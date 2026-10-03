@@ -81,10 +81,16 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
     onOpen={() => onOpen(project)} onSetHidden={() => void setHidden(!project.hidden, [project])} onDelete={() => confirm([project])} />);
   const searchInput = <input className="workspace-project-search" aria-label="搜索项目" type="search" value={search} maxLength={200} placeholder={status ? "搜索待逆向项目" : "搜索全部项目"} disabled={busy}
         onChange={(event) => { onSearch(event.target.value); setSelected([]); }} />;
+  const statusFilter = <div className="project-status-filter" role="group" aria-label="项目状态筛选">
+      <button type="button" aria-pressed={!status} disabled={busy} onClick={() => onStatus(undefined)}>全部</button>
+      <button type="button" aria-pressed={status === "unstarted"} disabled={busy} onClick={() => onStatus("unstarted")}>待逆向</button>
+    </div>;
   return <section className={`history${workspace ? " workspace-project-library" : ""}`}>
     {workspace ? <h2 ref={heading} className="workspace-library-heading" tabIndex={-1}>项目记录</h2> : <h1 ref={heading} tabIndex={-1}>项目记录</h1>}
+    <div className={workspace ? "workspace-library-controls" : undefined}>
     {workspace && <div className="workspace-library-toolbar">
-      <div>{searchTarget ? createPortal(searchInput, searchTarget) : searchInput}
+      {statusFilter}
+      <div className="workspace-library-actions">{searchTarget ? createPortal(searchInput, searchTarget) : searchInput}
       <div className="workspace-project-view" role="group" aria-label="项目显示方式">
         <button type="button" aria-label="卡片视图" aria-pressed={view === "grid"} onClick={() => changeView("grid")}><Icon name="grid" />卡片</button>
         <button type="button" aria-label="列表视图" aria-pressed={view === "list"} onClick={() => changeView("list")}><Icon name="list" />列表</button>
@@ -95,10 +101,7 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
       <HiddenProjectsToggle shown={showHidden} disabled={busy} onToggle={onToggleHidden} />
       {!!projects.length && <button className="text-button" disabled={busy} aria-pressed={managing} onClick={() => { setManaging(!managing); setSelected([]); }}>{managing ? "完成管理" : "批量管理"}</button>}
     </div></div>}
-    <div className="project-status-filter" role="group" aria-label="项目状态筛选">
-      <button type="button" aria-pressed={!status} disabled={busy} onClick={() => onStatus(undefined)}>全部</button>
-      <button type="button" aria-pressed={status === "unstarted"} disabled={busy} onClick={() => onStatus("unstarted")}>待逆向</button>
-    </div>
+    {!workspace && statusFilter}
     {!!projects.length && selectable && <div className="history-toolbar">
       <label><input ref={selectAll} className="project-checkbox" type="checkbox" checked={!!eligible.length && checked.length === eligible.length}
         disabled={unavailable || !eligible.length} onChange={(event) => setSelected(event.target.checked ? eligible.map((project) => project.id) : [])} />选择本页</label>
@@ -110,6 +113,8 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
       </button>
       </div>
     </div>}
+    </div>
+    <div className={workspace ? "workspace-library-content" : undefined} tabIndex={workspace ? 0 : undefined} role={workspace ? "region" : undefined} aria-label={workspace ? "项目内容" : undefined}>
     <p className="history-notice" role="status">{notice}</p>
     {error && !pending.length && <p className="error" role="alert">{error}</p>}
     {!loading && !loadError && !projects.length && !search.trim() && <p className="muted">{status ? "暂无待逆向项目。" : "暂无可见项目。"}</p>}
@@ -122,6 +127,7 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
       <button className="secondary" disabled={busy || page >= pages} onClick={() => onPage(page + 1)}>下一页</button>
     </nav>}
     <div className={workspace ? listView ? "workspace-project-list" : "workspace-project-grid" : "project-page-items"} role={workspace ? "list" : undefined} aria-label={workspace ? "项目" : undefined} aria-busy={loading} data-loading={loading}>{items}</div>
+    </div>
     <dialog ref={dialog} className={workspace ? "result-dialog modal dialog-small" : "delete-dialog"} aria-labelledby="delete-title" aria-describedby="delete-description"
       onCancel={(event) => { event.stopPropagation(); event.preventDefault(); if (!busy) setPending([]); }}
       onKeyDown={(event) => { if (event.key === "Escape") event.stopPropagation(); }}>

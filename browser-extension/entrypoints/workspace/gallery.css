@@ -1,7 +1,7 @@
 /* Approved gallery A. Scoped to the production gallery and its native preview. */
 .gallery-main{min-width:0;min-height:0;display:flex;flex-direction:column}
 .gallery-content{min-height:0;flex:1;display:flex;flex-direction:column;padding:8px 28px 0}
-.gallery-count{font-size:12px;color:var(--muted);margin:0 0 16px}
+.workspace-app .gallery-count{font-size:12px;color:var(--muted);margin:0 0 12px}
 .gallery-count span{padding:0 9px;color:#bbb5a8}
 .gallery-search{width:250px;display:flex;align-items:center;gap:10px;background:var(--surface-muted);padding:0 13px;border-radius:12px;min-height:40px}
 .gallery-search>svg{width:17px;height:17px;flex:none;color:var(--muted)}

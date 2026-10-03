@@ -83,7 +83,7 @@
 .workspace-result-empty > .ui-icon { width:40px;height:40px;margin-bottom:18px; }
 .workspace-result-empty p { font-size:11px;line-height:1.9; }
 .workspace-main > .error,.workspace-main > .model-notice { flex:none;margin:8px 16px; }
-.workspace-body[data-history="true"] { display:block;overflow:auto; }
+.workspace-body[data-history="true"] { display:flex;overflow:clip; }
 .workspace-body[data-history="true"] .workspace-editor { border:0; }
 @media(min-width:1500px) { .workspace-editor main { padding:26px 32px; } .workspace-app .composer-footer { padding:10px 32px; } .workspace-app .prompt-text { max-height:360px; } .workspace-app .sidebar { padding-top:28px; } }
 @media(max-width:1100px) { .workspace-app { --sidebar-inset:9px;--sidebar-width:170px; } .workspace-app .logo-row { padding-left:3px; } .workspace-app .logo-row strong { font-size:14px; } .workspace-app .project-button strong { max-width:89px; } .workspace-app .workspace-head { padding:0 20px; } .workspace-app .head-actions .badge { display:none; } .workspace-editor main { padding:18px 16px; } .workspace-app .composer-footer { padding:10px 16px; } .workspace-app .mode-switch button { font-size:11px;padding:10px 5px; } .workspace-app .mode-switch button span { font-size:8px; } }
