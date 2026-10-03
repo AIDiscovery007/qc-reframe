@@ -200,7 +200,7 @@ createServer(async (req, res) => {
         const handoff = new URLSearchParams(location.search).has('handoff') ? JSON.parse(sessionStorage.getItem('workspace-draft') || 'null') : null;
         if(handoff){projects.splice(0,projects.length,...handoff.projects);Object.assign(data,handoff.data);}
         const findJob=(id)=>projects.flatMap(p=>p.jobs).find(j=>j.id===id);
-        const models={accountLabel:'ChatGPT · 预览',selected:state==='models-new'?null:'preview-vision',models:[{model:'preview-vision',label:'Vision Model',isDefault:true,status:state==='models-new'?'unverified':'verified'},{model:'preview-unavailable',label:'Unavailable Model',status:'unverified'}]};
+        const models={accountLabel:'ChatGPT · 预览',selected:state==='models-new'?null:'preview-vision',reasoningEffort:state==='models-new'?undefined:'medium',models:[{model:'preview-vision',label:'Vision Model',isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:['low','medium','high','xhigh'].map(reasoningEffort=>({reasoningEffort})),status:state==='models-new'?'unverified':'verified'},{model:'preview-unavailable',label:'Unavailable Model',defaultReasoningEffort:'low',supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],status:'unverified'}]};
         const cli={detectedAt:new Date().toISOString(),installed:true,version:'0.100.0',latestVersion:'0.101.0',executable:'/example/bin/codex',source:'npm',canUpdate:true,updateAvailable:true,command:'npm install -g @openai/codex@latest'};
         if(new URLSearchParams(location.search).get('cli')==='standalone')Object.assign(cli,{source:'standalone',version:'0.159.2',latestVersion:'0.159.2',canUpdate:false,updateAvailable:false,command:'/example/bin/codex update'});
         if(new URLSearchParams(location.search).get('cli')==='custom')Object.assign(cli,{source:'custom',latestVersion:null,canUpdate:false,updateAvailable:false,command:null,reason:'此安装来源无法安全自动升级，请通过原安装方式更新。'});
@@ -253,10 +253,10 @@ createServer(async (req, res) => {
           if(message.type==='alchemy:state')return {ok:true,value:structuredClone({preferences:{paired:!!data.preferences.token,mode:data.preferences.mode,showHiddenProjects},selection:!showHiddenProjects&&projects.find(p=>p.id===data.selection?.projectId)?.hidden?undefined:data.selection})};
           if(message.type==='alchemy:models-refresh'||(message.type==='alchemy:query'&&message.path==='/models'))return {ok:true,value:structuredClone(models)};
           if(message.type==='alchemy:model-verify'){
-            models.verification={model:message.model,status:'running'};
+            models.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:'running'};
             setTimeout(()=>{
-              if(message.model==='preview-unavailable'){models.verification={model:message.model,status:'failed',error:'该模型当前无法调用，请选择其他模型并验证。'};models.models[1].status='unavailable';}
-              else {models.selected=message.model;models.models[0].status='verified';models.verification={model:message.model,status:'completed'};}
+              if(message.model==='preview-unavailable'){models.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:'failed',error:'该模型当前无法调用，请选择其他模型并验证。'};models.models[1].status='unavailable';}
+              else {models.selected=message.model;models.reasoningEffort=message.reasoningEffort;models.models[0].status='verified';models.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:'completed'};}
             },1800);
             return {ok:true,value:structuredClone(models)};
           }

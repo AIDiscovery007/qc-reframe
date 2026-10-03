@@ -10,7 +10,7 @@ import { createBridge } from '../bridge/server.mjs';
 import { modelError } from '../bridge/model-context.mjs';
 
 const catalog = { accountKey: 'account-a', provider: 'openai', accountLabel: 'ChatGPT · test', models: [
-  { model: 'model-a', label: 'A', isDefault: true, reasoningEffort: 'low' },
+  { model: 'model-a', label: 'A', isDefault: true, reasoningEffort: 'low', supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }] },
   { model: 'model-b', label: 'B', isDefault: false, reasoningEffort: 'medium' },
 ] };
 async function directory(t) {
@@ -104,7 +104,8 @@ test('model routes are authenticated, verification blocks inference and shutdown
   const listed = await (await get('/models')).json();
   assert.equal(listed.selected, null);
   assert.ok(!JSON.stringify(listed).includes('accountKey'));
-  assert.equal((await post('/models/verify', { model: 'model-a' })).status, 202);
+  assert.equal((await post('/models/verify', { model: 'model-a', reasoningEffort: 'ultra' })).status, 400);
+  assert.equal((await post('/models/verify', { model: 'model-a', reasoningEffort: 'high' })).status, 202);
   assert.equal((await post('/shutdown')).status, 409);
   assert.equal((await post('/jobs', input)).status, 409);
   release(); await settled(models);
@@ -113,10 +114,12 @@ test('model routes are authenticated, verification blocks inference and shutdown
   assert.equal((await post(`/jobs/${job.id}/generations`, { language: 'zh' })).status, 202);
   for (let i = 0; i < 100 && (await (await get('/health')).json()).active; i++) await new Promise(r => setTimeout(r, 10));
   assert.equal(seen.length, 2);
-  assert.ok(seen.every(s => s.model === 'model-a' && s.reasoningEffort === 'low'));
+  assert.ok(seen.every(s => s.model === 'model-a' && s.reasoningEffort === 'high'));
   const saved = await (await get(`/jobs/${job.id}`)).json();
   assert.equal(saved.model, 'model-a');
+  assert.equal(saved.reasoningEffort, 'high');
   assert.equal(saved.generations[0].model, 'model-a');
+  assert.equal(saved.generations[0].reasoningEffort, 'high');
 });
 
 test('real RPC transport paginates, filters vision models, overrides model/effort, uses ephemeral probes and rejects changed accounts', async t => {
@@ -130,7 +133,7 @@ rl.on('line',line=>{const m=JSON.parse(line);fs.appendFileSync(${JSON.stringify(
 if(m.id===undefined)return;
 if(m.method==='account/read')result={account:{type:'chatgpt',email:'test@example.com',planType:'test'},requiresOpenaiAuth:true};
 if(m.method==='config/read')result={config:{model:'broken-global',model_provider:'openai',model_reasoning_effort:'ultra'}};
-if(m.method==='model/list')result=m.params.cursor?{data:[{model:'vision',displayName:'Vision',defaultReasoningEffort:'low',isDefault:true}],nextCursor:null}:{data:[{model:'text',inputModalities:['text']},{model:'hidden',hidden:true}],nextCursor:'next'};
+if(m.method==='model/list')result=m.params.cursor?{data:[{model:'vision',displayName:'Vision',defaultReasoningEffort:'low',supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],isDefault:true}],nextCursor:null}:{data:[{model:'text',inputModalities:['text']},{model:'hidden',hidden:true}],nextCursor:'next'};
 if(m.method==='thread/start')result={thread:{id:'probe'},model:m.params.model,modelProvider:m.params.modelProvider};
 send({id:m.id,result});
 if(m.method==='turn/start'){send({method:'item/completed',params:{threadId:'probe',item:{type:'agentMessage',text:'OK'}}});send({method:'turn/completed',params:{threadId:'probe',turn:{status:'completed'}}});}
@@ -141,14 +144,15 @@ if(m.method==='turn/start'){send({method:'item/completed',params:{threadId:'prob
   t.after(() => { for (const [key, value] of Object.entries(previous)) if (value === undefined) delete process.env[key]; else process.env[key] = value; });
   const c = await readModelCatalog(dir);
   assert.deepEqual(c.models.map(m => m.model), ['vision']);
-  const selection = { ...c.models[0], accountKey: c.accountKey, provider: c.provider };
+  assert.deepEqual(c.models[0].supportedReasoningEfforts.map(o => o.reasoningEffort), ['low', 'high']);
+  const selection = { ...c.models[0], reasoningEffort: 'high', accountKey: c.accountKey, provider: c.provider };
   await verifyModel({ cwd: dir, selection });
   const calls = (await readFile(log, 'utf8')).trim().split('\n').map(s => JSON.parse(s));
   const start = calls.find(m => m.method === 'thread/start').params;
   assert.equal(start.model, 'vision');
-  assert.equal(start.config.model_reasoning_effort, 'low');
+  assert.equal(start.config.model_reasoning_effort, 'high');
   assert.equal(start.ephemeral, true);
-  assert.equal(calls.find(m => m.method === 'turn/start').params.effort, 'low');
+  assert.equal(calls.find(m => m.method === 'turn/start').params.effort, 'high');
   await assert.rejects(runCodex({ cwd: dir, input: [], modelSettings: { ...selection, accountKey: 'changed' } }), /账号、登录或提供方已变化/);
   const controller = new AbortController(); controller.abort();
   await assert.rejects(runCodex({ cwd: dir, signal: controller.signal, input: [], modelSettings: selection }), /取消/);
@@ -166,5 +170,84 @@ test('CLI upgrade clears persisted model trust even when refreshing the new cata
   await assert.rejects(store.reset(), /protocol unavailable/);
   assert.equal(store.selectedModel, null);
   assert.throws(() => store.selection(), /选择模型/);
+  assert.equal(await readFile(join(dataDir, 'model-settings.json'), 'utf8'), 'null');
+});
+
+
+test('custom effort is validated, persisted, restored, and preserved after refresh or failed verification', async t => {
+  const dataDir = await directory(t);
+  let failure;
+  const seen = [];
+  const store = await createModelStore({ dataDir, readCatalog: async () => catalog, verify: async ({ selection }) => {
+    seen.push(selection); if (failure) throw failure;
+  } });
+  const listed = await store.list();
+  assert.equal(listed.models[0].defaultReasoningEffort, 'low');
+  assert.deepEqual(listed.models[0].supportedReasoningEfforts.map(o => o.reasoningEffort), ['low', 'high']);
+  for (const effort of ['ultra', '', null, 3, {}]) {
+    await assert.rejects(store.start('model-a', effort), { status: 400 });
+  }
+  assert.equal(seen.length, 0);
+  await store.start('model-a', 'high');
+  let state = await settled(store);
+  assert.equal(state.reasoningEffort, 'high');
+  assert.equal(state.verification.reasoningEffort, 'high');
+  assert.equal(seen[0].reasoningEffort, 'high');
+  assert.equal((await store.refresh()).reasoningEffort, 'high');
+  failure = new Error('Network offline');
+  await store.start('model-a', 'low');
+  state = await settled(store);
+  assert.equal(state.verification.status, 'failed');
+  assert.equal(state.verification.reasoningEffort, 'low');
+  assert.equal(state.reasoningEffort, 'high');
+  const restored = await createModelStore({ dataDir, readCatalog: async () => catalog });
+  assert.equal((await restored.list()).reasoningEffort, 'high');
+  assert.equal(restored.selection().reasoningEffort, 'high');
+});
+
+test('legacy catalogs expose only their default effort and old settings stay unchanged', async t => {
+  const dataDir = await directory(t);
+  const saved = { model: 'model-b', reasoningEffort: 'medium', accountKey: catalog.accountKey, provider: catalog.provider };
+  const original = JSON.stringify(saved);
+  await writeFile(join(dataDir, 'model-settings.json'), original);
+  const store = await createModelStore({ dataDir, readCatalog: async () => catalog, verify: async () => {} });
+  const state = await store.list();
+  assert.deepEqual(state.models[1].supportedReasoningEfforts, [{ reasoningEffort: 'medium' }]);
+  assert.equal(state.reasoningEffort, 'medium');
+  await assert.rejects(store.start('model-b', 'high'), { status: 400 });
+  assert.equal(await readFile(join(dataDir, 'model-settings.json'), 'utf8'), original);
+  await store.start('model-b'); await settled(store);
+  assert.equal(store.selection().reasoningEffort, 'medium');
+});
+
+
+test('unsupported effort preserves the same model and original diagnostic; real model denial still invalidates', async t => {
+  const dataDir = await directory(t);
+  let failure;
+  const store = await createModelStore({ dataDir, readCatalog: async () => catalog, verify: async () => {
+    if (failure) throw modelError(new Error(failure), 'model-a');
+  } });
+  await store.start('model-a', 'low'); await settled(store);
+  const original = await readFile(join(dataDir, 'model-settings.json'), 'utf8');
+  for (const message of [
+    "Unsupported reasoning effort 'high' for model 'model-a'",
+    "Invalid reasoning_effort 'high': model 'model-a' does not support this value",
+    "This model does not support reasoning.effort 'high'",
+  ]) {
+    failure = message;
+    await store.start('model-a', 'high');
+    const state = await settled(store);
+    assert.equal(state.selected, 'model-a');
+    assert.equal(state.reasoningEffort, 'low');
+    assert.equal(state.models[0].status, 'verified');
+    assert.equal(state.verification.status, 'failed');
+    assert.equal(state.verification.error, message);
+    assert.equal(await readFile(join(dataDir, 'model-settings.json'), 'utf8'), original);
+  }
+  failure = "The 'model-a' model is not supported when using Codex with a ChatGPT account.";
+  await store.start('model-a', 'high');
+  const denied = await settled(store);
+  assert.equal(denied.selected, null);
+  assert.equal(denied.models[0].status, 'unavailable');
   assert.equal(await readFile(join(dataDir, 'model-settings.json'), 'utf8'), 'null');
 });

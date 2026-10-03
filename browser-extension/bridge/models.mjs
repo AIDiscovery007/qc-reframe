@@ -4,6 +4,9 @@ import { withCodex } from "./codex-rpc.mjs";
 import { readModelContext } from "./model-context.mjs";
 import { runCodex } from "./agent.mjs";
 
+const effortOptions = (item) => item.supportedReasoningEfforts?.length ? item.supportedReasoningEfforts
+  : item.reasoningEffort ? [{ reasoningEffort: item.reasoningEffort }] : [];
+
 export async function readModelCatalog(cwd) {
   return withCodex({ cwd, timeoutMs: 45_000 }, async (request) => {
     const context = await readModelContext(request, cwd);
@@ -15,7 +18,7 @@ export async function readModelCatalog(cwd) {
       for (const item of page.data || []) {
         if (item.hidden || !(item.inputModalities || ["text", "image"]).includes("image") || models.some((m) => m.model === item.model)) continue;
         models.push({ model: item.model, label: item.displayName || item.model,
-          reasoningEffort: item.defaultReasoningEffort, isDefault: item.isDefault });
+          reasoningEffort: item.defaultReasoningEffort, supportedReasoningEfforts: item.supportedReasoningEfforts, isDefault: item.isDefault });
       }
       cursor = page.nextCursor;
       if (cursor && cursors.has(cursor)) throw new Error("Codex 模型列表分页异常，请更新 CLI 后重试。");
@@ -45,8 +48,9 @@ export async function createModelStore({ dataDir, cwd, readCatalog = readModelCa
   const failures = new Map();
   const current = () => !catalog || selected?.accountKey === catalog.accountKey ? selected : null;
   const view = () => ({ accountLabel: catalog?.accountLabel, selected: current()?.model || null,
-    verifiedAt: current()?.verifiedAt, verification,
+    reasoningEffort: current()?.reasoningEffort, verifiedAt: current()?.verifiedAt, verification,
     models: (catalog?.models || []).map((item) => ({ model: item.model, label: item.label, isDefault: item.isDefault,
+      defaultReasoningEffort: item.reasoningEffort, supportedReasoningEfforts: effortOptions(item),
       status: failures.has(item.model) ? "unavailable" : current()?.model === item.model ? "verified" : "unverified" })),
   });
   const refresh = async () => {
@@ -79,16 +83,18 @@ export async function createModelStore({ dataDir, cwd, readCatalog = readModelCa
       if (!selected?.model) throw Object.assign(new Error("请在连接设置中选择模型，并点击「验证并使用」。"), { status: 409 });
       return { ...selected };
     },
-    async start(model) {
+    async start(model, reasoningEffort) {
       if (controller) throw Object.assign(new Error("正在验证模型，请稍候。"), { status: 409 });
       await refresh();
       if (controller) throw Object.assign(new Error("正在验证模型，请稍候。"), { status: 409 });
       const item = catalog.models.find((m) => m.model === model);
       if (!item) throw Object.assign(new Error("请选择当前列表中的图像输入模型。"), { status: 400 });
-      const next = { model, reasoningEffort: item.reasoningEffort, provider: catalog.provider, accountKey: catalog.accountKey };
+      if (reasoningEffort !== undefined && !effortOptions(item).some((option) => option.reasoningEffort === reasoningEffort))
+        throw Object.assign(new Error("请选择当前模型支持的推理强度，刷新列表后重试。"), { status: 400 });
+      const next = { model, reasoningEffort: reasoningEffort ?? item.reasoningEffort, provider: catalog.provider, accountKey: catalog.accountKey };
       controller = new AbortController();
       const signal = controller.signal;
-      verification = { model, status: "running" };
+      verification = { model, reasoningEffort: next.reasoningEffort, status: "running" };
       void (async () => {
         try {
           await verify({ cwd, selection: next, signal });
@@ -98,13 +104,13 @@ export async function createModelStore({ dataDir, cwd, readCatalog = readModelCa
           await rename(path + ".tmp", path);
           selected = saved;
           failures.delete(model);
-          verification = { model, status: "completed" };
+          verification = { model, reasoningEffort: next.reasoningEffort, status: "completed" };
         } catch (error) {
           if (error.modelUnavailable) {
             failures.set(model, true);
             if (selected?.model === model) { selected = undefined; await writeFile(path, "null", { mode: 0o600 }).catch(() => {}); }
           }
-          verification = { model, status: "failed", error: error.message };
+          verification = { model, reasoningEffort: next.reasoningEffort, status: "failed", error: error.message };
         } finally { controller = undefined; }
       })();
       return view();

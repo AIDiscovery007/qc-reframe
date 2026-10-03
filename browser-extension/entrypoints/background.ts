@@ -365,7 +365,8 @@ export default defineBackground(() => {
         return bridge("/models/refresh", token, {});
       case "alchemy:model-verify":
         if (typeof message.model !== "string" || !message.model || message.model.length > 200) throw new Error("请选择有效模型");
-        return bridge("/models/verify", token, { model: message.model });
+        if (message.reasoningEffort !== undefined && (typeof message.reasoningEffort !== "string" || !message.reasoningEffort || message.reasoningEffort.length > 50)) throw new Error("请选择有效推理强度");
+        return bridge("/models/verify", token, { model: message.model, reasoningEffort: message.reasoningEffort });
       case "alchemy:cancel":
         if (typeof message.id !== "string" || !/^[\w-]+$/.test(message.id)) throw new Error("无效任务");
         return bridge(`/jobs/${message.id}/cancel`, token, {});

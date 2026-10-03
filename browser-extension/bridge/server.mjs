@@ -322,7 +322,7 @@ export async function createBridge({
         if (controllers.size || models.busy) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
         const body = await readBody(req);
         if (path.endsWith("/verify") && (typeof body.model !== "string" || body.model.length > 200)) throw bad("请选择有效模型");
-        try { json(path.endsWith("/verify") ? 202 : 200, path.endsWith("/verify") ? await models.start(body.model) : await models.refresh()); }
+        try { json(path.endsWith("/verify") ? 202 : 200, path.endsWith("/verify") ? await models.start(body.model, body.reasoningEffort) : await models.refresh()); }
         catch (error) { throw bad(error.message, error.status || 503); }
         return;
       }
@@ -561,7 +561,7 @@ export async function createBridge({
         const controller = new AbortController();
         controller.projectId = job.projectId;
         controllers.set(id, controller);
-        const next = { id, model: modelSettings.model, status: "running", stage: "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
+        const next = { id, model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
         job.generations ||= [];
         job.generations.push(next);
         try {
@@ -704,6 +704,7 @@ export async function createBridge({
         ...(subjectAsset ? { subjectAsset } : {}),
         mode: body.mode,
         model: modelSettings.model,
+        reasoningEffort: modelSettings.reasoningEffort,
         status: "running",
         stage: "正在连接本机 Codex…",
         createdAt: new Date().toISOString(),

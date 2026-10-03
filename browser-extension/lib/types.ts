@@ -47,6 +47,7 @@ export type Job = {
   error?: string;
   threadId?: string;
   model?: string;
+  reasoningEffort?: string;
   reenact?: Omit<SubjectInput, "subjectImage" | "subjects"> & { subjects?: SavedSubject[] };
   generations?: Generation[];
 };
@@ -85,6 +86,7 @@ export type Generation = {
   negativePrompt: string;
   threadId?: string;
   model?: string;
+  reasoningEffort?: string;
   extension?: "png" | "jpeg" | "webp";
   subjectExtension?: "png" | "jpeg" | "webp";
   revisedPrompt?: string;
@@ -107,9 +109,10 @@ export type ImageTarget = {
 export type ModelCatalog = {
   accountLabel?: string;
   selected: string | null;
+  reasoningEffort?: string;
   verifiedAt?: string;
-  models: { model: string; label: string; isDefault: boolean; status: "verified" | "unverified" | "unavailable" }[];
-  verification?: { model: string; status: "running" | "completed" | "failed"; error?: string };
+  models: { model: string; label: string; isDefault: boolean; defaultReasoningEffort?: string; supportedReasoningEfforts?: { reasoningEffort: string; description?: string }[]; status: "verified" | "unverified" | "unavailable" }[];
+  verification?: { model: string; reasoningEffort?: string; status: "running" | "completed" | "failed"; error?: string };
 };
 
 export type GalleryWork = {

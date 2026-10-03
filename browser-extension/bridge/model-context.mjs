@@ -34,6 +34,7 @@ export async function assertModelContext(request, cwd, selection) {
 
 export function modelError(error, model) {
   const message = error.message || String(error);
+  if (/\breasoning[._\s-]+effort\b/i.test(message) && /\b(?:unsupported|not support(?:ed)?|invalid)\b/i.test(message)) return error;
   if (/not supported.*ChatGPT account|model.*(?:not found|not available|not supported|does not exist)|do not have access.*model|unsupported.*model/i.test(message))
     return Object.assign(new Error(`模型 ${model || "所选模型"} 当前无法通过本机 Codex 账号调用，请在连接设置中选择其他模型并验证。`), { modelUnavailable: true });
   return error;
