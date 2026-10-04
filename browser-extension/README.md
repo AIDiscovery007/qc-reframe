@@ -1,8 +1,8 @@
 # QC-Reframe for Chrome
 
-功能概览见 [功能导览](docs/FEATURES.md)。首次安装请先看 [项目首页](../README.md) 和 [交给 Codex 执行的初始化流程](docs/INSTALL_WITH_CODEX.md)。当前发布版本：**0.3.0**。迭代记录见 [更新日志](docs/releases/README.md)。
+功能概览见 [功能导览](docs/FEATURES.md)。首次安装请先看 [项目首页](../README.md) 和 [交给 Codex 执行的初始化流程](docs/INSTALL_WITH_CODEX.md)。当前发布版本：**0.3.1**。迭代记录见 [更新日志](docs/releases/README.md)。
 
-本版变化见 [v0.3.0 更新说明](docs/releases/v0.3.0.md)。从 v0.2.0 升级无需数据迁移或重新配对；画廊、完成提醒和跨窗口撤销依赖新版本机 bridge，应在任务结束后更新完整仓库并重启服务，再重新加载原扩展、刷新工作台与网页。新增 notifications、offscreen、alarms 权限，用于桌面提醒、可选提示音与后台恢复检查；历史记录和图片保留。Chrome ZIP 仅含浏览器端，不含 bridge 和运行 skill。
+本版变化见 [v0.3.1 更新说明](docs/releases/v0.3.1.md)。从 v0.3.0 升级无需数据迁移或重新配对；推理强度设置及验证失败保护需要更新完整仓库，并在任务结束后重启本机 bridge，再重新加载原扩展、刷新工作台与网页。相较 v0.3.0 无新增权限，不修改 Codex 全局配置，历史记录和图片保留。Chrome ZIP 仅含浏览器端，不含 bridge 和运行 skill。
 
 开发与后续维护请先阅读 [贡献指南](../Contribution.md) 和 [AGENTS.md](AGENTS.md)。
 

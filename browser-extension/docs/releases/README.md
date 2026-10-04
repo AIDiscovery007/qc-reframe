@@ -6,10 +6,11 @@
 
 后续待发布改动见 [unreleased](unreleased.md)。
 
-最新版本：[v0.3.0 · 作品画廊、完成提醒与对齐双画布](v0.3.0.md)。
+最新版本：[v0.3.1 · 紧凑布局、推理强度与提醒跳转](v0.3.1.md)。
 
 | 版本 | 更新内容 | 详情 |
 | --- | --- | --- |
+| 0.3.1 | 固定工具栏与紧凑页头、动态推理强度、提醒复用工作台与初始化竞态修复 | [版本说明](v0.3.1.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.3.1) |
 | 0.3.0 | 跨项目自由瀑布流、完成提醒、隐藏与跨窗口撤销、对齐双画布、浮层反馈与统一页头 | [版本说明](v0.3.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.3.0) |
 | 0.2.0 | 画布与图条、拖拽提示词面板、轻量入口统一与草稿接续、人物和整体氛围提示词 | [版本说明](v0.2.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.2.0) |
 | 0.1.26 | 路径下拉选择、提示词工具归位、统一生成主操作与显式通用风格入口 | [版本说明](v0.1.26.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.1.26) |

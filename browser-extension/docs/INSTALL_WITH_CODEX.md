@@ -1,6 +1,6 @@
-# 用 Codex 安装 QC-Reframe 0.3.0
+# 用 Codex 安装 QC-Reframe 0.3.1
 
-这是供用户及其 Codex 执行的本地安装流程。版本为 `0.3.0`，发行标签为 `v0.3.0`。请完成能够执行的步骤，再集中列出需要用户操作的剩余步骤。
+这是供用户及其 Codex 执行的本地安装流程。版本为 `0.3.1`，发行标签为 `v0.3.1`。请完成能够执行的步骤，再集中列出需要用户操作的剩余步骤。
 
 [← 首页](../../README.md) · [功能导览](FEATURES.md) · [使用手册](../README.md)
 
@@ -9,10 +9,10 @@
 在 **Codex 桌面 App 的本地聊天**里复制发送：
 
 ```text
-请帮我安装并启动 QC-Reframe 0.3.0：
+请帮我安装并启动 QC-Reframe 0.3.1：
 https://github.com/AIDiscovery007/qc-reframe
 
-请获取仓库的 v0.3.0 标签，先阅读 browser-extension/docs/INSTALL_WITH_CODEX.md，
+请获取仓库的 v0.3.1 标签，先阅读 browser-extension/docs/INSTALL_WITH_CODEX.md，
 先确认插件实际使用的本机 Codex CLI 已更新到最新版本，再完成环境检查、初始化、构建、本机服务启动和配对准备，
 优先在我的 Codex 内置浏览器里使用。能自动完成的步骤请直接完成。
 需要我登录或在浏览器界面确认加载扩展时，再给我准确的文件路径和最短操作步骤。
@@ -30,7 +30,7 @@ https://github.com/AIDiscovery007/qc-reframe
 优先复用用户已有的同一安装目录；没有时，在用户可写且准备长期保留的位置执行：
 
 ```bash
-git clone --branch v0.3.0 --single-branch https://github.com/AIDiscovery007/qc-reframe.git
+git clone --branch v0.3.1 --single-branch https://github.com/AIDiscovery007/qc-reframe.git
 cd qc-reframe/browser-extension
 ```
 
@@ -60,7 +60,7 @@ npm run status
 
 `start` 在后台运行 bridge，关闭启动终端后仍可使用；它会先验证带配对令牌的 `/health`。重复启动同一版本会复用服务。若端口被其他服务、旧版本或另一份安装占用，会停止启动流程并说明原因，不强行结束别人的进程。不要通过修改端口来绕过冲突，浏览器端默认连接 `43187`。
 
-`status` 应显示 `service: "qc-alchemy"`、`version: "0.3.0"`、`ready: true`。这只证明 bridge 与 Alchemy skill 就绪；`doctor` 另检查 CLI 登录。它们不会实际调用模型，因此不代表生图能力已完成实测。
+`status` 应显示 `service: "qc-alchemy"`、`version: "0.3.1"`、`ready: true`。这只证明 bridge 与 Alchemy skill 就绪；`doctor` 另检查 CLI 登录。它们不会实际调用模型，因此不代表生图能力已完成实测。
 
 imagegen 默认读取 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`，未设置 `CODEX_HOME` 时读取 `~/.codex/skills/.system/imagegen/SKILL.md`。如果找不到，让 Codex 查找用户实际安装的 imagegen skill 并设置路径；不要创建一个同名空文件充当已安装。缺失 imagegen 不妨碍提示词逆向，但生图不可用。找到 skill 也不代表账户一定支持内置 `image_gen`。
 
@@ -89,7 +89,7 @@ npm run setup
 
 1. 打开 `chrome://extensions`。
 2. 开启开发者模式，选择“加载已解压的扩展程序”。
-3. 选择 `.output/chrome-mv3`，确认列表显示 QC-Reframe **0.3.0**。
+3. 选择 `.output/chrome-mv3`，确认列表显示 QC-Reframe **0.3.1**。
 
 请用户自行确认浏览器展示的权限。安装到 Chrome 与安装到 Codex 内置浏览器是两份独立安装。
 
@@ -106,7 +106,7 @@ npm run pair
 验收分开报告：
 
 - 服务状态：认证的健康检查成功、版本与 skill 就绪。
-- 扩展状态：实际加载 0.3.0，悬停图片后出现 R 标志，点击可展开“立即逆向 / 加入 Reframe / 打开工作台”。
+- 扩展状态：实际加载 0.3.1，悬停图片后出现 R 标志，点击可展开“立即逆向 / 加入 Reframe / 打开工作台”。
 - 配对状态：点击悬浮入口，面板显示连接成功，并能显示选中的参考图。
 
 配对后在「插件模型」选择候选项，点击「验证并使用」才保存。该操作发送一次简短请求，会消耗少量模型额度；用户仅要求安装时，保留为手动步骤并说明尚未验证。
@@ -115,11 +115,11 @@ npm run pair
 
 ## 日常启动、升级和排错
 
-从 v0.2.0 升级到 v0.3.0，无需数据迁移或重新配对，历史项目、提示词、图片和配置保留。画廊、完成提醒与跨窗口撤销依赖新版本机 bridge，应更新完整仓库；仅替换 Chrome ZIP 不会更新这些服务端功能。
+从 v0.3.0 升级到 v0.3.1，无需数据迁移或重新配对，历史项目、提示词、图片和配置保留。推理强度设置及验证失败保护依赖新版本机 bridge，应更新完整仓库并在空闲时重启服务；仅替换 Chrome ZIP 不会更新这些服务端功能，不修改 Codex 全局配置。
 
-完成或取消运行中的任务，在原安装的 `browser-extension` 目录执行 `npm stop`，保留本地改动与 `.local/` 数据，将仓库更新到 `v0.3.0`，运行 `npm run setup`、`npm start`。重新加载原扩展，再刷新工作台和已打开网页。管理脚本拒绝复用版本号不同的旧服务；健康检查与扩展管理页均应显示 `0.3.0`。轻量端未提交草稿是浏览器会话数据，不承诺跨浏览器重启保留，重要编辑请先保存。
+完成或取消运行中的任务，在原安装的 `browser-extension` 目录执行 `npm stop`，保留本地改动与 `.local/` 数据，将仓库更新到 `v0.3.1`，运行 `npm run setup`、`npm start`。重新加载原扩展，再刷新工作台和已打开网页。管理脚本拒绝复用版本号不同的旧服务；健康检查与扩展管理页均应显示 `0.3.1`。轻量端未提交草稿是浏览器会话数据，不承诺跨浏览器重启保留，重要编辑请先保存。
 
-新增 `notifications`、`offscreen`、`alarms` 权限，分别用于桌面提醒、可选提示音和后台恢复检查；按浏览器要求确认更新后的权限。默认桌面通知静默，声音需在设置中心主动开启。系统通知关闭时仍可查看界面未读标记。
+相较 v0.3.0 无新增权限；从 v0.2.0 或更早版本升级时，需按浏览器要求确认自 v0.3.0 起新增的 `notifications`、`offscreen`、`alarms` 权限，分别用于桌面提醒、可选提示音和后台恢复检查。默认桌面通知静默，声音需在设置中心主动开启。系统通知关闭时仍可查看界面未读标记。
 
 首次安装仍需完整仓库，不能仅靠 Chrome ZIP 完成。
 
