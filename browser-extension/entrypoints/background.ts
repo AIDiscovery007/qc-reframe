@@ -1,3 +1,4 @@
+import { openWorkspace } from "../lib/workspace-navigation";
 import { startReminderService } from "../lib/reminder-background";
 import { browser } from "wxt/browser";
 import { bridge } from "../lib/bridge";
@@ -227,7 +228,7 @@ export default defineBackground(() => {
       return value && Date.now() - value.createdAt <= 24 * 60 * 60 * 1000 ? value : undefined;
     });
   };
-  const uiMessage = async (message: Record<string, any>, source = "popup") => {
+  const uiMessage = async (message: Record<string, any>, source = "popup", sourceTab?: number) => {
     // Expose only this public preference; content scripts cannot read local storage.
     if (message.type === "alchemy:get-motion-preference") {
       const { motionPreference } = await browser.storage.local.get("motionPreference");
@@ -253,13 +254,16 @@ export default defineBackground(() => {
     const showHiddenProjects = await showsHiddenProjects();
     switch (message.type) {
       case "alchemy:open-workspace": {
+        if (message.view !== undefined && !["tasks", "settings"].includes(message.view)) throw new Error("无效工作台页面");
         const id = crypto.randomUUID();
         // Explicit UI context wins over another view's global selection and mode.
         const draft = message.draft;
         validateDraft(draft);
-        const context = handoffContext(message.context ?? { mode: preferences?.mode || "style", selection: selection || null });
+        const viewKey = selection?.projectId ? `projectView:${selection.projectId}` : undefined;
+        const savedView = !message.context && viewKey ? (await browser.storage.local.get(viewKey) as Record<string, { mode?: Mode }>)[viewKey] : undefined;
+        const context = handoffContext(message.context ?? { mode: viewKey ? savedView?.mode || "style" : preferences?.mode || "style", selection: selection || null });
         await storeDraft(`workspace:${id}`, { ...context, draft, createdAt: Date.now() }, message.draft ? `quick:${source}` : undefined);
-        try { await browser.tabs.create({ url: `${browser.runtime.getURL("/workspace.html")}?handoff=${id}` }); }
+        try { await openWorkspace(new URLSearchParams({ handoff: id, ...(message.view ? { view: message.view } : {}) }), sourceTab); }
         catch (error) { await consumeHandoff(`workspace:${id}`); throw error; }
         return;
       }
@@ -326,6 +330,20 @@ export default defineBackground(() => {
         await browser.storage.local.set({ preferences: { ...preferences, mode: preferences?.mode || "style", token: message.token } });
         return health;
       }
+      case "alchemy:project-views": {
+        const stored = await browser.storage.local.get(null);
+        return Object.fromEntries(Object.entries(stored).filter(([key]) => /^projectView:[a-f0-9]{64}$/.test(key))
+          .map(([key, value]) => [key.slice("projectView:".length), value]));
+      }
+      case "alchemy:save-project-view": {
+        const view = message.view;
+        if (typeof message.projectId !== "string" || !/^[a-f0-9]{64}$/.test(message.projectId)
+          || !view || !modes.includes(view.mode) || !view.versions || typeof view.versions !== "object" || Array.isArray(view.versions)
+          || Object.entries(view.versions).some(([mode, id]) => !modes.includes(mode)
+            || typeof id !== "string" || (id !== "new" && !/^[\da-f-]{36}$/.test(id)))) throw new Error("无效项目选择");
+        await browser.storage.local.set({ [`projectView:${message.projectId}`]: { mode: view.mode, versions: view.versions } });
+        return;
+      }
       case "alchemy:mode":
         if (!modes.includes(message.mode)) throw new Error("无效模式");
         await browser.storage.local.set({ preferences: { ...preferences, token, mode: message.mode } });
@@ -391,6 +409,7 @@ export default defineBackground(() => {
           const latest = await browser.storage.local.get("selection") as { selection?: Selection };
           if (latest.selection?.projectId && result.deletedIds.includes(latest.selection.projectId))
             await browser.storage.local.remove("selection");
+          await browser.storage.local.remove(result.deletedIds.map(id => `projectView:${id}`));
           await reminders.projectsChanged(result.deletedIds);
           return result;
         } finally { selecting = false; }
@@ -485,8 +504,8 @@ export default defineBackground(() => {
       uiMessage(message).then(value => reply({ ok: true, value }), error => reply({ error: error.message }));
       return true;
     }
-    if ((contentSender || extensionSender) && ["alchemy:get-motion-preference", "alchemy:set-motion-preference", "alchemy:show-hidden-projects", "alchemy:set-project-hidden", "alchemy:gallery", "alchemy:projects", "alchemy:project", "alchemy:project-thumbnail", "alchemy:generation-thumbnail", "alchemy:quick-draft", "alchemy:open-workspace", "alchemy:upload-reference", "alchemy:cli-check", "alchemy:cli-update", "alchemy:models-refresh", "alchemy:model-verify", "alchemy:state", "alchemy:connect", "alchemy:mode", "alchemy:query", "alchemy:cancel", "alchemy:reference", "alchemy:project-reference", "alchemy:open-project", "alchemy:ensure-project", "alchemy:delete-projects", "alchemy:start", "alchemy:save-prompt", "alchemy:generate", "alchemy:generation-cancel", "alchemy:generation-reference", "alchemy:generation-image", "alchemy:generation-file-action"].includes(message?.type)) {
-      uiMessage(message, contentSender ? `tab:${sender.tab!.id}` : "popup").then(
+    if ((contentSender || extensionSender) && ["alchemy:get-motion-preference", "alchemy:set-motion-preference", "alchemy:show-hidden-projects", "alchemy:set-project-hidden", "alchemy:gallery", "alchemy:projects", "alchemy:project", "alchemy:project-thumbnail", "alchemy:generation-thumbnail", "alchemy:quick-draft", "alchemy:open-workspace", "alchemy:upload-reference", "alchemy:cli-check", "alchemy:cli-update", "alchemy:models-refresh", "alchemy:model-verify", "alchemy:project-views", "alchemy:save-project-view", "alchemy:state", "alchemy:connect", "alchemy:mode", "alchemy:query", "alchemy:cancel", "alchemy:reference", "alchemy:project-reference", "alchemy:open-project", "alchemy:ensure-project", "alchemy:delete-projects", "alchemy:start", "alchemy:save-prompt", "alchemy:generate", "alchemy:generation-cancel", "alchemy:generation-reference", "alchemy:generation-image", "alchemy:generation-file-action"].includes(message?.type)) {
+      uiMessage(message, contentSender ? `tab:${sender.tab!.id}` : "popup", sender.tab?.id).then(
         (value) => reply({ ok: true, value }),
         (error) => reply({ error: error.message }),
       );

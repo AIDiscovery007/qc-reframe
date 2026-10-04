@@ -29,7 +29,7 @@ const compiled = ts.transpileModule(`
 `, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 
 function fixture(overrides = {}) {
-  const state = { versions: {}, subjects: {}, multi: {}, instructions: {}, selections: [], busy: [] };
+  const state = { modes: {}, versions: {}, subjects: {}, multi: {}, instructions: {}, selections: [], busy: [] };
   const selectionRevision = { current: 0 }, referenceContext = { current: { key: 'old:style:v1' } };
   const requests = [], exports = {};
   const next = { id: 'next', projectId: 'next-project', image: 'new-image' };
@@ -40,6 +40,7 @@ function fixture(overrides = {}) {
     subjectImage: () => 'retained-subject', multiSubjects: [{ id: 'a', subjectImage: 'a', role: '人物', detail: '帽子' }, { id: 'b', subjectImage: 'b', role: '物品', detail: '' }],
     setBusy: value => state.busy.push(value), setError: value => { state.error = value; }, setHistoryOpen: value => { state.historyOpen = value; }, setGalleryOpen: value => { state.galleryOpen = value; },
     setSelection: value => state.selections.push(value),
+    setProjectMode: (id, mode) => { state.modes[id] = mode; },
     setVersions: update => { state.versions = update(state.versions); },
     setSubjectDrafts: update => { state.subjects = update(state.subjects); },
     setMultiSubjectDrafts: update => { state.multi = update(state.multi); },
@@ -56,6 +57,7 @@ test('fresh reference recovers a failed image and migrates input into a new vers
     assert.equal(ui.requests[0].type, 'alchemy:upload-reference');
     assert.equal(ui.requests[0].image, 'new-image');
     assert.equal(ui.state.selections[0], ui.next);
+    assert.equal(ui.state.modes['next-project'], mode);
     assert.equal(ui.state.versions[`next-project:${mode}`], 'new');
     assert.equal(ui.state.instructions[`next-project:${mode}:new`], 'retained-instruction');
     if (mode === 'multi-reenact') assert.deepEqual(Array.from(ui.state.multi[`next-project:${mode}:new`], item => `${item.id}:${item.role}:${item.detail}`), ['a:人物:帽子', 'b:物品:']);

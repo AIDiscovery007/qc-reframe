@@ -62,10 +62,18 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const referenceInput = useRef<HTMLInputElement>(null);
   const [activeCount, setActiveCount] = useState(0);
   const [cliBusy, setCliBusy] = useState(false);
-  const [preferences, setPreferences] = useState(defaults);
+  const [basePreferences, setPreferences] = useState(defaults);
+  const [projectModes, setProjectModes] = useState<Record<string, Mode>>({});
+  const [viewsReady, setViewsReady] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
   const [storedSelection, setSelection] = useState<Selection>();
   const [hiddenProjectIds, setHiddenProjectIds] = useState<string[]>([]);
+  const preferences = { ...basePreferences, mode: storedSelection?.projectId
+    ? projectModes[storedSelection.projectId] || "style" : basePreferences.mode };
+  const setProjectMode = (projectId: string | undefined, mode: Mode) => {
+    if (projectId) setProjectModes(items => ({ ...items, [projectId]: mode }));
+    else setPreferences(value => ({ ...value, mode }));
+  };
   const showHidden = !!preferences.showHiddenProjects;
   const visibilityRevision = useRef(0);
   const visibilityPending = useRef(false);
@@ -157,7 +165,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const reading = selection && !selection.image && !selection.error;
   const referenceError = job && referenceErrors[job.id];
   const restoring = !!job?.reenact && !references[job.id] && !referenceError;
-  const blocked = !connected || !selectedModel || busy || savingMode || modelBusy || cliBusy || !!running || loadingProject || restoring;
+  const blocked = !draftReady || !connected || !selectedModel || busy || savingMode || modelBusy || cliBusy || !!running || loadingProject || restoring;
 
   useEffect(() => {
     setCopied(false);
@@ -172,13 +180,13 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     let ownContext = false;
     let quickRestored = workspace;
     let savedQuick: WorkspaceHandoff | undefined;
-    const restoreDraft = (draft?: WorkspaceDraft) => {
+    const restoreDraft = (draft?: WorkspaceDraft, merge = false) => {
       if (!draft) return;
-      setSubjectDrafts(draft.subjectDrafts || {});
-      setMultiSubjectDrafts(draft.multiSubjectDrafts || {});
-      setPromptDrafts(draft.promptDrafts || {});
-      setInstructions(draft.instructions || {});
-      setVersions(draft.versions || {});
+      setSubjectDrafts(merge ? value => ({ ...value, ...draft.subjectDrafts }) : draft.subjectDrafts || {});
+      setMultiSubjectDrafts(merge ? value => ({ ...value, ...draft.multiSubjectDrafts }) : draft.multiSubjectDrafts || {});
+      setPromptDrafts(merge ? value => ({ ...value, ...draft.promptDrafts }) : draft.promptDrafts || {});
+      setInstructions(merge ? value => ({ ...value, ...draft.instructions }) : draft.instructions || {});
+      setVersions(items => ({ ...items, ...draft.versions }));
       setLang(draft.lang || "zh");
     };
     const refresh = async () => {
@@ -195,7 +203,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
             : previous.mode,
           showHiddenProjects: visibility === visibilityRevision.current ? value.preferences.showHiddenProjects : previous.showHiddenProjects,
         }));
-        if (firstRefresh) setSettings(!value.preferences.paired);
+        if (firstRefresh && !ownContext) setSettings(!value.preferences.paired);
         initialized = true;
         setDraftReady(quickRestored);
         if (workspace && (ownContext || !firstRefresh)) return 1500;
@@ -228,7 +236,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         if (cancelled || revision !== selectionRevision.current) return;
         previous = reference; setSelection(reference);
         setHistoryOpen(false); setGalleryOpen(false); setTasksOpen(false); setError("");
-        setPreferences(value => ({ ...value, mode: target.mode }));
+        setProjectMode(target.projectId, target.mode);
         setVersions(value => ({ ...value, [`${target.projectId}:${target.mode}`]: target.id }));
         const generationId = params.get("generation");
         const image = !!generationId && !!target.generations?.some(item => item.id === generationId);
@@ -237,53 +245,72 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         dispatchDrawer({ type: "toggle", key: `${target.projectId}:${target.mode}:${target.id}`, open: image, seen: "" });
       } catch (error) { if (!cancelled && revision === selectionRevision.current) setError((error as Error).message); }
     };
+    const navigateHandoff = async (params: URLSearchParams, merge = true) => {
+      const id = params.get("handoff");
+      const revision = ++selectionRevision.current;
+      ownContext = true;
+      try {
+        const handoff = await request<WorkspaceHandoff | undefined>({ type: "alchemy:workspace-handoff", id });
+        if (cancelled || revision !== selectionRevision.current) return;
+        if (!handoff) throw new Error("接续草稿已失效，请从快捷面板重新打开工作台");
+        restoreDraft(handoff.draft, merge);
+        setSettings(false); setNewProjectOpen(false); setHistoryOpen(false); setGalleryOpen(false); setTasksOpen(false); setError("");
+        setProjectMode(handoff.selection?.projectId, handoff.mode);
+        if (handoff.selection) {
+          const source = handoff.selection;
+          previous = source;
+          setSelection(source);
+          if (source.projectId) {
+            try {
+              const reference = await request<Selection>({ type: "alchemy:project-reference", id: source.projectId });
+              if (cancelled || revision !== selectionRevision.current) return;
+              previous = { ...reference, id: source.id };
+              setSelection(previous);
+            } catch (error) {
+              if (cancelled || revision !== selectionRevision.current) return;
+              setSelection({ ...source, error: (error as Error).message });
+            }
+          } else setSelection({ ...source, error: "参考图尚未保存，请重新上传" });
+        } else { previous = undefined; setSelection(undefined); setProject(undefined); }
+        if (params.get("view") === "settings") setSettings(true);
+        if (params.get("view") === "tasks") setTasksOpen(true);
+      } catch (e) { if (!cancelled && revision === selectionRevision.current) setError((e as Error).message); }
+    };
     const onReminderNavigation = () => {
-      if (!workspace || !location.hash.startsWith("#reminder=")) return;
-      const params = new URLSearchParams(location.hash.slice("#reminder=".length));
+      if (!workspace || !/^#(?:reminder|workspace)=/.test(location.hash)) return;
+      const params = new URLSearchParams(location.hash.slice(location.hash.indexOf("=") + 1));
       history.replaceState(null, "", location.pathname + location.search);
-      void navigateReminder(params);
+      void (params.has("handoff") ? navigateHandoff(params) : navigateReminder(params));
     };
     const initialize = async () => {
+      let views: Record<string, { mode: Mode; versions: Record<string, string> }> = {};
+      try {
+        views = await request<typeof views>({ type: "alchemy:project-views" }) || {};
+        if (cancelled) return;
+        setProjectModes(Object.fromEntries(Object.entries(views || {}).map(([id, view]) => [id, view.mode])));
+        setVersions(Object.fromEntries(Object.entries(views || {}).flatMap(([id, view]) =>
+          Object.entries(view.versions).map(([mode, version]) => [`${id}:${mode}`, version]))));
+        setViewsReady(true);
+      } catch (error) { if (!cancelled) setError(`项目选择恢复失败：${(error as Error).message}`); }
       const params = new URLSearchParams(location.search);
       if (workspace && (params.has("task") || params.get("tasks") === "unread")) {
         await navigateReminder(params);
         for (const key of ["task", "tasks", "generation"]) params.delete(key);
         history.replaceState(null, "", location.pathname + (params.size ? `?${params}` : "") + location.hash);
       }
-      const id = workspace && params.get("handoff");
-      if (id) {
-        try {
-          ownContext = true;
-          const handoff = await request<WorkspaceHandoff | undefined>({ type: "alchemy:workspace-handoff", id });
-          if (cancelled) return;
-          if (!handoff) throw new Error("接续草稿已失效，请从快捷面板重新打开工作台");
-          restoreDraft(handoff.draft);
-          setPreferences(value => ({ ...value, mode: handoff.mode }));
-          if (handoff.selection) {
-            const source = handoff.selection;
-            previous = source;
-            setSelection(source);
-            if (source.projectId) {
-              try {
-                const reference = await request<Selection>({ type: "alchemy:project-reference", id: source.projectId });
-                if (cancelled) return;
-                previous = { ...reference, id: source.id };
-                setSelection(previous);
-              } catch (error) {
-                if (cancelled) return;
-                setSelection({ ...source, error: (error as Error).message });
-              }
-            } else setSelection({ ...source, error: "参考图尚未保存，请重新上传" });
-          }
-          params.delete("handoff");
-          history.replaceState(null, "", location.pathname + (params.size ? `?${params}` : "") + location.hash);
-        } catch (e) { if (!cancelled) setError((e as Error).message); }
+      if (workspace && params.has("handoff")) {
+        await navigateHandoff(params, false);
+        for (const key of ["handoff", "view"]) params.delete(key);
+        history.replaceState(null, "", location.pathname + (params.size ? `?${params}` : "") + location.hash);
       }
       if (!workspace) {
         try {
           savedQuick = await request<WorkspaceHandoff | undefined>({ type: "alchemy:quick-draft" });
           if (cancelled) return;
-          restoreDraft(savedQuick?.draft);
+          restoreDraft(savedQuick?.draft && { ...savedQuick.draft, versions: Object.fromEntries(
+            Object.entries(savedQuick.draft.versions || {}).filter(([key]) => !views[key.slice(0, key.indexOf(":"))]),
+          ) });
+          if (savedQuick && !views[savedQuick.selection?.projectId || ""]) setProjectMode(savedQuick.selection?.projectId, savedQuick.mode);
           quickRestored = true;
         } catch (error) { if (!cancelled) setDraftError(`草稿恢复失败：${(error as Error).message}`); }
       }
@@ -358,6 +385,16 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     return () => { cancelled = true; };
   }, [job?.id, !!job?.reenact, referenceError]);
 
+  const projectView = JSON.stringify({ mode: preferences.mode, versions: Object.fromEntries(
+    Object.entries(versions).filter(([key]) => key.startsWith(`${selection?.projectId}:`))
+      .map(([key, value]) => [key.slice(key.indexOf(":") + 1), value]),
+  ) });
+  useEffect(() => {
+    if (!viewsReady || !draftReady || !selection?.projectId || !activeProject) return;
+    void request({ type: "alchemy:save-project-view", projectId: selection.projectId, view: JSON.parse(projectView) })
+      .catch(error => setError(`项目选择暂未保存：${error.message}`));
+  }, [viewsReady, draftReady, selection?.projectId, activeProject?.id, projectView]);
+
   const draftSnapshot = (): WorkspaceDraft => ({
     multiSubjectDrafts, subjectDrafts, instructions, promptDrafts, lang,
     versions: activeProject ? { ...versions, [subjectKey(preferences.mode)]: job?.id || "new" } : versions,
@@ -375,7 +412,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     return () => { cancelled = true; };
   }, [workspace, draftReady, multiSubjectDrafts, subjectDrafts, instructions, promptDrafts, lang, versions, job?.id, activeProject?.id, selection?.id, selection?.projectId, preferences.mode]);
 
-  const openWorkspace = async () => {
+  const openWorkspace = async (view?: "tasks" | "settings") => {
     if (handoffPending.current) return;
     if (busy || savingMode || subjectUnavailable[subjectKey(preferences.mode)] || reading || (connected && loadingProject)) {
       setError("正在处理当前输入，请完成后再打开工作台"); return;
@@ -386,7 +423,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       const prefix = `${selection?.projectId || selection?.id}:`;
       const forProject = <T,>(items: Record<string, T>) => Object.fromEntries(Object.entries(items).filter(([key]) => key.startsWith(prefix)));
       const draft = draftSnapshot();
-      await request({ type: "alchemy:open-workspace", context: workspaceContext(), draft: {
+      await request({ type: "alchemy:open-workspace", view, context: workspaceContext(), draft: {
         multiSubjectDrafts: forProject(multiSubjectDrafts), subjectDrafts: forProject(subjectDrafts), instructions: forProject(instructions), versions: forProject(draft.versions || {}), lang,
         promptDrafts: Object.fromEntries(Object.entries(promptDrafts).filter(([id]) => activeProject?.jobs.some(job => job.id === id))),
       } });
@@ -418,6 +455,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         setInstructions(items => ({ ...items, [key]: multiPrompt }));
       }
       selectionRevision.current++;
+      setProjectMode(next.projectId, preferences.mode);
       setSelection(next); setHistoryOpen(false); setGalleryOpen(false); setNewProjectOpen(false);
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -436,6 +474,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       else if (mode !== "recreate") setSubjectDrafts(items => ({ ...items, [key]: subjectImage(mode) }));
       if (instruction !== undefined) setInstructions(items => ({ ...items, [`${key}:new`]: instruction }));
       selectionRevision.current++;
+      setProjectMode(next.projectId, mode);
       setSelection(next); setError(""); setHistoryOpen(false); setGalleryOpen(false);
     } finally { setBusy(false); }
   };
@@ -460,6 +499,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       } else setSubjectDrafts(items => ({ ...items, [key]: subject }));
       setInstructions(items => ({ ...items, [`${key}:new`]: instruction }));
       selectionRevision.current++;
+      setProjectMode(next.projectId, mode);
       setSelection(next); setHistoryOpen(false); setGalleryOpen(false);
     } catch (e) { setError((e as Error).message || "无法互换图片，请重试"); }
     finally { setBusy(false); }
@@ -472,22 +512,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       : current);
   };
   const saveMode = async (mode: Mode) => {
-    if (savingMode || busy) return;
-    const previous = preferences.mode;
-    setCopied(false);
-    setError("");
-    modeRevision.current++;
-    setSavingMode(true);
-    setPreferences((value) => ({ ...value, mode }));
-    try {
-      await request({ type: "alchemy:mode", mode });
-    } catch (e) {
-      setPreferences((value) => ({ ...value, mode: previous }));
-      setError((e as Error).message);
-    } finally {
-      modeRevision.current++;
-      setSavingMode(false);
-    }
+    if (savingMode || busy || !draftReady) return;
+    setCopied(false); setError("");
+    setProjectMode(selection?.projectId, mode);
   };
   const connect = async () => {
     setBusy(true);
@@ -550,6 +577,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       library.refresh();
       setRefreshNonce(value => value + 1);
       if (selection?.projectId && deletedIds.includes(selection.projectId)) { setSelection(undefined); setProject(undefined); }
+      setProjectModes(items => Object.fromEntries(Object.entries(items).filter(([id]) => !deletedIds.includes(id))));
       setVersions((items) => Object.fromEntries(Object.entries(items).filter(([key]) => !deletedIds.some((id) => key.startsWith(`${id}:`)))));
       setPromptDrafts((items) => Object.fromEntries(Object.entries(items).filter(([id]) => !removedJobs.includes(id))));
       setMultiSubjectDrafts((items) => Object.fromEntries(Object.entries(items).filter(([key]) => !deletedIds.some((id) => key.startsWith(`${id}:`)))));
@@ -787,7 +815,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         <span title={connectionText}>
           {connected ? "Codex 已连接" : "Codex 未连接"}
         </span>
-        {activeCount > 0 && <button className="text-button" onClick={() => void openWorkspace()}>{activeCount} 个任务</button>}
+        {activeCount > 0 && <button className="text-button" onClick={() => void openWorkspace("tasks")}>{activeCount} 个任务</button>}
         <button className="text-button workspace-entry" disabled={busy || savingMode || !!subjectUnavailable[subjectKey(preferences.mode)]} onClick={() => void openWorkspace()} title="在工作台继续"><Icon name="expand" />工作台</button>
         <button
           className="icon-button"
@@ -826,7 +854,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           >
             {busy ? "正在连接…" : "连接 Codex"}
           </button>
-          {connected && <button className="text-button" onClick={() => void openWorkspace()}>在工作台管理模型与设置<Icon name="arrow" /></button>}
+          {connected && <button className="text-button" onClick={() => void openWorkspace("settings")}>在工作台管理模型与设置<Icon name="arrow" /></button>}
         </section>
       )}
       {error && (
@@ -839,7 +867,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       )}
       {connected && !selectedModel && !settings && <div className="model-notice">
         <span>先为 QC-Reframe 选择可用模型</span>
-        <button className="text-button" onClick={() => workspace ? setSettings(true) : void openWorkspace()}>选择模型</button>
+        <button className="text-button" onClick={() => workspace ? setSettings(true) : void openWorkspace("settings")}>选择模型</button>
       </div>}
 
       {(visibilityNotice || (!tasksOpen && visibilityError)) && <ProjectVisibilityToast notice={visibilityNotice} error={tasksOpen ? "" : visibilityError} busy={busy} containerRef={visibilityFeedback}
@@ -858,7 +886,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           setTargetPrompt({ jobId, request: Date.now() });
           dispatchDrawer({ type: "toggle", key: `${projectId}:${mode}:${jobId}`, open: false, seen: "" });
         }
-        await saveMode(mode);
+        setProjectMode(projectId, mode);
       }} />}
       {workspace && galleryOpen ? <ResultGallery connected={connected} revision={dataRevision} showHidden={showHidden} hiddenProjectIds={hiddenProjectIds}
         visibilityToggle={<HiddenProjectsToggle shown={showHidden} disabled={busy || !connected} onToggle={() => void toggleHiddenProjects()} />}
@@ -866,9 +894,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           setBusy(true); modeRevision.current++;
           try {
             const next = await request<Selection>({ type: "alchemy:open-project", id: work.projectId });
-            await request({ type: "alchemy:mode", mode: work.mode });
             selectionRevision.current++; setSelection(next); setHistoryOpen(false);
-            setPreferences(value => ({ ...value, mode: work.mode }));
+            setProjectMode(work.projectId, work.mode);
             setVersions(items => ({ ...items, [`${work.projectId}:${work.mode}`]: work.jobId }));
             setTargetGeneration({ jobId: work.jobId, id: work.generationId });
             dispatchDrawer({ type: "toggle", key: `${work.projectId}:${work.mode}:${work.jobId}`, open: true, seen: "" });

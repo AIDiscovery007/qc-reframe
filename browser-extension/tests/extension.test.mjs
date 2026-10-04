@@ -239,6 +239,7 @@ async function background(fetch = async () => ({ ok: true, json: async () => ({ 
       },
     },
     tabs: {
+      query: async () => [],
       sendMessage: async (_tabId, message) => {
         messages.push(message);
       },
@@ -433,7 +434,7 @@ test("prompt edits are validated, authenticated and limited to prompt fields", a
 test("workspace handoff preserves drafts only in session storage and is consumed only by extension pages", async () => {
   const { handlers, chrome, tabs, sessionStorage } = await background(() => assert.fail("opening workspace must not call bridge"));
   const selection = { id: "selected", projectId: "a".repeat(64), image: "saved-reference" };
-  chrome.storage.local.get = async () => ({ preferences: { token: "private-token", mode: "reenact" }, selection });
+  chrome.storage.local.get = async () => ({ preferences: { token: "private-token", mode: "style" }, selection, [`projectView:${selection.projectId}`]: { mode: "reenact", versions: {} } });
   chrome.storage.local.set = async () => assert.fail("drafts must not be saved to local storage");
   const content = { id: "test", frameId: 0, url: "https://pinterest.com/", tab: { id: 4 } };
   const workspace = { id: "test", url: "chrome-extension://test/workspace.html" };
@@ -929,4 +930,48 @@ test("session readers wait for queued writes and handoff consumption is exactly 
   const id = new URL(tabs[0].url).searchParams.get('handoff');
   const consumed = await Promise.all([send({ type: "alchemy:workspace-handoff", id }), send({ type: "alchemy:workspace-handoff", id })]);
   assert.equal(consumed.filter(item => item.value).length, 1);
+});
+
+
+test("all workspace entry points reuse a matching live tab and keep handoffs private", async () => {
+  const { handlers, chrome, tabs, sessionStorage } = await background();
+  const existing = { id: 20, windowId: 3, active: false, url: 'chrome-extension://test/workspace.html?keep=yes' };
+  const updates = [], windows = [];
+  chrome.tabs.query = async () => [{ id: 99, url: 'chrome-extension://test/workspace.html.backup' }, existing];
+  chrome.tabs.update = async (id, update) => { updates.push({ id, ...update }); Object.assign(existing, update); };
+  chrome.windows = { update: async (id, update) => windows.push({ id, ...update }) };
+  const popup = { id: 'test', url: 'chrome-extension://test/popup.html' };
+  const send = (message, sender = popup) => new Promise(resolve => handlers.message(message, sender, resolve));
+  for (const view of [undefined, 'settings', 'tasks']) {
+    const draft = { instructions: { key: 'private draft' } };
+    assert.equal((await send({ type: 'alchemy:open-workspace', view, draft })).ok, true);
+    const update = updates.at(-1), url = new URL(update.url), route = new URLSearchParams(url.hash.slice('#workspace='.length));
+    assert.equal(update.id, 20); assert.equal(update.active, true); assert.equal(url.search, '?keep=yes');
+    assert.equal(route.get('view'), view || null);
+    assert.equal(sessionStorage['workspace:' + route.get('handoff')].draft.instructions.key, 'private draft');
+    assert.ok(!update.url.includes('private'));
+  }
+  assert.equal(tabs.length, 0); assert.equal(windows.length, 3); assert.equal(windows[0].id, 3);
+  chrome.tabs.update = async () => { throw new Error('activation failed'); };
+  assert.match((await send({ type: 'alchemy:open-workspace', draft: { instructions: { key: 'recoverable' } } })).error, /activation failed/);
+  assert.equal(sessionStorage['quick:popup'].draft.instructions.key, 'recoverable');
+  assert.equal(tabs.length, 0);
+  assert.match((await send({ type: 'alchemy:open-workspace', view: 'https://example.com' })).error, /无效工作台页面/);
+});
+
+
+test("plain workspace entry restores the selected project's path instead of the global mode", async () => {
+  const { handlers, chrome, tabs, sessionStorage } = await background(() => assert.fail("navigation must not start tasks"));
+  const projectId = "a".repeat(64);
+  const stored = { preferences: { token: "secret", mode: "reenact" }, selection: { id: "selected", projectId },
+    [`projectView:${projectId}`]: { mode: "recreate", versions: {} } };
+  chrome.storage.local.get = async () => stored;
+  const send = message => new Promise(resolve => handlers.message(message, { id: "test", url: "chrome-extension://test/popup.html" }, resolve));
+  assert.equal((await send({ type: "alchemy:open-workspace" })).ok, true);
+  const id = new URL(tabs.at(-1).url).searchParams.get("handoff");
+  assert.equal(sessionStorage[`workspace:${id}`].mode, "recreate");
+  delete stored[`projectView:${projectId}`];
+  assert.equal((await send({ type: "alchemy:open-workspace" })).ok, true);
+  const firstId = new URL(tabs.at(-1).url).searchParams.get("handoff");
+  assert.equal(sessionStorage[`workspace:${firstId}`].mode, "style", "unvisited project must not inherit global mode");
 });

@@ -1,3 +1,4 @@
+import { openWorkspace } from "./workspace-navigation";
 import { browser } from 'wxt/browser';
 import { bridge } from './bridge';
 import { markRemindersRead, newReminderState, reconcileReminders, reminderSummary, type ReminderState, type TaskNotice } from './task-reminders';
@@ -77,19 +78,6 @@ export function startReminderService() {
   const schedule = (state: ReminderState) => {
     clearTimeout(flushTimer);
     if (state.pending.length) flushTimer = setTimeout(() => void wake(), Math.max(0, state.due - Date.now()));
-  };
-  const openWorkspace = async (params: URLSearchParams, sourceTab?: number) => {
-    const base = browser.runtime.getURL('/workspace.html');
-    const tabs = (await browser.tabs.query({ url: `${base}*` })).filter(tab =>
-      (tab.pendingUrl || tab.url)?.split(/[?#]/)[0] === base && tab.id != null);
-    tabs.sort((a, b) => Number(b.id === sourceTab) - Number(a.id === sourceTab)
-      || Number(b.active) - Number(a.active) || (b.lastAccessed || 0) - (a.lastAccessed || 0));
-    const tab = tabs[0];
-    if (!tab) { await browser.tabs.create({ url: `${base}?${params}` }); return; }
-    // Only change the fragment: keep the live React tree and any unsaved drafts.
-    params.set('request', crypto.randomUUID());
-    await browser.tabs.update(tab.id!, { active: true, url: `${(tab.pendingUrl || tab.url)!.split('#')[0]}#reminder=${params}` });
-    await browser.windows.update(tab.windowId, { focused: true });
   };
   const open = async (id: string, sourceTab?: number) => {
     if (id === 'all') {

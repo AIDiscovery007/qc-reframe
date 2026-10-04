@@ -16,6 +16,11 @@ function extract(source, names) {
   return Object.entries(values).map(([name, value]) => `const ${name} = ${value};`).join('\n');
 }
 function evaluate(source, globals, names) {
+  const original = globals;
+  globals = { setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, ...globals,
+    setProjectMode: original.setProjectMode || ((_id, mode) => original.setPreferences(value => ({ ...value, mode }))),
+    request: async message => message.type === 'alchemy:project-views' ? original.projectViews || {} : original.request(message),
+  };
   const exports = {};
   runInNewContext(ts.transpileModule(`${source}\nObject.assign(exports,{${names.join(',')}});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, { exports, ...globals });
   return exports;
@@ -85,6 +90,48 @@ const visit = node => {
 };
 visit(tree);
 
+test('quick reopen keeps durable project choices while restoring inputs; explicit handoff and legacy drafts retain their choices', async () => {
+  for (const scenario of ['saved-project', 'legacy-draft', 'explicit-handoff']) {
+    const state = { modes: {}, versions: {}, preferences: {} };
+    const setter = key => value => { state[key] = typeof value === 'function' ? value(state[key]) : value; };
+    let refresh;
+    const source = { id: 'reference-A', projectId: 'A' };
+    const saved = { mode: 'style', selection: source, draft: {
+      versions: { 'A:style': 'old-choice', 'B:reenact': 'old-B', 'C:style': 'legacy-C' },
+      instructions: { 'A:style:old-choice': 'unsaved input' }, subjectDrafts: { 'A:style': 'subject-image' },
+    } };
+    const context = {
+      workspace: scenario === 'explicit-handoff',
+      projectViews: scenario === 'legacy-draft' ? {} : {
+        A: { mode: 'recreate', versions: { style: 'new-choice', recreate: 'chosen-recreate' } },
+        B: { mode: 'reenact', versions: { reenact: 'chosen-B' } },
+      },
+      window: { addEventListener() {}, removeEventListener() {} },
+      location: { search: scenario === 'explicit-handoff' ? '?handoff=test' : '', hash: '', pathname: '/popup.html' },
+      history: { replaceState() {} }, URLSearchParams,
+      modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, deletingProjects: { current: false },
+      request: async message => message.type === 'alchemy:project-reference' ? { ...source, image: 'reference' } : saved,
+      readState: async () => ({ preferences: { paired: true, mode: 'reenact' }, selection: source }),
+      pollWhileVisible: callback => { refresh = callback; return () => {}; },
+      setProjectModes: setter('modes'), setProjectMode: (id, mode) => { state.modes[id] = mode; },
+      setVersions: setter('versions'), setPreferences: setter('preferences'), setSelection: setter('selection'),
+      setInstructions: setter('instructions'), setSubjectDrafts: setter('subjects'),
+      setMultiSubjectDrafts() {}, setPromptDrafts() {}, setLang() {}, setSettings() {}, setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {},
+      setError: value => { if (value) assert.fail(value); }, setDraftError: value => assert.fail(value),
+    };
+    evaluate(`const start = ${initialize};`, context, ['start']).start();
+    await new Promise(resolve => setImmediate(resolve));
+    await refresh();
+    assert.equal(state.modes.A, scenario === 'saved-project' ? 'recreate' : 'style', scenario);
+    assert.equal(state.versions['A:style'], scenario === 'saved-project' ? 'new-choice' : 'old-choice', scenario);
+    assert.equal(state.versions['B:reenact'], scenario === 'saved-project' ? 'chosen-B' : 'old-B', scenario);
+    if (scenario !== 'legacy-draft') assert.equal(state.versions['A:recreate'], 'chosen-recreate');
+    assert.equal(state.versions['C:style'], 'legacy-C');
+    assert.equal(state.instructions['A:style:old-choice'], 'unsaved input');
+    assert.equal(state.subjects['A:style'], 'subject-image');
+  }
+});
+
 test('workspace handoff restores its own source and mode without polling back to another view', async () => {
   const state = { preferences: {}, selections: [], drafts: {} };
   let refresh;
@@ -97,7 +144,7 @@ test('workspace handoff restores its own source and mode without polling back to
     pollWhileVisible: callback => { refresh = callback; return () => {}; },
     setPreferences: update => { state.preferences = update(state.preferences); },
     setSelection: value => state.selections.push(value), setInstructions: value => { state.drafts = value; },
-    setSubjectDrafts() {}, setMultiSubjectDrafts() {}, setPromptDrafts() {}, setVersions() {}, setLang() {}, setSettings() {}, setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {}, setError: value => assert.fail(value),
+    setSubjectDrafts() {}, setMultiSubjectDrafts() {}, setPromptDrafts() {}, setVersions() {}, setLang() {}, setSettings() {}, setNewProjectOpen() {}, setTasksOpen() {}, setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {}, setError: value => { if (value) assert.fail(value); },
   };
   evaluate(`const start = ${initialize};`, context, ['start']).start();
   await new Promise(resolve => setImmediate(resolve));
@@ -222,3 +269,39 @@ for (const delayed of ['handoff', 'reference']) for (const kind of ['single', 'b
     cleanup(); assert.equal(listeners.has('hashchange'), false);
   });
 }
+
+
+test('live workspace handoff merges drafts, routes settings/tasks, and ignores superseded responses', async () => {
+  const state = { instructions: { 'other:style:new': 'keep me' }, versions: { 'other:style': 'old' }, subjects: { other: 'image' }, selections: [], mode: '', settings: false, tasks: false };
+  const revision = { current: 0 }, pending = new Map();
+  const setter = key => value => { state[key] = typeof value === 'function' ? value(state[key] || {}) : value; };
+  const handoff = { selection: { id: 'source', projectId: 'project' }, mode: 'reenact', draft: { instructions: { 'project:reenact:new': 'incoming' }, versions: { 'project:reenact': 'new' } } };
+  const ui = evaluate(`let cancelled = false, ownContext = false, previous;\n${extract(app, ['restoreDraft', 'navigateHandoff', 'navigateReminder'])}`, {
+    selectionRevision: revision, workspace: true, URLSearchParams,
+    request: message => {
+      if (message.id === 'slow-handoff' || message.id === 'slow-project') return new Promise(resolve => pending.set(message.id, resolve));
+      return Promise.resolve(message.type === 'alchemy:workspace-handoff' ? handoff : { id: 'reference', projectId: message.id, image: 'reference-image' });
+    },
+    setSelection: value => state.selections.push(value), setProject() {}, setProjectMode: (_id, mode) => { state.mode = mode; },
+    setInstructions: setter('instructions'), setVersions: setter('versions'), setSubjectDrafts: setter('subjects'), setMultiSubjectDrafts: setter('multi'), setPromptDrafts: setter('prompts'), setLang() {},
+    setSettings: setter('settings'), setTasksOpen: setter('tasks'), setNewProjectOpen() {}, setHistoryOpen() {}, setGalleryOpen() {},
+    setError: value => { if (value) assert.fail(value); },
+  }, ['navigateHandoff', 'navigateReminder']);
+  await ui.navigateHandoff(new URLSearchParams({ handoff: 'one', view: 'settings' }));
+  assert.equal(state.settings, true); assert.equal(state.tasks, false); assert.equal(state.mode, 'reenact');
+  assert.equal(state.selections.at(-1).image, 'reference-image');
+  assert.equal(state.instructions['other:style:new'], 'keep me'); assert.equal(state.instructions['project:reenact:new'], 'incoming');
+  assert.equal(state.subjects.other, 'image'); assert.equal(state.versions['other:style'], 'old'); assert.equal(state.versions['project:reenact'], 'new');
+  const stale = ui.navigateHandoff(new URLSearchParams({ handoff: 'slow-handoff', view: 'settings' }));
+  await ui.navigateHandoff(new URLSearchParams({ handoff: 'two', view: 'tasks' }));
+  const count = state.selections.length;
+  pending.get('slow-handoff')({ ...handoff, mode: 'recreate' }); await stale;
+  assert.equal(state.selections.length, count); assert.equal(state.tasks, true); assert.equal(state.settings, false); assert.equal(state.mode, 'reenact');
+  handoff.selection.projectId = 'slow-project';
+  const staleReference = ui.navigateHandoff(new URLSearchParams({ handoff: 'three', view: 'settings' }));
+  await new Promise(resolve => setImmediate(resolve));
+  await ui.navigateReminder(new URLSearchParams({ tasks: 'unread' }));
+  const before = state.selections.length;
+  pending.get('slow-project')({ id: 'late', projectId: 'slow-project' }); await staleReference;
+  assert.equal(state.selections.length, before); assert.equal(state.tasks, true); assert.equal(state.settings, false);
+});

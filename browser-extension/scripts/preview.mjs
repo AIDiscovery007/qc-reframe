@@ -228,7 +228,7 @@ createServer(async (req, res) => {
               for(const key of ['tasks','task','generation'])target.searchParams.delete(key);
               if(message.id==='all')target.searchParams.set('tasks','unread');
               else {target.searchParams.set('task',notice.jobId);if(notice.generationId)target.searchParams.set('generation',notice.generationId);}
-              if(location.pathname==='/workspace.html'||location.pathname==='/'){const params=new URLSearchParams({request:crypto.randomUUID()});for(const key of ['tasks','task','generation'])if(target.searchParams.has(key))params.set(key,target.searchParams.get(key));location.hash='reminder='+params;}else window.open(target.href,'reframe-workspace');
+              if(location.pathname==='/workspace.html'||location.pathname==='/'){const params=new URLSearchParams({request:crypto.randomUUID()});for(const key of ['tasks','task','generation'])if(target.searchParams.has(key))params.set(key,target.searchParams.get(key));location.hash='workspace='+params;}else window.open(target.href,'reframe-workspace');
             }
             const toastKey='preview-reminder-toast:'+readKey;
             return {ok:true,value:{unread,preferences:message.preferences||preferences,desktop:previewOptions.has('notificationDenied')?'denied':'granted',audioSupported:true,connectionError:'',audioError:'',toast:message.type==='alchemy:reminder-view'&&message.visible&&previewOptions.get('reminder')==='toast'&&!sessionStorage.getItem(toastKey)&&(sessionStorage.setItem(toastKey,'true'),true)?unread:undefined}};
@@ -243,13 +243,15 @@ createServer(async (req, res) => {
             if(previewOptions.get('imagePreview')==='delay')await new Promise(resolve=>setTimeout(resolve,2500));
           }
           if(message.type==='alchemy:quick-draft'){const key=location.pathname.includes('popup')?'quick-popup':'quick-panel';if(message.context){sessionStorage.setItem(key,JSON.stringify({...message.context,draft:message.draft}));return {ok:true};}return {ok:true,value:JSON.parse(sessionStorage.getItem(key)||'null')};}
-          if(message.type==='alchemy:open-workspace'){sessionStorage.setItem('workspace-draft',JSON.stringify({...message.context,draft:message.draft,projects,data}));location.href='/workspace.html?state='+state+'&handoff=preview';return {ok:true};}
-          if(message.type==='alchemy:workspace-handoff'){sessionStorage.removeItem('workspace-draft');return {ok:true,value:handoff};}
+          if(message.type==='alchemy:open-workspace'){sessionStorage.setItem('workspace-draft',JSON.stringify({...message.context,draft:message.draft,projects,data}));const params=new URLSearchParams({handoff:'preview',...(message.view?{view:message.view}:{})});if(location.pathname==='/workspace.html'||location.pathname==='/'){params.set('request',crypto.randomUUID());location.hash='workspace='+params;}else location.href='/workspace.html?state='+state+'&'+params;return {ok:true};}
+          if(message.type==='alchemy:workspace-handoff'){const saved=JSON.parse(sessionStorage.getItem('workspace-draft')||'null');sessionStorage.removeItem('workspace-draft');return {ok:true,value:saved};}
           if(message.type==='alchemy:upload-reference'){if(new URLSearchParams(location.search).get('swap')==='failed')return {error:'互换失败（预览），请重试'};let p=projects.find(p=>(p.image||template)===message.image);if(!p){p={id:crypto.randomUUID(),title:'上传的参考图',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),sourceUrl:'',capture:'original',jobs:[],image:message.image};projects.unshift(p);touch(p);}data.selection={...selection(p),image:message.image};return {ok:true,value:data.selection};}
           if(message.type==='alchemy:query'&&message.path==='/cli/status')return {ok:true,value:structuredClone(cli)};
           if(message.type==='alchemy:cli-check'){cli.detectedAt=new Date().toISOString();if(cli.command)cli.checkedAt=cli.detectedAt;return {ok:true,value:structuredClone(cli)};}
           if(message.type==='alchemy:cli-update'){cli.operation={status:'running',stage:'正在升级（预览）'};setTimeout(()=>{cli.version=cli.latestVersion;cli.updateAvailable=false;cli.operation={status:'completed',stage:'升级完成（预览）'};models.selected=null;},2500);return {ok:true,value:structuredClone(cli)};}
           if(message.type==='alchemy:connect'){data.preferences.token='preview';return {ok:true,value:{ready:true}};}
+          if(message.type==='alchemy:project-views')return {ok:true,value:JSON.parse(localStorage.getItem('preview-project-views')||'{}')};
+          if(message.type==='alchemy:save-project-view'){const views=JSON.parse(localStorage.getItem('preview-project-views')||'{}');views[message.projectId]=message.view;localStorage.setItem('preview-project-views',JSON.stringify(views));return {ok:true};}
           if(message.type==='alchemy:state')return {ok:true,value:structuredClone({preferences:{paired:!!data.preferences.token,mode:data.preferences.mode,showHiddenProjects},selection:!showHiddenProjects&&projects.find(p=>p.id===data.selection?.projectId)?.hidden?undefined:data.selection})};
           if(message.type==='alchemy:models-refresh'||(message.type==='alchemy:query'&&message.path==='/models'))return {ok:true,value:structuredClone(models)};
           if(message.type==='alchemy:model-verify'){

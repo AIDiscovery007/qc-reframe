@@ -253,3 +253,25 @@ test("gallery hook default filters reach the bridge without an empty project ID"
   assert.equal(url.searchParams.has("projectId"), false);
   assert.equal(url.searchParams.get("limit"), "96");
 });
+
+
+test("project path and version choices persist independently and expose no private storage", async () => {
+  const bg = background(), other = "b".repeat(64);
+  const older = "11111111-1111-4111-8111-111111111111", newer = "22222222-2222-4222-8222-222222222222";
+  const save = (id, mode, versions) => bg.send({ type: "alchemy:save-project-view", projectId: id, view: { mode, versions } });
+  await Promise.all([save(projectId, "recreate", { recreate: older, style: newer }), save(other, "reenact", { reenact: newer })]);
+  await save(other, "style", { reenact: newer, style: "new" });
+  const views = (await background(bg.local).send({ type: "alchemy:project-views" })).value;
+  assert.equal(views[projectId].mode, "recreate");
+  assert.equal(views[projectId].versions.recreate, older);
+  assert.equal(views[projectId].versions.style, newer);
+  assert.equal(views[other].mode, "style");
+  assert.equal(views[other].versions.reenact, newer);
+  assert.equal(views[other].versions.style, "new");
+  assert.deepEqual(Object.keys(views).sort(), [projectId, other]);
+  assert.equal(bg.local.preferences.token, "private-token");
+  assert.equal(bg.local.preferences.mode, undefined, "project choices must not mutate global mode");
+  for (const view of [{ mode: "invalid", versions: {} }, { mode: "style", versions: { style: "../bad" } }, { mode: "style", versions: { unknown: "new" } }, { mode: "style", versions: [] }])
+    assert.match((await bg.send({ type: "alchemy:save-project-view", projectId, view })).error, /无效/);
+  assert.equal(await bg.send({ type: "alchemy:project-views" }, { ...sender, id: "foreign" }), undefined);
+});

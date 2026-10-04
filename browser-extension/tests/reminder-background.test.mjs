@@ -6,7 +6,7 @@ import ts from 'typescript';
 import { webcrypto } from 'node:crypto';
 
 const compile = async path => ts.transpileModule(await readFile(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-const stateCode = await compile('../lib/task-reminders.ts'), serviceCode = await compile('../lib/reminder-background.ts');
+const stateCode = await compile('../lib/task-reminders.ts'), serviceCode = await compile('../lib/reminder-background.ts'), navigationCode = await compile('../lib/workspace-navigation.ts');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const task = (id, extra = {}) => ({ id, jobId: 'prompt', projectId: 'a'.repeat(64), mode: 'style', status: 'completed', createdAt: new Date(2000).toISOString(), hidden: false, ...extra });
 
@@ -33,14 +33,16 @@ async function harness({ denied = false, stored, audioFails = false, paired = fa
     },
     windows: { update: async (id, value) => windows.push({ id, ...value }) },
   };
+  const navigation = {};
+  runInNewContext(navigationCode, { exports: navigation, URLSearchParams, crypto: webcrypto, require: () => ({ browser }) });
   const exports = {};
   runInNewContext(serviceCode, { exports, Date: Clock, URLSearchParams, console, crypto: webcrypto,
     setTimeout: (fn, delay) => { const id = ++serial; timers.set(id, { fn, at: now + delay }); return id; }, clearTimeout: id => timers.delete(id),
-    require: name => name === 'wxt/browser' ? { browser } : name === './task-reminders' ? stateExports : { bridge: async path => feed ? feed(path) : ({ revision: String(now), tasks }) },
+    require: name => name === 'wxt/browser' ? { browser } : name === './task-reminders' ? stateExports : name === './workspace-navigation' ? navigation : { bridge: async path => feed ? feed(path) : ({ revision: String(now), tasks }) },
   });
   const service = exports.startReminderService(); await tick();
   const message = (type, props = {}, tab = 1) => new Promise((resolve, reject) => listener({ type: `alchemy:reminder-${type}`, ...props }, { id: 'test', url: 'chrome-extension://test/workspace.html', tab: { id: tab } }, reply => reply.error ? reject(new Error(reply.error)) : resolve(reply.value)));
-  return { local, session, notices, sounds, tabs, badges, updates, windows, message, setFeed(next) { feed = next; }, projectsChanged: service.projectsChanged,
+  return { local, session, notices, sounds, tabs, badges, updates, windows, message, openWorkspace: navigation.openWorkspace, setFeed(next) { feed = next; }, projectsChanged: service.projectsChanged,
     async snapshot(next) { tasks = next; local.preferences = { token: 'test-only' }; await service.wake(); },
     async advance(ms) { now += ms; for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.fn(); } await tick(); await message('get'); },
     async click() { clicked('reframe-tasks'); await tick(); },
@@ -197,7 +199,7 @@ test('reminders reuse their originating workspace without reloading it or touchi
   const result = new URL(h.updates[0].url);
   assert.equal(result.search, '?handoff=old', 'reuse only changes the fragment');
   assert.equal(new URLSearchParams(result.hash.slice(10)).get('generation'), 'image');
-  assert.ok(h.updates[1].url.includes('#reminder=tasks=unread'));
+  assert.ok(h.updates[1].url.includes('#workspace=tasks=unread'));
   assert.deepEqual(h.windows.map(window => window.id), [11, 11]);
 });
 
@@ -206,7 +208,7 @@ test('desktop single and batch reminders reuse an active workspace across window
     const h = await harness({ existingTabs: [workspaceTab(1), workspaceTab(2, { active: true })] });
     await h.snapshot(tasks); await h.advance(5000); await h.click();
     assert.equal(h.tabs.length, 0); assert.equal(h.updates[0].id, 2);
-    assert.ok(h.updates[0].url.includes(tasks.length === 1 ? '#reminder=task=prompt' : '#reminder=tasks=unread'));
+    assert.ok(h.updates[0].url.includes(tasks.length === 1 ? '#workspace=task=prompt' : '#workspace=tasks=unread'));
     assert.equal(h.windows[0].id, 12);
   }
 });
@@ -223,4 +225,19 @@ test('activation failure reports an error instead of creating a duplicate worksp
   const h = await harness({ existingTabs: [workspaceTab(1)], updateFails: true });
   await assert.rejects(h.message('open', { id: 'all' }), /cannot activate/);
   assert.equal(h.tabs.length, 0);
+});
+
+
+test('generic entries and reminders share one queue even when the workspace is opening', async () => {
+  const h = await harness();
+  await Promise.all([
+    h.openWorkspace(new URLSearchParams({ handoff: 'draft', view: 'settings' })),
+    h.message('open', { id: 'all' }),
+    h.openWorkspace(new URLSearchParams({ handoff: 'next' })),
+  ]);
+  assert.equal(h.tabs.length, 1);
+  assert.equal(h.updates.length, 2);
+  assert.equal(new URL(h.tabs[0].url).searchParams.get('handoff'), 'draft');
+  assert.ok(h.updates.some(tab => tab.url.includes('tasks=unread')));
+  assert.ok(h.updates.some(tab => tab.url.includes('handoff=next')));
 });

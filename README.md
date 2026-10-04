@@ -4,15 +4,15 @@
 
 在浏览器里收集灵感，在本机工作台调整主体、提示词与结果。沿用 Codex 登录和额度，无需另外填写模型 API Key。
 
-**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.3.1](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.3.1)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
+**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.3.2](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.3.2)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
 
-## v0.3.1，更顺畅地接回创作
+## v0.3.2，在同一个工作台继续创作
 
-项目筛选与视图切换集中在固定工具栏，滚动浏览时仍可随时操作；工作台页头更紧凑，画廊统计与筛选之间留出清晰间距。
+网页入口、快捷面板、任务提醒和设置入口统一复用已有工作台，在页内打开对应项目、结果或设置，避免重复标签堆积。
 
-插件模型可按当前模型选择推理强度，验证成功后保存；档位验证失败保留原有效配置。点击完成提醒会优先复用已有工作台，返回对应提示词、图片或任务中心。
+每个项目独立记住逆向路径，每条路径独立记住提示词版本。切换项目或重新打开工作台后恢复各自选择，旧快捷草稿也不会覆盖后来保存的选择。
 
-[查看 v0.3.1 更新与升级说明 →](browser-extension/docs/releases/v0.3.1.md)
+[查看 v0.3.2 更新与升级说明 →](browser-extension/docs/releases/v0.3.2.md)
 
 ## 工作台，让画面成为主角
 
