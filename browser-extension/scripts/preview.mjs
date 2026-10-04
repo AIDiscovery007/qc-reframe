@@ -228,7 +228,7 @@ createServer(async (req, res) => {
               for(const key of ['tasks','task','generation'])target.searchParams.delete(key);
               if(message.id==='all')target.searchParams.set('tasks','unread');
               else {target.searchParams.set('task',notice.jobId);if(notice.generationId)target.searchParams.set('generation',notice.generationId);}
-              window.open(target.href,'_blank');
+              if(location.pathname==='/workspace.html'||location.pathname==='/'){const params=new URLSearchParams({request:crypto.randomUUID()});for(const key of ['tasks','task','generation'])if(target.searchParams.has(key))params.set(key,target.searchParams.get(key));location.hash='reminder='+params;}else window.open(target.href,'reframe-workspace');
             }
             const toastKey='preview-reminder-toast:'+readKey;
             return {ok:true,value:{unread,preferences:message.preferences||preferences,desktop:previewOptions.has('notificationDenied')?'denied':'granted',audioSupported:true,connectionError:'',audioError:'',toast:message.type==='alchemy:reminder-view'&&message.visible&&previewOptions.get('reminder')==='toast'&&!sessionStorage.getItem(toastKey)&&(sessionStorage.setItem(toastKey,'true'),true)?unread:undefined}};

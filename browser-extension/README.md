@@ -207,7 +207,7 @@ npm run pair
 
 ### 任务完成提醒
 
-逆向或生图结束后，任务中心保留未查看标记，扩展图标显示数量。正在查看对应结果时直接更新；在 Reframe 内查看别处时轻提示一次，离开 Reframe 时发送静默桌面通知。点击单条提醒打开对应提示词或生图版本，多条提醒进入任务中心；关闭提醒不会清除未读。已读判断以实际结果正文/图片/错误文本进入可见区域为准，滚动容器外或只露出标题不会清除；已读或隐藏后的轻提示随同步移除。
+逆向或生图结束后，任务中心保留未查看标记，扩展图标显示数量。正在查看对应结果时直接更新；在 Reframe 内查看别处时轻提示一次，离开 Reframe 时发送静默桌面通知。点击单条提醒打开对应提示词或生图版本，多条提醒进入任务中心。提醒优先在当前工作台内跳转；从网页、弹窗或桌面通知进入时复用已打开的工作台并激活所在窗口，仅没有工作台时新建标签。页内跳转不重载工作台；关闭提醒不会清除未读。已读判断以实际结果正文/图片/错误文本进入可见区域为准，滚动容器外或只露出标题不会清除；已读或隐藏后的轻提示随同步移除。
 
 「设置中心 → 任务提醒」中的声音默认关闭，开启后可选择轻柔/清铃、音量并试听。开关本身不发声。接连完成的任务合并提醒，不循环、不催看；取消不提醒，首次启用不补发旧历史。隐藏项目不主动弹出或发声；未读数量遵循「包含隐藏项目」开关。
 
@@ -290,7 +290,7 @@ npm run zip       # 扩展 ZIP，不包含本机 bridge / skill
 npm run preview   # 弹窗视觉预览，不调用 Codex
 ```
 
-预览地址 `http://127.0.0.1:43188/?state=result`，也支持 `empty`、`running`、`failed`、`reenact`、`style-new`、`reenact-new`（尚未逆向的参考图）、`generation`、`generation-completed`（生图交互示例），均使用明确标记的示例数据。主体图上传和指令编辑使用真实表单；预览的提交按钮不调用 Codex。增加 `&reminder=toast&tasks=unread` 查看提醒及未读示例，`&reminderTask=image` 切换图片提醒，点击提醒可真实新开对应示例结果；`&case=任意新值` 重置该组未读示例，`popup.html?state=projects&reminder=unread&reminderTask=image&panelClip=1&case=clip` 验证裁剪和滚动已读（快捷界面组件 fixture，不代表真实 content 浮层）。`&notificationDenied=1` 模拟通知权限关闭；设置声音只修改预览偏好，不播放声音。预览不能替代真实扩展中的权限、声音、悬浮和跨域图片验收。 工作台提交边界可用 `?state=projects&generationStartDelay=4000&generationDelay=2000` 验证（主体重演路径为首次生成，提取风格为已有结果）；加 `generationStart=failed` 模拟提交失败，`motion=reduce` 检查静态反馈。提交延迟最多 60 秒，仅作用于示例，不调用模型。
+预览地址 `http://127.0.0.1:43188/?state=result`，也支持 `empty`、`running`、`failed`、`reenact`、`style-new`、`reenact-new`（尚未逆向的参考图）、`generation`、`generation-completed`（生图交互示例），均使用明确标记的示例数据。主体图上传和指令编辑使用真实表单；预览的提交按钮不调用 Codex。增加 `&reminder=toast&tasks=unread` 查看提醒及未读示例，`&reminderTask=image` 切换图片提醒，点击提醒在当前工作台内定位对应示例结果；`&case=任意新值` 重置该组未读示例，`popup.html?state=projects&reminder=unread&reminderTask=image&panelClip=1&case=clip` 验证裁剪和滚动已读（快捷界面组件 fixture，不代表真实 content 浮层）。`&notificationDenied=1` 模拟通知权限关闭；设置声音只修改预览偏好，不播放声音。预览不能替代真实扩展中的权限、声音、悬浮和跨域图片验收。 工作台提交边界可用 `?state=projects&generationStartDelay=4000&generationDelay=2000` 验证（主体重演路径为首次生成，提取风格为已有结果）；加 `generationStart=failed` 模拟提交失败，`motion=reduce` 检查静态反馈。提交延迟最多 60 秒，仅作用于示例，不调用模型。
 
 `/content-preview` 用于网页内浮层验收，`?state=invalidated` 可模拟扩展失效提示；同样只使用示例数据。
 

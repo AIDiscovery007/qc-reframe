@@ -77,19 +77,20 @@ test('quick generation cannot bypass dedicated prompts and ignores late response
   assert.equal(pending.current, false);
 });
 
+const tree = ts.createSourceFile('App.tsx', app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let initialize;
+const visit = node => {
+  if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useEffect' && node.arguments[0]?.getText(tree).includes('const initialize = async')) initialize = node.arguments[0].getText(tree);
+  ts.forEachChild(node, visit);
+};
+visit(tree);
+
 test('workspace handoff restores its own source and mode without polling back to another view', async () => {
-  const tree = ts.createSourceFile('App.tsx', app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  let initialize;
-  const visit = node => {
-    if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useEffect' && node.arguments[0]?.getText(tree).includes('const initialize = async')) initialize = node.arguments[0].getText(tree);
-    ts.forEachChild(node, visit);
-  };
-  visit(tree);
   const state = { preferences: {}, selections: [], drafts: {} };
   let refresh;
   const source = { id: 'A', projectId: 'A-project', sourceUrl: '' };
   const context = {
-    workspace: true, location: { search: '?handoff=test', pathname: '/workspace.html' }, history: { replaceState() {} }, URLSearchParams,
+    workspace: true, window: { addEventListener() {}, removeEventListener() {} }, location: { search: '?handoff=test', hash: '', pathname: '/workspace.html' }, history: { replaceState() {} }, URLSearchParams,
     modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, deletingProjects: { current: false },
     request: async message => message.type === 'alchemy:workspace-handoff' ? { selection: source, mode: 'reenact', draft: { instructions: { key: 'unsaved' }, versions: { key: 'new' } } } : { ...source, image: 'A-image' },
     readState: async () => ({ preferences: { paired: true, mode: 'recreate' }, selection: { id: 'B', image: 'B-image' } }),
@@ -134,3 +135,90 @@ test('subject replacement failure clears old input and context changes release u
   assert.match(errors.at(-1), /PNG/);
   assert.equal(availability.at(-1), true);
 });
+
+test('live reminder navigation switches versions without reinitializing and ignores stale results', async () => {
+  const script = extract(app, ['navigateReminder', 'onReminderNavigation']);
+  const state = { preferences: {}, versions: {}, selections: [], drawers: [], tasks: false, history: true, gallery: true };
+  const revision = { current: 0 }, location = { hash: '', pathname: '/workspace.html', search: '?preview=yes' };
+  let resolveSlow;
+  const jobId = '11111111-1111-4111-8111-111111111111', imageId = '22222222-2222-4222-8222-222222222222';
+  const target = { id: jobId, projectId: 'project', mode: 'reenact', generations: [{ id: imageId }] };
+  const ui = evaluate(`let cancelled = false, ownContext = false, previous;\n${script}`, {
+    workspace: true, selectionRevision: revision, URLSearchParams, Date, location,
+    history: { replaceState(_state, _title, url) { state.url = url; location.hash = ''; } },
+    query: async path => path.endsWith('33333333-3333-4333-8333-333333333333') ? new Promise(resolve => { resolveSlow = resolve; }) : target,
+    request: async () => ({ id: 'reference', projectId: 'project', image: 'image' }),
+    setSelection: value => state.selections.push(value), setPreferences: fn => { state.preferences = fn(state.preferences); },
+    setVersions: fn => { state.versions = fn(state.versions); }, setTasksOpen: value => { state.tasks = value; },
+    setHistoryOpen: value => { state.history = value; }, setGalleryOpen: value => { state.gallery = value; },
+    setSettings() {}, setNewProjectOpen() {}, setError: value => { if (value) assert.fail(value); },
+    setTargetGeneration: value => { state.generation = value; }, setTargetPrompt: value => { state.prompt = value; },
+    dispatchDrawer: value => state.drawers.push(value),
+  }, ['navigateReminder', 'onReminderNavigation']);
+  location.hash = `#reminder=task=${jobId}&generation=${imageId}`;
+  ui.onReminderNavigation(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.url, '/workspace.html?preview=yes');
+  assert.equal(state.selections.length, 1); assert.equal(state.preferences.mode, 'reenact');
+  assert.equal(state.versions['project:reenact'], jobId); assert.equal(state.generation.id, imageId);
+  assert.equal(state.drawers.at(-1).open, true); assert.equal(state.history, false); assert.equal(state.gallery, false);
+  await ui.navigateReminder(new URLSearchParams({ task: jobId }));
+  assert.equal(state.prompt.jobId, jobId); assert.equal(state.drawers.at(-1).open, false);
+  const slow = ui.navigateReminder(new URLSearchParams({ task: '33333333-3333-4333-8333-333333333333' }));
+  await ui.navigateReminder(new URLSearchParams({ tasks: 'unread' }));
+  resolveSlow(target); await slow;
+  assert.equal(state.tasks, true); assert.equal(state.selections.length, 2, 'late task must not replace newer navigation');
+});
+
+for (const delayed of ['handoff', 'reference']) for (const kind of ['single', 'batch', 'latest']) {
+  test(`reminders during delayed ${delayed} initialization preserve drafts and navigate to ${kind}`, async () => {
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    let finish, refresh;
+    const gate = new Promise(resolve => { finish = resolve; });
+    const source = { id: 'source', projectId: 'source-project', sourceUrl: '' };
+    const jobId = '11111111-1111-4111-8111-111111111111', generationId = '22222222-2222-4222-8222-222222222222';
+    const target = { id: jobId, projectId: 'target-project', mode: 'style', generations: [{ id: generationId }] };
+    const state = { preferences: {}, versions: {}, selections: [], tasks: false, requests: [] }, listeners = new Map();
+    const location = new URL('https://example.test/workspace.html?handoff=test&keep=value');
+    const handoff = { selection: source, mode: 'reenact', draft: { instructions: { draft: 'unsaved' }, subjectDrafts: { draft: 'subject-image' }, versions: { draft: 'new' } } };
+    const cleanup = evaluate(`const start = ${initialize};`, {
+      workspace: true, location, URLSearchParams,
+      window: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) },
+      history: { replaceState(_state, _title, url) { location.href = new URL(url, location).href; } },
+      modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, deletingProjects: { current: false },
+      request: async message => {
+        if (message.type === 'alchemy:workspace-handoff') { if (delayed === 'handoff') await gate; return handoff; }
+        if (message.id === source.projectId) { if (delayed === 'reference') await gate; return { ...source, image: 'source-image' }; }
+        return { id: 'target', projectId: target.projectId, image: 'target-image' };
+      },
+      query: async path => { state.requests.push(path); return target; },
+      readState: async () => ({ preferences: { paired: true, mode: 'recreate' }, selection: { id: 'unrelated' } }),
+      pollWhileVisible: callback => { refresh = callback; return () => {}; },
+      setPreferences: fn => { state.preferences = fn(state.preferences); }, setSelection: value => state.selections.push(value),
+      setInstructions: value => { state.instructions = value; }, setSubjectDrafts: value => { state.subjects = value; },
+      setVersions: value => { state.versions = typeof value === 'function' ? value(state.versions) : value; },
+      setTasksOpen: value => { state.tasks = value; }, setTargetGeneration: value => { state.generation = value; },
+      setTargetPrompt: value => { state.prompt = value; }, dispatchDrawer: value => { state.drawer = value; },
+      setMultiSubjectDrafts() {}, setPromptDrafts() {}, setLang() {}, setSettings() {}, setNewProjectOpen() {},
+      setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {}, setError: value => { if (value) assert.fail(value); },
+    }, ['start']).start();
+    await tick();
+    if (kind === 'latest') {
+      location.hash = '#reminder=tasks=unread&request=first';
+      location.hash = '#reminder=task=33333333-3333-4333-8333-333333333333&request=second';
+    }
+    location.hash = kind === 'batch' ? '#reminder=tasks=unread&request=latest' : `#reminder=task=${jobId}&generation=${generationId}&request=latest`;
+    finish(); await tick(); await refresh();
+    assert.equal(location.search, '?keep=value'); assert.equal(location.hash, '');
+    assert.equal(state.instructions.draft, 'unsaved'); assert.equal(state.subjects.draft, 'subject-image'); assert.equal(state.versions.draft, 'new');
+    if (kind === 'batch') {
+      assert.equal(state.tasks, true); assert.equal(state.selections.at(-1).id, source.id);
+      assert.equal(state.preferences.mode, 'reenact'); assert.deepEqual(state.requests, []);
+    } else {
+      assert.equal(state.tasks, false); assert.equal(state.selections.at(-1).id, 'target');
+      assert.equal(state.preferences.mode, 'style'); assert.equal(state.generation.id, generationId);
+      assert.equal(state.versions['target-project:style'], jobId); assert.equal(state.drawer.open, true);
+      assert.deepEqual(state.requests, [`/jobs/${jobId}`], 'only the latest reminder is consumed');
+    }
+    cleanup(); assert.equal(listeners.has('hashchange'), false);
+  });
+}

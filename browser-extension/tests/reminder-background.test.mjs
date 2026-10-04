@@ -3,15 +3,16 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { webcrypto } from 'node:crypto';
 
 const compile = async path => ts.transpileModule(await readFile(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const stateCode = await compile('../lib/task-reminders.ts'), serviceCode = await compile('../lib/reminder-background.ts');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const task = (id, extra = {}) => ({ id, jobId: 'prompt', projectId: 'a'.repeat(64), mode: 'style', status: 'completed', createdAt: new Date(2000).toISOString(), hidden: false, ...extra });
 
-async function harness({ denied = false, stored, audioFails = false, paired = false, feed } = {}) {
+async function harness({ denied = false, stored, audioFails = false, paired = false, feed, existingTabs = [], updateFails = false } = {}) {
   let now = 10000, listener, clicked, alarm, serial = 0, tasks = [], contexts = [];
-  const timers = new Map(), notices = [], sounds = [], tabs = [], badges = [];
+  const timers = new Map(), notices = [], sounds = [], tabs = [], badges = [], updates = [], windows = [];
   const stateExports = {};
   class Clock extends Date { static now() { return now; } }
   runInNewContext(stateCode, { exports: stateExports, Date: Clock });
@@ -25,16 +26,21 @@ async function harness({ denied = false, stored, audioFails = false, paired = fa
       onMessage: { addListener(fn) { listener = fn; } }, sendMessage: async message => { sounds.push(message); return audioFails ? { error: 'blocked' } : { ok: true }; } },
     offscreen: { createDocument: async () => { contexts = [{}]; } },
     notifications: { getPermissionLevel: async () => denied ? 'denied' : 'granted', create: async (id, value) => notices.push({ id, ...value }), clear: async () => {}, onClicked: { addListener(fn) { clicked = fn; } } },
-    tabs: { create: async value => tabs.push(value) },
+    tabs: {
+      query: async () => existingTabs,
+      create: async value => { tabs.push(value); existingTabs.push({ ...value, id: 100 + tabs.length, windowId: 1, active: true }); },
+      update: async (id, value) => { if (updateFails) throw new Error('cannot activate'); updates.push({ id, ...value }); Object.assign(existingTabs.find(tab => tab.id === id), value); },
+    },
+    windows: { update: async (id, value) => windows.push({ id, ...value }) },
   };
   const exports = {};
-  runInNewContext(serviceCode, { exports, Date: Clock, URLSearchParams, console,
+  runInNewContext(serviceCode, { exports, Date: Clock, URLSearchParams, console, crypto: webcrypto,
     setTimeout: (fn, delay) => { const id = ++serial; timers.set(id, { fn, at: now + delay }); return id; }, clearTimeout: id => timers.delete(id),
     require: name => name === 'wxt/browser' ? { browser } : name === './task-reminders' ? stateExports : { bridge: async path => feed ? feed(path) : ({ revision: String(now), tasks }) },
   });
   const service = exports.startReminderService(); await tick();
   const message = (type, props = {}, tab = 1) => new Promise((resolve, reject) => listener({ type: `alchemy:reminder-${type}`, ...props }, { id: 'test', url: 'chrome-extension://test/workspace.html', tab: { id: tab } }, reply => reply.error ? reject(new Error(reply.error)) : resolve(reply.value)));
-  return { local, session, notices, sounds, tabs, badges, message, setFeed(next) { feed = next; }, projectsChanged: service.projectsChanged,
+  return { local, session, notices, sounds, tabs, badges, updates, windows, message, setFeed(next) { feed = next; }, projectsChanged: service.projectsChanged,
     async snapshot(next) { tasks = next; local.preferences = { token: 'test-only' }; await service.wake(); },
     async advance(ms) { now += ms; for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.fn(); } await tick(); await message('get'); },
     async click() { clicked('reframe-tasks'); await tick(); },
@@ -177,4 +183,44 @@ test('a repeated wake cannot strand a five-second pending batch behind unchanged
   assert.deepEqual(h.local.taskReminders.pending, []);
   assert.equal(calls.some(path => path.includes('?revision=')), false);
   await h.alarm(); assert.equal(h.notices.length, 1);
+});
+
+const workspaceTab = (id, extra = {}) => ({ id, windowId: id + 10, url: 'chrome-extension://test/workspace.html', active: false, ...extra });
+
+test('reminders reuse their originating workspace without reloading it or touching other tabs', async () => {
+  const h = await harness({ existingTabs: [workspaceTab(2, { active: true }), workspaceTab(1, { url: 'chrome-extension://test/workspace.html?handoff=old' })] });
+  await h.snapshot([task('image', { generationId: 'image' })]);
+  await h.message('open', { id: 'image' });
+  await h.message('open', { id: 'all' });
+  assert.equal(h.tabs.length, 0);
+  assert.deepEqual(h.updates.map(tab => tab.id), [1, 1]);
+  const result = new URL(h.updates[0].url);
+  assert.equal(result.search, '?handoff=old', 'reuse only changes the fragment');
+  assert.equal(new URLSearchParams(result.hash.slice(10)).get('generation'), 'image');
+  assert.ok(h.updates[1].url.includes('#reminder=tasks=unread'));
+  assert.deepEqual(h.windows.map(window => window.id), [11, 11]);
+});
+
+test('desktop single and batch reminders reuse an active workspace across windows', async () => {
+  for (const tasks of [[task('prompt')], [task('prompt'), task('image', { generationId: 'image' })]]) {
+    const h = await harness({ existingTabs: [workspaceTab(1), workspaceTab(2, { active: true })] });
+    await h.snapshot(tasks); await h.advance(5000); await h.click();
+    assert.equal(h.tabs.length, 0); assert.equal(h.updates[0].id, 2);
+    assert.ok(h.updates[0].url.includes(tasks.length === 1 ? '#reminder=task=prompt' : '#reminder=tasks=unread'));
+    assert.equal(h.windows[0].id, 12);
+  }
+});
+
+test('rapid reminder clicks create only one workspace and repeated targets get distinct navigations', async () => {
+  const h = await harness({ existingTabs: [workspaceTab(7, { url: 'chrome-extension://test/workspace.html.other' })] });
+  await h.snapshot([task('prompt')]);
+  await Promise.all([h.message('open', { id: 'prompt' }), h.message('open', { id: 'prompt' }), h.message('open', { id: 'prompt' })]);
+  assert.equal(h.tabs.length, 1); assert.equal(h.updates.length, 2);
+  assert.notEqual(h.updates[0].url, h.updates[1].url);
+});
+
+test('activation failure reports an error instead of creating a duplicate workspace', async () => {
+  const h = await harness({ existingTabs: [workspaceTab(1)], updateFails: true });
+  await assert.rejects(h.message('open', { id: 'all' }), /cannot activate/);
+  assert.equal(h.tabs.length, 0);
 });

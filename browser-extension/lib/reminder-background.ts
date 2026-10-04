@@ -78,16 +78,29 @@ export function startReminderService() {
     clearTimeout(flushTimer);
     if (state.pending.length) flushTimer = setTimeout(() => void wake(), Math.max(0, state.due - Date.now()));
   };
-  const open = async (id: string) => {
+  const openWorkspace = async (params: URLSearchParams, sourceTab?: number) => {
+    const base = browser.runtime.getURL('/workspace.html');
+    const tabs = (await browser.tabs.query({ url: `${base}*` })).filter(tab =>
+      (tab.pendingUrl || tab.url)?.split(/[?#]/)[0] === base && tab.id != null);
+    tabs.sort((a, b) => Number(b.id === sourceTab) - Number(a.id === sourceTab)
+      || Number(b.active) - Number(a.active) || (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    const tab = tabs[0];
+    if (!tab) { await browser.tabs.create({ url: `${base}?${params}` }); return; }
+    // Only change the fragment: keep the live React tree and any unsaved drafts.
+    params.set('request', crypto.randomUUID());
+    await browser.tabs.update(tab.id!, { active: true, url: `${(tab.pendingUrl || tab.url)!.split('#')[0]}#reminder=${params}` });
+    await browser.windows.update(tab.windowId, { focused: true });
+  };
+  const open = async (id: string, sourceTab?: number) => {
     if (id === 'all') {
-      await browser.tabs.create({ url: `${browser.runtime.getURL('/workspace.html')}?tasks=unread` });
+      await openWorkspace(new URLSearchParams({ tasks: 'unread' }), sourceTab);
       return;
     }
     const state = await read();
     const target = (await shown(state.unread)).find(item => item.id === id);
     if (!target) throw new Error('这条提醒已查看或项目已隐藏，请在任务中心查看。');
     const params = new URLSearchParams({ task: target.jobId, ...(target.generationId ? { generation: target.generationId } : {}) });
-    await browser.tabs.create({ url: `${browser.runtime.getURL('/workspace.html')}?${params}` });
+    await openWorkspace(params, sourceTab);
   };
   const wake = async () => {
     if (watching) { again = true; return; }
@@ -153,7 +166,7 @@ export function startReminderService() {
       }
       if (toast) toast = toast.filter(item => state.unread.some(unread => unread.id === item.id && !unread.hidden));
       if (message.type === 'alchemy:reminder-test') { await audio(state.preferences); await browser.storage.local.remove('reminderAudioError'); }
-      if (message.type === 'alchemy:reminder-open') { if (typeof message.id !== 'string') throw new Error('无效任务'); await open(message.id); }
+      if (message.type === 'alchemy:reminder-open') { if (typeof message.id !== 'string') throw new Error('无效任务'); await open(message.id, sender.tab?.id); }
       const errors = await browser.storage.local.get(['reminderConnectionError', 'reminderAudioError']);
       return { unread: await shown(state.unread), preferences: state.preferences, desktop: await permission(), audioSupported,
         connectionError: errors.reminderConnectionError || '', audioError: errors.reminderAudioError || '', toast };
@@ -167,7 +180,7 @@ export function startReminderService() {
       const state = await read();
       const targets = (await shown(state.unread)).filter(item => Array.isArray(reminderTarget) && reminderTarget.includes(item.id));
       if (targets.length === 1) await open(targets[0]!.id);
-      else if (targets.length) await browser.tabs.create({ url: `${browser.runtime.getURL('/workspace.html')}?tasks=unread` });
+      else if (targets.length) await open('all');
       await browser.notifications.clear(id);
     }).catch(console.error);
   });

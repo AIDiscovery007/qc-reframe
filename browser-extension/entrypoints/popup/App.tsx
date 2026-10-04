@@ -214,27 +214,41 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       } catch (e) { if (!cancelled) setError((e as Error).message); }
       return 1500;
     };
+    const navigateReminder = async (params: URLSearchParams) => {
+      if (!workspace) return;
+      const revision = ++selectionRevision.current;
+      setSettings(false); setNewProjectOpen(false);
+      if (params.get("tasks") === "unread") { setTasksOpen(true); return; }
+      const taskId = params.get("task");
+      if (!taskId || !/^[\da-f-]{36}$/.test(taskId)) return;
+      ownContext = true;
+      try {
+        const target = await query<Job>(`/jobs/${taskId}`);
+        const reference = await request<Selection>({ type: "alchemy:project-reference", id: target.projectId });
+        if (cancelled || revision !== selectionRevision.current) return;
+        previous = reference; setSelection(reference);
+        setHistoryOpen(false); setGalleryOpen(false); setTasksOpen(false); setError("");
+        setPreferences(value => ({ ...value, mode: target.mode }));
+        setVersions(value => ({ ...value, [`${target.projectId}:${target.mode}`]: target.id }));
+        const generationId = params.get("generation");
+        const image = !!generationId && !!target.generations?.some(item => item.id === generationId);
+        if (image) setTargetGeneration({ jobId: target.id, id: generationId! });
+        else setTargetPrompt({ jobId: target.id, request: Date.now() });
+        dispatchDrawer({ type: "toggle", key: `${target.projectId}:${target.mode}:${target.id}`, open: image, seen: "" });
+      } catch (error) { if (!cancelled && revision === selectionRevision.current) setError((error as Error).message); }
+    };
+    const onReminderNavigation = () => {
+      if (!workspace || !location.hash.startsWith("#reminder=")) return;
+      const params = new URLSearchParams(location.hash.slice("#reminder=".length));
+      history.replaceState(null, "", location.pathname + location.search);
+      void navigateReminder(params);
+    };
     const initialize = async () => {
       const params = new URLSearchParams(location.search);
-      const taskId = workspace && params.get("task");
-      if (workspace && params.get("tasks") === "unread") { setTasksOpen(true); history.replaceState(null, "", location.pathname); }
-      if (taskId && /^[\da-f-]{36}$/.test(taskId)) {
-        ownContext = true;
-        try {
-          const target = await query<Job>(`/jobs/${taskId}`);
-          const reference = await request<Selection>({ type: "alchemy:project-reference", id: target.projectId });
-          if (cancelled) return;
-          previous = reference; setSelection(reference);
-          setPreferences(value => ({ ...value, mode: target.mode }));
-          setVersions(value => ({ ...value, [`${target.projectId}:${target.mode}`]: target.id }));
-          const generationId = params.get("generation");
-          if (generationId && target.generations?.some(item => item.id === generationId)) setTargetGeneration({ jobId: target.id, id: generationId });
-          else {
-            setTargetPrompt({ jobId: target.id, request: Date.now() });
-            dispatchDrawer({ type: "toggle", key: `${target.projectId}:${target.mode}:${target.id}`, open: false, seen: "" });
-          }
-          history.replaceState(null, "", location.pathname);
-        } catch (error) { if (!cancelled) setError((error as Error).message); }
+      if (workspace && (params.has("task") || params.get("tasks") === "unread")) {
+        await navigateReminder(params);
+        for (const key of ["task", "tasks", "generation"]) params.delete(key);
+        history.replaceState(null, "", location.pathname + (params.size ? `?${params}` : "") + location.hash);
       }
       const id = workspace && params.get("handoff");
       if (id) {
@@ -261,7 +275,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
               }
             } else setSelection({ ...source, error: "参考图尚未保存，请重新上传" });
           }
-          history.replaceState(null, "", location.pathname);
+          params.delete("handoff");
+          history.replaceState(null, "", location.pathname + (params.size ? `?${params}` : "") + location.hash);
         } catch (e) { if (!cancelled) setError((e as Error).message); }
       }
       if (!workspace) {
@@ -272,10 +287,13 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           quickRestored = true;
         } catch (error) { if (!cancelled) setDraftError(`草稿恢复失败：${(error as Error).message}`); }
       }
-      if (!cancelled) stopPolling = pollWhileVisible(refresh);
+      if (!cancelled) {
+        stopPolling = pollWhileVisible(refresh);
+        if (workspace) { window.addEventListener("hashchange", onReminderNavigation); onReminderNavigation(); }
+      }
     };
     void initialize();
-    return () => { cancelled = true; stopPolling(); };
+    return () => { cancelled = true; stopPolling(); window.removeEventListener("hashchange", onReminderNavigation); };
   }, []);
 
   // Older extension selections join the same durable template project on first open.
