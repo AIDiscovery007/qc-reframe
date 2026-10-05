@@ -77,3 +77,14 @@
 - 提交前核对当前分支codex/creative-workspace、逐项改动范围、忽略边界与diff check；475项全量测试及各轮独立复核证据沿用原任务，不为纯提交重复调用模型或测试。私有会话快照、原型探针/截图、构建输出和本地运行数据保持忽略。
 
 - 提交成功：`c7aa33753abb6597616077349f29246d84cc0a26`，feat: add session-based creation and concrete body prompts；47文件，包含两项功能、测试、文档及协作交接。各执行者原任务已补整合提交号，随后仅提交此交付记录。未推送、未发布、未升版本或改标签；此前实际模型/扩展重载限制保持。
+
+## 2026-10-05 · 会话弹窗已选项置顶
+
+- 用户在实际扩展截图批注中要求“应该始终把已勾选的会话区分出来，放在顶部方便用户快速看”。已核对当前UIUX登记及工作区（HEAD9c8e6e1，开工时干净）。
+- 窄改SessionPicker/CSS，将draft已选项作为顶部独立区域，搜索/分页/归档切换保持可见，支持直接取消勾选，候选不重复；保留选择顺序、上限、确认/取消及保存保护。外部工作台、RPC和模型链路不变。
+- 已派当前UIUX01a10aa7-1bd6-75d2-853b-2553005db757执行，工具isError=false；本地修改与必要验证，不延续上轮已完成的提交授权，不推送发布、不调模型或重启bridge。状态执行中。
+- 主监工已按modern-web-guidance检索并读取accessibility指南；复核原生checkbox、可辨分组、焦点连续性和滚动，914×1034与窄屏布局。先查3处定向文件，无需新增探索子agent。
+- 首轮复核：独立5项SessionPicker测试通过，生产构建fixture验证分页、搜索无结果仍保留已选、归档切换、键盘取消和焦点转移正常；390×844五项可见、确认按钮可见。发现长标题令grid行宽366.64px超过选区可用宽度，文字未在卡片内省略；已向当前UIUX送达最小返修，工具isError=false，待重建复核。
+- 最终复核通过：grid列改minmax(0,1fr)，重建后390×844五行均300px、与选区列表相符，长标题正确省略；914×1034五项置顶及候选去重通过，截图browser-extension/prototypes/session-context/screenshots/supervisor-selected-sessions-914.png。执行者build/compile/478项全量通过，监工独立5项组件测试与diff check通过。原执行任务已记已复核整合至工作区；无整合提交、推送发布、bridge重启、模型调用或实际扩展重载。复核通知已送达当前UIUX会话01a10aa7-1bd6-75d2-853b-2553005db757，工具isError=false，无需回执。
+
+- Git交付（2026-10-05）：用户明确要求“提交”，监工已将顶部已选会话功能、测试及使用说明提交为 `9336cb1af095e28fe0a4535755cc5555f573634e`（fix: keep selected sessions visible above candidates），分支codex/creative-workspace。沿用上一轮build/compile/478项与UI复核证据，本轮暂存差异及diff check通过；仅本地提交，未推送、未发布、未升版本。协作日志另作记录提交。
