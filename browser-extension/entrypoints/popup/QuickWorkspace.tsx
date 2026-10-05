@@ -9,8 +9,8 @@ import Icon from "./Icon";
 
 const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演" };
 
-export default function QuickWorkspace({ contextKey, selection, title, mode, subject, instruction, job, disabled, modeDisabled, reverseDisabled, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, generationDisabled, generationHint }: {
-  contextKey: string; selection?: Selection; title?: string; mode: Mode; subject: string; instruction: string; job?: Job;
+export default function QuickWorkspace({ revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, instruction, job, disabled, modeDisabled, reverseDisabled, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, generationDisabled, generationHint }: {
+  revealPrompt?: number; targetGeneration?: string; contextKey: string; selection?: Selection; title?: string; mode: Mode; subject: string; instruction: string; job?: Job;
   generationHint?: string; generationDisabled: boolean; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; status?: string; stale: boolean; cancelling: boolean; copied: boolean; lang: "zh" | "en"; versions: ReactNode;
   onMode(mode: Mode): void; onSubject(image: string): void | Promise<void>; onAvailability(available: boolean): void;
   onInstruction(value: string): void; onReference(file?: File): void; onRotateReference(image: string): Promise<void>; onSwap(): void;
@@ -37,6 +37,7 @@ export default function QuickWorkspace({ contextKey, selection, title, mode, sub
     }
   }, [job?.id, job?.status]);
   useEffect(() => { select("reference"); setUploading(false); setError(""); return () => { revision.current++; pendingInput.current = false; onAvailability(true); }; }, [contextKey]);
+  useEffect(() => { if (revealPrompt !== undefined) setPromptOpen(true); else if (targetGeneration) setPromptOpen(false); }, [revealPrompt, targetGeneration]);
   const saveSubject = async (read: () => Promise<string>, rethrow = false) => {
     if (disabled || pendingInput.current) return false;
     const attempt = ++revision.current, context = contextKey;
@@ -101,13 +102,13 @@ export default function QuickWorkspace({ contextKey, selection, title, mode, sub
       <p className="quick-prompt-text" data-reminder-task={job.id}>{lang === "zh" ? job.result.promptZh : job.result.promptEn}</p>
       <button className="text-button" onClick={onWorkspace}>完整编辑<Icon name="arrow" /></button>
     </section>}
-    {job && <QuickResult key={job.id} job={job} lang={lang} subject={subject} disabled={generationDisabled || uploading} hint={generationHint} onSubject={() => subjectFile.current?.click()} onReverse={onReverse} onUpdate={onUpdate} onWorkspace={onWorkspace} />}
+    {job && <QuickResult key={job.id} targetGeneration={targetGeneration} job={job} lang={lang} subject={subject} disabled={generationDisabled || uploading} hint={generationHint} onSubject={() => subjectFile.current?.click()} onReverse={onReverse} onUpdate={onUpdate} onWorkspace={onWorkspace} />}
   </section>;
 }
 
-function QuickResult({ job, lang, subject, disabled, hint, onSubject, onReverse, onUpdate, onWorkspace }: { hint?: string; onSubject(): void; onReverse(): void; job: Job; lang: "zh" | "en"; subject: string; disabled: boolean; onUpdate(job: Job): void; onWorkspace(): void }) {
+function QuickResult({ targetGeneration, job, lang, subject, disabled, hint, onSubject, onReverse, onUpdate, onWorkspace }: { targetGeneration?: string; hint?: string; onSubject(): void; onReverse(): void; job: Job; lang: "zh" | "en"; subject: string; disabled: boolean; onUpdate(job: Job): void; onWorkspace(): void }) {
   const running = job.generations?.find(item => item.status === "running");
-  const generation = running || job.generations?.at(-1);
+  const generation = job.generations?.find(item => item.id === targetGeneration) || running || job.generations?.at(-1);
   const generic = job.mode === "style" && !job.reenact;
   const incomplete = /\[SUBJECT\]/i.test(lang === "zh" ? job.result?.promptZh || "" : job.result?.promptEn || "");
   const inputsReady = job.mode === "recreate" || !!subject;

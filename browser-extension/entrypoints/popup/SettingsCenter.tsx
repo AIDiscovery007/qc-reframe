@@ -1,3 +1,4 @@
+import ServiceRestart from "./ServiceRestart";
 import { ReminderSettings } from "./TaskReminders";
 import { showMotionDialog } from "../../lib/motion-dialog";
 import { pollWhileVisible } from "../../lib/visible-poll";
@@ -164,6 +165,7 @@ export default function SettingsCenter({ connected, serviceBusy, onClose, onConn
           {pairError && <div className="settings-info settings-error" role="alert">{pairError}</div>}
           <details className="settings-detail" open={!connected}><summary>如何启动本机服务？</summary><p className="fine">在插件目录打开终端，启动服务，再获取配对码。</p><code>npm start<br />npm run pair</code></details>
         </section>}
+        <div hidden={section !== "connection"}><ServiceRestart connected={connected} busy={serviceBusy || updating || !!pending} onConnected={onConnected} /></div>
         {section === "storage" && <section aria-labelledby="storage-title">
           <h3 id="storage-title">本地数据</h3>
           <dl className="settings-facts"><div><dt>图片</dt><dd><code>.local/images/</code></dd></div><div><dt>项目与任务</dt><dd><code>.local/records/</code></dd></div><div><dt>配对与设置</dt><dd><code>.local/config/</code></dd></div><div><dt>运行文件</dt><dd><code>.local/logs/ · .local/runtime/</code></dd></div></dl>

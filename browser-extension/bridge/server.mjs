@@ -1,3 +1,4 @@
+import { prepareRestart } from "./restart.mjs";
 import { createTaskFeed } from "./task-feed.mjs";
 import { createServer } from "node:http";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -101,10 +102,13 @@ export async function createBridge({
   generator = runGeneration,
   generationSkillPath = imagegenSkillPath(),
   allowShutdown = false,
+  restart,
+  restartId,
   imageAction = openGeneratedImage,
   models,
   cli,
 } = {}) {
+  const instanceId = randomUUID();
   const paths = await migrateStorage(dataDir);
   models ||= await createModelStore({ dataDir: paths.config, cwd: root });
   cli ||= createCliManager({ onUpdated: () => models.reset() });
@@ -286,6 +290,7 @@ export async function createBridge({
           version,
           projectsRevision: projects.revision,
           managed: allowShutdown,
+          instanceId, restartId, canRestart: allowShutdown && !!restart,
           skill: skill || null,
           ready: Boolean(skill),
           active: controllers.size + Number(models.busy) + Number(cliBusy()),
@@ -324,6 +329,29 @@ export async function createBridge({
         if (path.endsWith("/verify") && (typeof body.model !== "string" || body.model.length > 200)) throw bad("请选择有效模型");
         try { json(path.endsWith("/verify") ? 202 : 200, path.endsWith("/verify") ? await models.start(body.model, body.reasoningEffort) : await models.refresh()); }
         catch (error) { throw bad(error.message, error.status || 503); }
+        return;
+      }
+      if (req.method === "POST" && path === "/restart") {
+        if (!allowShutdown || !restart) throw bad("此服务不支持插件内重启。请在原终端停止，再在插件目录运行 npm start。", 409);
+        if (controllers.size || models.busy || cliBusy()) throw bad("任务、模型验证或 Codex 操作执行中，请等待完成后再重启。", 409);
+        const nextRestartId = randomUUID();
+        let commit;
+        try { commit = await restart({ root, dataDir, port: server.address().port, instanceId, restartId: nextRestartId, skillPath, generationSkillPath }); }
+        catch { throw bad("重启准备失败，原服务仍在运行。请查看本机服务日志后重试。", 503); }
+        shuttingDown = true;
+        let committed = false;
+        const finishRestart = () => {
+          if (committed) return;
+          committed = true;
+          taskFeed.close();
+          server.close();
+          server.closeIdleConnections();
+          commit();
+        };
+        res.once("finish", finishRestart);
+        res.once("close", finishRestart);
+        json(202, { previousInstanceId: instanceId, restartId: nextRestartId });
+        if (res.destroyed) finishRestart();
         return;
       }
       if (req.method === "POST" && path === "/shutdown" && allowShutdown) {
@@ -838,7 +866,7 @@ if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const { server, tokenPath } = await createBridge({ allowShutdown: process.env.ALCHEMY_MANAGED === "1" });
+  const { server, tokenPath } = await createBridge({ allowShutdown: process.env.ALCHEMY_MANAGED === "1", restart: prepareRestart, restartId: process.env.ALCHEMY_RESTART_ID });
   const port = Number(process.env.ALCHEMY_PORT || 43187);
   server.on("error", (error) => {
     console.error(

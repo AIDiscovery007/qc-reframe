@@ -9,3 +9,4 @@
 | [executor](executor.md) | [提示音候选设计](codex://threads/01a1078c-94ed-7632-bb63-91922b02679b) | 调研提示音资源并制作试听候选。 | [工作日志](../../agent-logs/01a1078c-94ed-7632-bb63-91922b02679b.md) |
 | [executor](executor.md) | [项目输入调整语义](codex://threads/01a1078f-0023-76c3-bebf-253fda48e823) | 修复输入调整的项目归属、持久化及相关状态隔离。 | [工作日志](../../agent-logs/01a1078f-0023-76c3-bebf-253fda48e823.md) |
 | [uiux-engineer](uiux-engineer.md) | [编辑空间原型](codex://threads/01a10a0e-1659-7322-a91a-26b49af3ce99) | 提示词与指令编辑空间的设计、接入和动效验证。 | [工作日志](../../agent-logs/01a10a0e-1659-7322-a91a-26b49af3ce99.md) |
+| [executor](executor.md) | [工作台入口修复](codex://threads/01a1071d-d53b-7e81-bcdc-992cb97080e8) | 修复工作台入口复用及提醒导航。 | [工作日志](../../agent-logs/01a1071d-d53b-7e81-bcdc-992cb97080e8.md) |

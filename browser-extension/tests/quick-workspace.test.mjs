@@ -17,7 +17,7 @@ function extract(source, names) {
 }
 function evaluate(source, globals, names) {
   const original = globals;
-  globals = { setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, setInputRevisions() {}, ...globals,
+  globals = { noticeNavigation: { current: undefined }, setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, setInputRevisions() {}, ...globals,
     setProjectMode: original.setProjectMode || ((_id, mode) => original.setPreferences(value => ({ ...value, mode }))),
     request: async message => message.type === 'alchemy:project-views' ? original.projectViews || {} : original.request(message),
   };
@@ -348,4 +348,83 @@ for (const draftRevision of [7, 8]) test(`ordinary quick initialization validate
   assert.equal(state.prompts.historicalJob.promptZh, 'unsaved historical prompt', 'prompt edits belong to immutable jobs, not the current input revision');
   assert.equal(state.versions['A:style'], 'new');
   cleanup();
+});
+
+
+test('toast and unread entries route inside every Reframe surface without calling the background or changing the host URL', async () => {
+  const script = extract(app, ['openNotice']);
+  for (const surface of [{ workspace: true }, { workspace: false }, { workspace: false, embedded: true }]) {
+    const routes = [], errors = [];
+    const noticeNavigation = { current: async params => routes.push(Object.fromEntries(params)) };
+    const ui = evaluate(script, { ...surface, noticeNavigation, URLSearchParams,
+      request: () => assert.fail('must not open a tab'), location: new Proxy({}, { set() { assert.fail('must not change host URL'); } }),
+      setError: error => errors.push(error) }, ['openNotice']);
+    ui.openNotice({ id: 'image', jobId: 'job', generationId: 'image' });
+    ui.openNotice({ id: 'prompt', jobId: 'job' }); ui.openNotice();
+    assert.deepEqual(routes, [{ task: 'job', generation: 'image' }, { task: 'job' }, { tasks: 'unread' }]);
+    noticeNavigation.current = undefined; ui.openNotice();
+    assert.match(errors[0], /正在恢复界面/);
+  }
+});
+
+test('lightweight reminder navigation keeps its local version through polling, preserves drafts and accepts a new collected selection', async () => {
+  const state = { versions: {}, preferences: {}, instructions: {}, subjects: {}, prompts: {}, multi: {}, errors: [] };
+  const setter = key => value => { state[key] = typeof value === 'function' ? value(state[key]) : value; };
+  let refresh, finishRead, delayRead = false, globalSelection = { id: 'A', projectId: 'A', image: 'A-image' };
+  const jobId = '11111111-1111-4111-8111-111111111111', generationId = '22222222-2222-4222-8222-222222222222';
+  const noticeNavigation = { current: undefined }, revision = { current: 0 };
+  const target = { id: jobId, projectId: 'B', mode: 'recreate', generations: [{ id: generationId }, { id: 'newer' }] };
+  const cleanup = evaluate(`const start = ${initialize};`, {
+    workspace: false, noticeNavigation, URLSearchParams, Date,
+    location: { search: '?website=yes', hash: '#pinterest-section', pathname: '/pin/123' },
+    history: { replaceState() { assert.fail('must not rewrite the website URL'); } },
+    window: { addEventListener() { assert.fail('must not listen to the website hash'); }, removeEventListener() {} },
+    modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: revision, deletingProjects: { current: false },
+    request: async message => {
+      if (message.type === 'alchemy:quick-draft') return { draft: { instructions: { 'A:style:new': 'keep A', 'B:recreate:new': 'keep B' }, promptDrafts: { edited: { promptZh: 'unsaved' } } } };
+      if (message.type === 'alchemy:project-reference') return { id: 'B', projectId: 'B', image: 'B-image', inputRevision: 3 };
+      assert.fail(message.type);
+    },
+    query: async () => target,
+    readState: async () => {
+      if (delayRead) await new Promise(resolve => { finishRead = resolve; });
+      return { preferences: { paired: true, mode: 'style' }, selection: globalSelection };
+    },
+    pollWhileVisible: callback => { refresh = callback; return () => {}; },
+    setVersions: setter('versions'), setPreferences: setter('preferences'), setSelection: setter('selection'),
+    setInstructions: setter('instructions'), setSubjectDrafts: setter('subjects'), setMultiSubjectDrafts: setter('multi'), setPromptDrafts: setter('prompts'),
+    setTargetGeneration: setter('generation'), setTargetPrompt: setter('prompt'), setTasksOpen: setter('tasks'),
+    setLang() {}, setSettings() {}, setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {}, dispatchDrawer() {},
+    setError: value => { if (value) state.errors.push(value); }, setDraftError: value => assert.fail(value),
+  }, ['start']).start();
+  await new Promise(resolve => setImmediate(resolve)); await refresh();
+  await noticeNavigation.current(new URLSearchParams({ task: jobId, generation: generationId }));
+  assert.equal(state.selection.projectId, 'B'); assert.equal(state.versions['B:recreate'], jobId);
+  assert.equal(state.generation.id, generationId); assert.equal(state.prompt, undefined);
+  await refresh(); await refresh();
+  globalSelection = { ...globalSelection, jobId: 'finished-A', inputRevision: 4 }; await refresh();
+  assert.equal(state.selection.projectId, 'B', 'unchanged global A must not override locally selected B');
+  assert.equal(state.instructions['A:style:new'], 'keep A'); assert.equal(state.instructions['B:recreate:new'], 'keep B');
+  assert.equal(state.prompts.edited.promptZh, 'unsaved');
+  await noticeNavigation.current(new URLSearchParams({ task: jobId }));
+  const first = state.prompt.request;
+  await noticeNavigation.current(new URLSearchParams({ task: jobId }));
+  assert.ok(state.prompt.request > first); assert.equal(state.generation, undefined);
+  await noticeNavigation.current(new URLSearchParams({ tasks: 'unread' })); assert.equal(state.tasks, true);
+  delayRead = true;
+  const stalePoll = refresh();
+  await noticeNavigation.current(new URLSearchParams({ task: jobId }));
+  globalSelection = { id: 'C', projectId: 'C', image: 'C-image' };
+  finishRead(); await stalePoll;
+  assert.equal(state.selection.projectId, 'B', 'a stale poll must not override newer local navigation');
+  delayRead = false; await refresh();
+  assert.equal(state.selection.projectId, 'C', 'a new image collection must still reach the panel');
+  assert.deepEqual(state.errors, []); cleanup(); assert.equal(noticeNavigation.current, undefined);
+});
+
+test('quick result honors a reminded historical generation before running/latest fallbacks', () => {
+  const script = extract(quick, ['running', 'generation']);
+  const job = { generations: [{ id: 'old', status: 'completed' }, { id: 'running', status: 'running' }, { id: 'latest', status: 'completed' }] };
+  assert.equal(evaluate(script, { job, targetGeneration: 'old' }, ['generation']).generation.id, 'old');
+  assert.equal(evaluate(script, { job, targetGeneration: undefined }, ['generation']).generation.id, 'running');
 });

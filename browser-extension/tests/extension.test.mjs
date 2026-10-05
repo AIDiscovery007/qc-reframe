@@ -196,6 +196,7 @@ async function background(fetch = async () => ({ ok: true, json: async () => ({ 
     alarms: { create: async () => {}, onAlarm: { addListener() {} } },
     runtime: {
       id: "test",
+      getContexts: async () => [],
       getURL: (path) => `chrome-extension://test${path}`,
       onInstalled: {
         addListener: (fn) => {
@@ -290,7 +291,50 @@ test("background starts and opens results when sidePanel API is absent", async (
     throw new Error("No content script");
   };
   assert.equal((await send()).ok, true);
-  assert.equal(tabs[0].url, "chrome-extension://test/popup.html?view=tab");
+  assert.ok(tabs[0].url.startsWith("chrome-extension://test/workspace.html?handoff="));
+});
+
+for (const alreadyOpen of [true, false]) test(`unavailable webpage panel hands each selection to one workspace (existing=${alreadyOpen})`, async () => {
+  let projectId = 'a'.repeat(64);
+  const { handlers, chrome, tabs, sessionStorage } = await background(async url => {
+    if (url.endsWith('/projects')) return { ok: true, json: async () => ({ id: projectId }) };
+    if (url.endsWith('/reference')) return { ok: true, json: async () => ({ id: projectId, projectId, image: 'data:image/png;base64,iVBORw==', inputRevision: 2 }) };
+    return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'Content-Type': 'image/png' } });
+  }, {
+    Blob, Uint8Array, btoa,
+    createImageBitmap: async () => ({ width: 320, height: 400, close() {} }),
+    OffscreenCanvas: class {
+      getContext() { return { drawImage() {} }; }
+      async convertToBlob() { return new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }); }
+    },
+  });
+  const live = alreadyOpen ? [{ id: 20, windowId: 3, url: 'chrome-extension://test/workspace.html' }] : [];
+  const updates = [], stored = { preferences: { token: 'test' }, [`projectView:${projectId}`]: { mode: 'recreate' } };
+  chrome.storage.local.get = async () => stored;
+  chrome.storage.local.set = async value => Object.assign(stored, value);
+  chrome.tabs.sendMessage = async () => { throw new Error('No receiving content script'); };
+  chrome.tabs.query = async () => live;
+  chrome.tabs.create = async tab => { tabs.push(tab); live.push({ ...tab, id: 20, windowId: 3 }); };
+  chrome.tabs.update = async (id, update) => { assert.equal(id, 20); updates.push(update); Object.assign(live[0], update); };
+  chrome.windows = { update: async () => {} };
+  const sender = { id: 'test', frameId: 0, tab: { id: 4, windowId: 1, url: 'https://example.com' } };
+  for (const next of ['a', 'b', 'a']) {
+    projectId = next.repeat(64);
+    const reply = await new Promise(resolve => handlers.message({ type: 'alchemy:select', target: { src: 'https://example.com/image.png' } }, sender, resolve));
+    assert.equal(reply.ok, true);
+    const url = new URL(live[0].url), params = url.hash ? new URLSearchParams(url.hash.slice('#workspace='.length)) : url.searchParams;
+    const handoff = sessionStorage['workspace:' + params.get('handoff')];
+    assert.equal(handoff.selection.projectId, projectId);
+    assert.equal(handoff.selection.id, stored.selection.id);
+    assert.equal(handoff.selection.inputRevision, 2);
+    assert.equal(handoff.mode, next === 'a' ? 'recreate' : 'style');
+  }
+  assert.equal(tabs.length, alreadyOpen ? 0 : 1);
+  assert.equal(updates.length, alreadyOpen ? 3 : 2);
+  chrome.tabs.update = async () => { throw new Error('workspace unavailable'); };
+  const reply = await new Promise(resolve => handlers.message({ type: 'alchemy:select', target: { src: 'https://example.com/image.png' } }, sender, resolve));
+  assert.match(reply.error, /workspace unavailable/);
+  assert.equal(tabs.length, alreadyOpen ? 0 : 1);
 });
 
 test("reruns the current or historical image with the explicitly selected mode", async () => {
@@ -953,14 +997,17 @@ test("all workspace entry points reuse a matching live tab and keep handoffs pri
   const { handlers, chrome, tabs, sessionStorage } = await background();
   const existing = { id: 20, windowId: 3, active: false, url: 'chrome-extension://test/workspace.html?keep=yes' };
   const updates = [], windows = [];
-  chrome.tabs.query = async () => [{ id: 99, url: 'chrome-extension://test/workspace.html.backup' }, existing];
+  chrome.tabs.query = async filter => filter.url ? [] : [{ id: 99, url: 'chrome-extension://test/workspace.html.backup' },
+    { id: existing.id, windowId: existing.windowId, active: existing.active }];
+  chrome.runtime.getContexts = async () => [{ tabId: existing.id, documentUrl: existing.url }];
   chrome.tabs.update = async (id, update) => { updates.push({ id, ...update }); Object.assign(existing, update); };
   chrome.windows = { update: async (id, update) => windows.push({ id, ...update }) };
   const popup = { id: 'test', url: 'chrome-extension://test/popup.html' };
   const send = (message, sender = popup) => new Promise(resolve => handlers.message(message, sender, resolve));
   for (const view of [undefined, 'settings', 'tasks']) {
     const draft = { instructions: { key: 'private draft' } };
-    assert.equal((await send({ type: 'alchemy:open-workspace', view, draft })).ok, true);
+    const sender = view === 'tasks' ? { id: 'test', frameId: 0, url: 'https://www.pinterest.com/', tab: { id: 8, url: 'https://www.pinterest.com/' } } : popup;
+    assert.equal((await send({ type: 'alchemy:open-workspace', view, draft }, sender)).ok, true);
     const update = updates.at(-1), url = new URL(update.url), route = new URLSearchParams(url.hash.slice('#workspace='.length));
     assert.equal(update.id, 20); assert.equal(update.active, true); assert.equal(url.search, '?keep=yes');
     assert.equal(route.get('view'), view || null);
@@ -1152,4 +1199,33 @@ for (const failure of ['get', 'set']) test(`durable input save succeeds despite 
     assert.equal(result.value.inputRevision, 8);
     assert.equal(result.value.inputs.style.instruction, 'saved');
   }
+});
+
+
+test("service restart uses only the authenticated fixed endpoint and rejects untrusted senders", async () => {
+  const calls = [];
+  const { handlers } = await background(async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, json: async () => ({ previousInstanceId: "old", restartId: "ticket" }) };
+  });
+  const sender = { id: "test", url: "chrome-extension://test/workspace.html" };
+  const message = { type: "alchemy:service-restart", path: "/shutdown", command: "unexpected", dataDir: "/unexpected" };
+  assert.equal(handlers.message(message, { ...sender, id: "other" }, () => assert.fail("untrusted reply")), undefined);
+  assert.equal(calls.length, 0);
+  const response = await new Promise(resolve => handlers.message(message, sender, resolve));
+  assert.equal(response.value.restartId, "ticket");
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.endsWith("/restart"));
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.headers.Authorization, "Bearer test");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {});
+});
+
+test("service restart explains an old bridge route and preserves actionable server failures", async () => {
+  let error = "Not found";
+  const { handlers } = await background(async () => ({ ok: false, json: async () => ({ error }) }));
+  const send = () => new Promise(resolve => handlers.message({ type: "alchemy:service-restart" }, { id: "test", url: "chrome-extension://test/popup.html" }, resolve));
+  assert.match((await send()).error, /npm stop.*npm start/);
+  error = "任务执行中，请等待完成";
+  assert.equal((await send()).error, error);
 });

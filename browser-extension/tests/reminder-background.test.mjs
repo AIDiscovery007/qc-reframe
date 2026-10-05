@@ -10,7 +10,7 @@ const stateCode = await compile('../lib/task-reminders.ts'), serviceCode = await
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const task = (id, extra = {}) => ({ id, jobId: 'prompt', projectId: 'a'.repeat(64), mode: 'style', status: 'completed', createdAt: new Date(2000).toISOString(), hidden: false, ...extra });
 
-async function harness({ denied = false, stored, audioFails = false, paired = false, feed, existingTabs = [], updateFails = false } = {}) {
+async function harness({ denied = false, stored, audioFails = false, paired = false, feed, existingTabs = [], updateFails = false, restrictedUrls = false, contextsFail = false } = {}) {
   let now = 10000, listener, clicked, alarm, serial = 0, tasks = [], contexts = [];
   const timers = new Map(), notices = [], sounds = [], tabs = [], badges = [], updates = [], windows = [];
   const stateExports = {};
@@ -22,17 +22,21 @@ async function harness({ denied = false, stored, audioFails = false, paired = fa
     storage: { local: area(local), session: area(session), onChanged: { addListener() {} } },
     action: { setBadgeText: async value => badges.push(value.text), setBadgeBackgroundColor: async () => {}, setTitle: async () => {} },
     alarms: { create: async () => {}, onAlarm: { addListener(fn) { alarm = fn; } } },
-    runtime: { id: 'test', getURL: path => `chrome-extension://test${path}`, getContexts: async () => contexts,
+    runtime: { id: 'test', getURL: path => `chrome-extension://test${path}`, getContexts: async filter => { if (contextsFail && filter.contextTypes?.includes("TAB")) throw new Error("contexts unavailable"); return filter.contextTypes?.includes("TAB")
+      ? existingTabs.map(tab => ({ tabId: tab.id, documentUrl: tab.url })) : contexts; },
       onMessage: { addListener(fn) { listener = fn; } }, sendMessage: async message => { sounds.push(message); return audioFails ? { error: 'blocked' } : { ok: true }; } },
     offscreen: { createDocument: async () => { contexts = [{}]; } },
     notifications: { getPermissionLevel: async () => denied ? 'denied' : 'granted', create: async (id, value) => notices.push({ id, ...value }), clear: async () => {}, onClicked: { addListener(fn) { clicked = fn; } } },
     tabs: {
-      query: async () => existingTabs,
+      query: async filter => restrictedUrls
+        ? filter.url ? [] : existingTabs.map(({ url, ...tab }) => tab)
+        : existingTabs,
       create: async value => { tabs.push(value); existingTabs.push({ ...value, id: 100 + tabs.length, windowId: 1, active: true }); },
       update: async (id, value) => { if (updateFails) throw new Error('cannot activate'); updates.push({ id, ...value }); Object.assign(existingTabs.find(tab => tab.id === id), value); },
     },
     windows: { update: async (id, value) => windows.push({ id, ...value }) },
   };
+  if (contextsFail === 'missing') delete browser.runtime.getContexts;
   const navigation = {};
   runInNewContext(navigationCode, { exports: navigation, URLSearchParams, crypto: webcrypto, require: () => ({ browser }) });
   const exports = {};
@@ -269,4 +273,48 @@ test('new choices persist without sounding; preview uses the saved choice and in
   }
   for (const tone of ['missing', '__proto__', '../../private.ogg']) await assert.rejects(h.message('settings', { preferences: { sound: true, tone, volume: 60 } }), /无效提醒设置/);
   assert.equal(h.local.taskReminders.preferences.tone, 'tech');
+});
+
+
+test('external entries reuse extension contexts when URL-filtered tab queries cannot see the workspace', async () => {
+  const h = await harness({ restrictedUrls: true, existingTabs: [
+    workspaceTab(5, { url: 'chrome-extension://test/popup.html', active: true }),
+    workspaceTab(7, { url: 'chrome-extension://test/workspace.html?handoff=pending#old' }),
+  ] });
+  await h.openWorkspace(new URLSearchParams({ handoff: 'new' }));
+  await h.snapshot([task('prompt')]);
+  await h.message('open', { id: 'prompt' });
+  assert.equal(h.tabs.length, 0);
+  assert.deepEqual(h.updates.map(tab => tab.id), [7, 7]);
+  assert.ok(h.updates[0].url.startsWith('chrome-extension://test/workspace.html?handoff=pending#workspace='));
+  assert.ok(h.updates[1].url.includes('#workspace=task=prompt'));
+});
+
+
+test('context lookup rejection is surfaced without creating a duplicate workspace', async () => {
+  const h = await harness({ contextsFail: true, restrictedUrls: true, existingTabs: [workspaceTab(1)] });
+  await assert.rejects(h.message('open', { id: 'all' }), /无法确认已打开的工作台/);
+  assert.equal(h.tabs.length, 0); assert.equal(h.updates.length, 0);
+});
+
+test('missing context API is surfaced without guessing that no workspace is open', async () => {
+  const h = await harness({ contextsFail: 'missing', restrictedUrls: true, existingTabs: [workspaceTab(1)] });
+  await assert.rejects(h.message('open', { id: 'all' }), /无法确认已打开的工作台/);
+  assert.equal(h.tabs.length, 0); assert.equal(h.updates.length, 0);
+});
+
+for (const contextsFail of [true, 'missing']) test(`visible workspace URL remains reusable when context lookup is unavailable (${contextsFail})`, async () => {
+  const h = await harness({ contextsFail, existingTabs: [workspaceTab(7)] });
+  await h.message('open', { id: 'all' });
+  assert.equal(h.tabs.length, 0); assert.equal(h.updates.length, 1);
+  assert.equal(h.updates[0].id, 7);
+});
+
+for (const contextsFail of [true, 'missing']) test(`known absence creates only one workspace without context lookup (${contextsFail})`, async () => {
+  for (const existingTabs of [[], [{ id: 2, windowId: 1, url: 'https://www.pinterest.com/' }, { id: 3, windowId: 1, pendingUrl: 'chrome-extension://test/popup.html' }]]) {
+    const h = await harness({ contextsFail, existingTabs });
+    await Promise.all([h.message('open', { id: 'all' }), h.message('open', { id: 'all' })]);
+    assert.equal(h.tabs.length, 1); assert.equal(h.updates.length, 1);
+    assert.equal(h.updates[0].id, 101);
+  }
 });

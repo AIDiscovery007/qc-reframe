@@ -4,15 +4,13 @@
 
 在浏览器里收集灵感，在本机工作台调整主体、提示词与结果。沿用 Codex 登录和额度，无需另外填写模型 API Key。
 
-**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.3.2](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.3.2)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
+**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.3.3](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.3.3)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
 
-## v0.3.2，在同一个工作台继续创作
+## v0.3.3，在当前界面继续创作
 
-网页入口、快捷面板、任务提醒和设置入口统一复用已有工作台，在页内打开对应项目、结果或设置，避免重复标签堆积。
+提醒直接打开当前 Reframe 内的对应结果，工作台入口复用已有标签。参考图与主体调整保存在原项目中，编辑区可展开，并提供十种提示音及设置中心重启本机服务入口。
 
-每个项目独立记住逆向路径，每条路径独立记住提示词版本。切换项目或重新打开工作台后恢复各自选择，旧快捷草稿也不会覆盖后来保存的选择。
-
-[查看 v0.3.2 更新与升级说明 →](browser-extension/docs/releases/v0.3.2.md)
+[查看 v0.3.3 更新与升级说明 →](browser-extension/docs/releases/v0.3.3.md)
 
 ## 工作台，让画面成为主角
 

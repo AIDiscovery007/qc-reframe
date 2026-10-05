@@ -30,6 +30,13 @@ async function environment() {
   return env;
 }
 
+async function checkSkill(env) {
+  const skill = await readFile(env.ALCHEMY_SKILL_PATH, "utf8");
+  if (!/^name:\s*alchemy\s*$/m.test(skill)) throw new Error("Alchemy skill 缺失或名称不匹配，请重新获取完整仓库。");
+  for (const match of skill.matchAll(/\]\((references\/[^)]+)\)/g))
+    if (!await readable(resolve(dirname(env.ALCHEMY_SKILL_PATH), match[1]))) throw new Error(`Alchemy skill 缺少 ${match[1]}`);
+}
+
 async function doctor(env, maintenance = false) {
   const [major, minor] = process.versions.node.split(".").map(Number);
   if (major < 22 || (major === 22 && minor < 15)) throw new Error("需要 Node.js 22.15+，请先安装受支持的 Node.js LTS。");
@@ -54,10 +61,7 @@ async function doctor(env, maintenance = false) {
   }
   if (cliIssue && !maintenance) throw new Error(cliIssue);
   if (cliIssue) console.warn(`仅启动本机管理服务：${cliIssue}`);
-  const skill = await readFile(env.ALCHEMY_SKILL_PATH, "utf8");
-  if (!/^name:\s*alchemy\s*$/m.test(skill)) throw new Error("Alchemy skill 缺失或名称不匹配，请重新获取完整仓库。");
-  for (const match of skill.matchAll(/\]\((references\/[^)]+)\)/g))
-    if (!await readable(resolve(dirname(env.ALCHEMY_SKILL_PATH), match[1]))) throw new Error(`Alchemy skill 缺少 ${match[1]}`);
+  await checkSkill(env);
   const imagegen = await readable(env.IMAGEGEN_SKILL_PATH);
   console.log(`QC-Reframe ${version}\nNode.js ${process.versions.node}\nCodex CLI：${cliIssue ? "需要处理，请在设置中心检查" : "已登录"}\nAlchemy skill：就绪\n插件模型：在扩展连接设置中选择并验证\nimagegen：${imagegen ? "已找到（实际生图能力以账户和模型为准）" : "未找到；可逆向提示词，生图前需配置 IMAGEGEN_SKILL_PATH"}`);
   return env;
@@ -94,9 +98,16 @@ async function start(env) {
     connectionInfo();
     return;
   }
+  const release = await prepareStart(env);
+  try { await launch(env); } finally { await release(); }
+}
+
+// Hold the startup lock from preflight through handoff; neither path reacquires it.
+async function prepareStart(env, checkCli = true) {
   const manifest = JSON.parse(await readFile(join(root, ".output/chrome-mv3/manifest.json"), "utf8"));
   if (manifest.version !== version) throw new Error("扩展构建与当前版本不同，请先运行 npm run setup。");
-  await doctor(env, true);
+  if (checkCli) await doctor(env, true);
+  else await checkSkill(env);
   await ensureStorage(dataDir);
   const lock = join(paths.runtime, "start.lock");
   try { await mkdir(lock); }
@@ -104,9 +115,16 @@ async function start(env) {
     if (error.code === "EEXIST") throw new Error(`另一个启动操作尚未结束。如上次启动被中断，确认没有启动操作后移除 ${lock} 空目录再重试。`);
     throw error;
   }
-  let child;
   try {
     if (await readable(join(dataDir, "start.lock"))) throw new Error("旧版启动锁仍存在，请确认旧启动命令已结束后移除数据目录根部的 start.lock 空目录。");
+    await access(join(root, "bridge/server.mjs"), constants.R_OK);
+  } catch (error) { await rmdir(lock); throw error; }
+  return () => rmdir(lock);
+}
+
+async function launch(env) {
+  let child;
+  try {
     await migrateStorage(dataDir);
     await rotateServiceLog(paths.log);
     const log = await open(paths.log, "a", 0o600);
@@ -130,13 +148,44 @@ async function start(env) {
     }
     throw new Error(`服务未按时就绪，请查看 ${paths.log}。`);
   } catch (error) { child?.kill(); throw error; }
-  finally { await rmdir(lock); }
 }
 
 async function main() {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("ALCHEMY_PORT 无效。");
   const command = process.argv[2];
   const env = await environment();
+  if (command === "restart-after") {
+    if (!process.send || !process.argv[3] || !process.env.ALCHEMY_RESTART_ID) throw new Error("重启必须从已连接的插件发起。");
+    const cancelled = new AbortController();
+    const cancel = () => cancelled.abort();
+    process.once("SIGTERM", cancel);
+    process.once("disconnect", cancel);
+    let release;
+    try {
+      // The running service already supplies its CLI environment; do not run slow CLI probes again.
+      release = await prepareStart(env, false);
+      cancelled.signal.throwIfAborted();
+      const confirmed = once(process, "message", { signal: AbortSignal.any([cancelled.signal, AbortSignal.timeout(5000)]) });
+      process.send("ready");
+      const [message] = await confirmed;
+      if (message !== "restart") throw new Error("重启未确认。");
+      process.removeListener("disconnect", cancel);
+      process.disconnect();
+      for (let i = 0; i < 100; i++) {
+        cancelled.signal.throwIfAborted();
+        const health = await probe();
+        if (!health) return await launch(env);
+        if (health.instanceId !== process.argv[3]) throw new Error("服务实例已变化，未替换其他服务。");
+        await sleep(100);
+      }
+      throw new Error("原服务未按时停止，请运行 npm run status 检查。");
+    } finally {
+      process.removeListener("SIGTERM", cancel);
+      process.removeListener("disconnect", cancel);
+      if (process.connected) process.disconnect();
+      if (release) await release();
+    }
+  }
   if (command === "doctor") return doctor(env);
   if (command === "pair") {
     const value = await token();

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, fork } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
@@ -20,16 +20,24 @@ async function unusedPort() {
   await new Promise(resolve => server.close(resolve));
   return port;
 }
-async function installation(t) {
+async function installation(t, copyRoot = false) {
   const dir = await mkdtemp(join(tmpdir(), "alchemy install "));
+  let installRoot = root;
+  if (copyRoot) {
+    installRoot = join(dir, "installation");
+    await mkdir(join(installRoot, ".output/chrome-mv3"), { recursive: true });
+    for (const path of ["package.json", "scripts", "bridge", ".agents", ".output/chrome-mv3/manifest.json"])
+      await cp(join(root, path), join(installRoot, path), { recursive: true });
+    await symlink(join(root, "node_modules"), join(installRoot, "node_modules"), "dir");
+  }
   const codex = join(dir, "codex-test");
   await writeFile(codex, '#!/usr/bin/env node\nconsole.log("codex-cli test");\n', { mode: 0o700 });
   const env = { ...process.env, ALCHEMY_DATA_DIR: dir, ALCHEMY_PORT: String(await unusedPort()),
     CODEX_BIN: codex, CODEX_HOME: join(dir, "codex-home"), IMAGEGEN_SKILL_PATH: join(dir, "missing-imagegen.md") };
   delete env.ALCHEMY_SKILL_PATH;
-  const run = command => exec(process.execPath, [join(root, "scripts/manage.mjs"), command], { env, timeout: 15000 });
+  const run = command => exec(process.execPath, [join(installRoot, "scripts/manage.mjs"), command], { env, timeout: 15000 });
   t.after(async () => { await run("stop").catch(() => {}); await rm(dir, { recursive: true, force: true }); });
-  return { dir, env, run };
+  return { dir, env, run, installRoot };
 }
 
 test("bundled Alchemy runs without author's external files and has no dangling runtime references", async () => {
@@ -131,7 +139,7 @@ test("managed shutdown requires authentication and refuses while a model task is
   const dir = await mkdtemp(join(tmpdir(), "alchemy-shutdown-"));
   await writeFile(join(dir, "model-settings.json"), JSON.stringify({ model: "test-model", accountKey: "test" }));
   let finish;
-  const app = await createBridge({ dataDir: dir, allowShutdown: true, agent: () => new Promise(resolve => { finish = resolve; }) });
+  const app = await createBridge({ dataDir: dir, allowShutdown: true, restart: () => assert.fail("busy task must block restart"), agent: () => new Promise(resolve => { finish = resolve; }) });
   app.server.listen(0, "127.0.0.1");
   await once(app.server, "listening");
   const url = `http://127.0.0.1:${app.server.address().port}`;
@@ -143,6 +151,7 @@ test("managed shutdown requires authentication and refuses while a model task is
   const job = await fetch(`${url}/jobs`, { method: "POST", headers, body: JSON.stringify({ image, mode: "style" }) });
   assert.equal(job.status, 202);
   assert.equal((await fetch(`${url}/shutdown`, { method: "POST", headers })).status, 409);
+  assert.equal((await fetch(`${url}/restart`, { method: "POST", headers })).status, 409);
   finish({ title: "test", observations: [], promptZh: "test", promptEn: "test", negativePrompt: "", uncertainties: [] });
   for (let i = 0; i < 100; i++) {
     if (!(await (await fetch(`${url}/health`, { headers })).json()).active) break;
@@ -152,3 +161,90 @@ test("managed shutdown requires authentication and refuses while a model task is
   assert.equal((await fetch(`${url}/shutdown`, { method: "POST", headers })).status, 200);
   await closed;
 });
+
+test("plugin restart launches a new process on the same port with pairing, project inputs and runtime configuration intact", async t => {
+  const { dir, env, run } = await installation(t);
+  await run('start');
+  const token = (await readFile(join(dir, 'config/token'), 'utf8')).trim();
+  const url = `http://127.0.0.1:${env.ALCHEMY_PORT}`;
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const call = async (path, body) => {
+    const res = await fetch(url + path, { headers, method: body ? 'POST' : 'GET', body: body && JSON.stringify(body) });
+    assert.equal(res.ok, true); return res.json();
+  };
+  const before = await call('/health');
+  assert.equal(before.canRestart, true);
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=';
+  const project = await call('/projects', { image });
+  await call(`/projects/${project.id}/input`, { expectedRevision: 0, mode: 'style', instruction: 'saved input', subjectImage: image });
+  const reference = await call(`/projects/${project.id}/reference`);
+  const ticket = await call('/restart', {});
+  let after;
+  for (let i = 0; i < 100; i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    try {
+      const response = await fetch(`${url}/health`, { headers, signal: AbortSignal.timeout(1000) });
+      const health = await response.json();
+      if (health.restartId === ticket.restartId) { after = health; break; }
+    } catch {}
+  }
+  assert.ok(after, 'replacement service must become ready');
+  assert.notEqual(after.instanceId, before.instanceId);
+  assert.equal(after.ready, true);
+  assert.equal(after.managed, true);
+  assert.equal((await readFile(join(dir, 'config/token'), 'utf8')).trim(), token);
+  assert.deepEqual(await call(`/projects/${project.id}/reference`), reference);
+  const cli = await call('/cli/status');
+  assert.equal(cli.executable, env.CODEX_BIN, 'custom runtime configuration survives the new process');
+});
+
+
+for (const failure of ['missing-build', 'mismatched-build', 'missing-skill-reference', 'startup-lock', 'legacy-lock']) {
+  test(`restart preflight keeps the old ready instance when ${failure}`, async t => {
+    const { dir, env, run, installRoot } = await installation(t, true);
+    await run('start');
+    const headers = { Authorization: `Bearer ${(await readFile(join(dir, 'config/token'), 'utf8')).trim()}` };
+    const url = `http://127.0.0.1:${env.ALCHEMY_PORT}`;
+    const health = async () => (await fetch(`${url}/health`, { headers })).json();
+    const before = await health();
+    const manifest = join(installRoot, '.output/chrome-mv3/manifest.json');
+    if (failure === 'missing-build') await rm(manifest);
+    if (failure === 'mismatched-build') await writeFile(manifest, JSON.stringify({ version: '0.0.0' }));
+    if (failure === 'missing-skill-reference') {
+      const skill = join(installRoot, '.agents/skills/alchemy/SKILL.md');
+      await writeFile(skill, await readFile(skill, 'utf8') + '\n[Required](references/missing-test.md)\n');
+    }
+    const lock = join(dir, failure === 'legacy-lock' ? 'start.lock' : 'runtime/start.lock');
+    if (failure.endsWith('lock')) await mkdir(lock);
+    const response = await fetch(`${url}/restart`, { method: 'POST', headers });
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).error, /准备失败.*原服务仍在运行/);
+    const after = await health();
+    assert.equal(after.ready, true);
+    assert.equal(after.instanceId, before.instanceId);
+    if (failure.endsWith('lock')) assert.deepEqual(await readdir(lock), [], 'pre-existing locks are retained');
+    if (failure !== 'startup-lock') assert.ok(!(await readdir(join(dir, 'runtime'))).includes('start.lock'), 'no new lock remains');
+  });
+}
+
+for (const cancel of ['disconnect', 'SIGTERM', 'timeout']) {
+  test(`prepared restart releases its lock after ${cancel}, with the old instance untouched`, async t => {
+    const { dir, env, run } = await installation(t);
+    await run('start');
+    const before = JSON.parse((await run('status')).stdout);
+    const manager = fork(join(root, 'scripts/manage.mjs'), ['restart-after', before.instanceId], {
+      execArgv: [], env: { ...env, ALCHEMY_RESTART_ID: 'cancel-test' }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    });
+    t.after(() => { if (manager.exitCode === null) manager.kill(); });
+    const exited = once(manager, 'exit');
+    assert.equal((await once(manager, 'message'))[0], 'ready');
+    assert.deepEqual(await readdir(join(dir, 'runtime/start.lock')), []);
+    if (cancel === 'disconnect') manager.disconnect();
+    if (cancel === 'SIGTERM') manager.kill();
+    await exited;
+    assert.ok(!(await readdir(join(dir, 'runtime'))).includes('start.lock'));
+    const after = JSON.parse((await run('status')).stdout);
+    assert.equal(after.ready, true);
+    assert.equal(after.instanceId, before.instanceId);
+  });
+}

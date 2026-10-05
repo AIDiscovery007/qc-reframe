@@ -35,14 +35,13 @@ export default defineBackground(() => {
   void browser.storage.local.setAccessLevel({
     accessLevel: "TRUSTED_CONTEXTS",
   });
-  const openResult = async (tabId: number) => {
+  const openResult = async (tabId: number, selection: Selection) => {
     try {
       await browser.tabs.sendMessage(tabId, { type: "alchemy:show" });
     } catch {
-      // Pages without a content script can show the result in an extension tab.
-      await browser.tabs.create({
-        url: `${browser.runtime.getURL("/popup.html")}?view=tab`,
-      });
+      const viewKey = selection.projectId ? `projectView:${selection.projectId}` : "preferences";
+      const saved = (await browser.storage.local.get(viewKey))[viewKey] as { mode?: Mode } | undefined;
+      await uiMessage({ type: "alchemy:open-workspace", context: { selection, mode: saved?.mode || "style" } }, `tab:${tabId}`, tabId);
     }
   };
   browser.runtime.onInstalled.addListener(async () => {
@@ -104,7 +103,7 @@ export default defineBackground(() => {
       try { await browser.storage.local.set({ selection: storedInput(selection) }); }
       finally { selecting = false; }
       // Open after capture so the floating UI cannot cover the selected image.
-      await openResult(tab.id);
+      await openResult(tab.id, selection);
     }
   };
   const collect = async (target: ImageTarget, tab: { id: number; windowId: number; url?: string }): Promise<CollectionResult> => {
@@ -325,6 +324,12 @@ export default defineBackground(() => {
           return next;
         } finally { selecting = false; }
       }
+      case "alchemy:service-restart":
+        try { return await bridge("/restart", token, {}); }
+        catch (error) {
+          if ((error as Error).message === "Not found") throw new Error("当前服务尚不支持插件内重启。请在插件目录运行 npm stop，再运行 npm start。");
+          throw error;
+        }
       case "alchemy:cli-check":
         return bridge("/cli/check", token, {});
       case "alchemy:cli-update":
@@ -531,7 +536,7 @@ export default defineBackground(() => {
       uiMessage(message).then(value => reply({ ok: true, value }), error => reply({ error: error.message }));
       return true;
     }
-    if ((contentSender || extensionSender) && ["alchemy:get-motion-preference", "alchemy:set-motion-preference", "alchemy:show-hidden-projects", "alchemy:set-project-hidden", "alchemy:gallery", "alchemy:projects", "alchemy:project", "alchemy:project-thumbnail", "alchemy:generation-thumbnail", "alchemy:quick-draft", "alchemy:open-workspace", "alchemy:upload-reference", "alchemy:update-project-input", "alchemy:cli-check", "alchemy:cli-update", "alchemy:models-refresh", "alchemy:model-verify", "alchemy:project-views", "alchemy:save-project-view", "alchemy:state", "alchemy:connect", "alchemy:mode", "alchemy:query", "alchemy:cancel", "alchemy:reference", "alchemy:project-reference", "alchemy:open-project", "alchemy:ensure-project", "alchemy:delete-projects", "alchemy:start", "alchemy:save-prompt", "alchemy:generate", "alchemy:generation-cancel", "alchemy:generation-reference", "alchemy:generation-image", "alchemy:generation-file-action"].includes(message?.type)) {
+    if ((contentSender || extensionSender) && ["alchemy:get-motion-preference", "alchemy:set-motion-preference", "alchemy:show-hidden-projects", "alchemy:set-project-hidden", "alchemy:gallery", "alchemy:projects", "alchemy:project", "alchemy:project-thumbnail", "alchemy:generation-thumbnail", "alchemy:quick-draft", "alchemy:open-workspace", "alchemy:upload-reference", "alchemy:update-project-input", "alchemy:service-restart", "alchemy:cli-check", "alchemy:cli-update", "alchemy:models-refresh", "alchemy:model-verify", "alchemy:project-views", "alchemy:save-project-view", "alchemy:state", "alchemy:connect", "alchemy:mode", "alchemy:query", "alchemy:cancel", "alchemy:reference", "alchemy:project-reference", "alchemy:open-project", "alchemy:ensure-project", "alchemy:delete-projects", "alchemy:start", "alchemy:save-prompt", "alchemy:generate", "alchemy:generation-cancel", "alchemy:generation-reference", "alchemy:generation-image", "alchemy:generation-file-action"].includes(message?.type)) {
       uiMessage(message, contentSender ? `tab:${sender.tab!.id}` : "popup", sender.tab?.id).then(
         (value) => reply({ ok: true, value }),
         (error) => reply({ error: error.message }),
