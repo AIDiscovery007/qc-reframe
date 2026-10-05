@@ -22,7 +22,7 @@ function background(local = { preferences: { token: "private-token" } }) {
   });
   const browser = {
     storage: { local: area(local), session: area(session) },
-    runtime: { id: "test", getURL: path => `chrome-extension://test${path}`, sendMessage: async message => runtimeMessages.push(message), onInstalled: { addListener() {} }, onMessage: { addListener(fn) { listener = fn; } } },
+    runtime: { id: "test", getURL: path => `chrome-extension://test${path}`, sendMessage: async message => runtimeMessages.push(message), onConnect: { addListener() {} }, onInstalled: { addListener() {} }, onMessage: { addListener(fn) { listener = fn; } } },
     contextMenus: { onClicked: { addListener() {} } },
     tabs: { query: async () => [{ id: 1 }, { id: 2 }], sendMessage: async (id, message) => { if (id === 2) throw new Error("no content script"); tabMessages.push(message); }, create: async () => {} },
   };

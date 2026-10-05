@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 const { version } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
 // One child per operation, using the same local login and provider as inference.
-export async function withCodex({ cwd, signal, onNotification = () => {}, timeoutMs = 600_000, dynamicTools = [] }, action) {
+export async function withCodex({ cwd, signal, onNotification = () => {}, timeoutMs = 600_000, dynamicTools = [], maxResponseBytes = Infinity }, action) {
   if (signal?.aborted) throw new Error("任务已取消");
   const proc = spawn(process.env.CODEX_BIN || "codex", ["app-server"], { cwd, stdio: ["pipe", "pipe", "pipe"] });
   const pending = new Map();
@@ -45,13 +45,14 @@ export async function withCodex({ cwd, signal, onNotification = () => {}, timeou
   proc.on("exit", (code) => stop(new Error(`Codex 进程结束（${code}），请检查 CLI 登录与配置。`)));
   createInterface({ input: proc.stdout }).on("line", (line) => {
     if (failure) return;
+    if (Buffer.byteLength(line) > maxResponseBytes) { stop(new Error("Codex 会话响应过大，无法完整读取")); return; }
     let message;
     try { message = JSON.parse(line); } catch { return; }
     const waiting = pending.get(message.id);
     if (waiting && !message.method) {
       clearTimeout(waiting.timer);
       pending.delete(message.id);
-      if (message.error) waiting.reject(new Error(message.error.message));
+      if (message.error) waiting.reject(Object.assign(new Error(message.error.message), { code: message.error.code }));
       else {
         if (waiting.method === "thread/start" && message.result?.thread?.id)
           registered.set(message.result.thread.id, new Set((waiting.params.dynamicTools || []).map(tool => tool.name)));

@@ -55,7 +55,7 @@ export default function GenerationPanel({ targetGeneration, onTargetSelected, jo
   const imagePath = asset?.key === assetKey ? asset.path : undefined;
   const running = generations.find((item) => item.status === "running");
   const multi = job.mode === "multi-reenact";
-  const inputsReady = job.mode === "recreate" || (multi ? !!subjects && subjects.length >= 2 && subjects.length <= 6 && subjects.every(subject => !!subject.subjectImage) : !!subjectImage);
+  const inputsReady = (job.mode === "recreate" || job.mode === "session") || (multi ? !!subjects && subjects.length >= 2 && subjects.length <= 6 && subjects.every(subject => !!subject.subjectImage) : !!subjectImage);
   const generic = job.mode === "style" && !job.reenact;
   const incomplete = /\[SUBJECT\]/i.test(lang === "zh" ? job.result!.promptZh : job.result!.promptEn);
 
@@ -99,7 +99,7 @@ export default function GenerationPanel({ targetGeneration, onTargetSelected, jo
       onUpdate(await request<Job>({ type: cancel ? "alchemy:generation-cancel" : "alchemy:generate",
         id: job.id, language: lang, generationId: running?.id,
         ...(!cancel && ratio !== "auto" ? { aspectRatio: { width, height } } : {}),
-        ...(!cancel && job.mode !== "recreate" ? multi ? { subjects } : { subjectImage } : {}) }), cancel ? undefined : subjectImage, !cancel && multi ? subjects : undefined);
+        ...(!cancel && job.mode !== "recreate" && job.mode !== "session" ? multi ? { subjects } : { subjectImage } : {}) }), cancel ? undefined : subjectImage, !cancel && multi ? subjects : undefined);
       setSelected(cancel ? [...generations].reverse().find(item => item.status === "completed")?.id || "" : "");
     } catch (error) { failure = (error as Error).message; setError(failure); }
     finally { setBusy(false); if (!cancel) { setSubmitting(false); onRequestState?.(false, failure); } }
@@ -136,7 +136,7 @@ export default function GenerationPanel({ targetGeneration, onTargetSelected, jo
     {!validRatio && <p id={ratioHintId} className="ratio-hint ratio-error" role="status">宽高请填 1–10000 的整数，比例范围为 1:20–20:1。</p>}
   </div>;
   const generateButton = <button className="primary generate-button" disabled={disabled || busy || !!running || !validRatio || generic || incomplete || !inputsReady} aria-busy={busy || !!running}
-    title={`使用${job.mode === "recreate" ? "" : "当前主体图、参考模板与"}${lang === "zh" ? "中文" : "英文"}提示词生成，包含排除项。使用 Codex 生图额度。`} onClick={() => act()}>
+    title={`使用${job.mode === "recreate" ? "" : job.mode === "session" ? "参考风格与" : "当前主体图、参考模板与"}${lang === "zh" ? "中文" : "英文"}提示词生成，包含排除项。使用 Codex 生图额度。`} onClick={() => act()}>
     {!running && !busy && <Icon name="image" />}{running ? "生成中，完成后提醒" : busy ? "正在提交…" : generations.length ? "再生成一张" : "生成图片"}<Icon name="arrow" />
   </button>;
   const warning = (generic || incomplete) ? "请先上传主体图，生成专属提示词。" : !inputsReady ? multi ? "请添加至少 2 张可用的主体图。" : "请先上传可用的主体图。" : "";
@@ -147,7 +147,7 @@ export default function GenerationPanel({ targetGeneration, onTargetSelected, jo
   const comparisonInputs = original?.key === assetKey ? multi ? <div className="multi-comparison-inputs">
     {original.subjects?.map((subject, index) => <figure key={subject.id}><ImagePreview src={subject.subjectImage} alt={`本次主体 ${index + 1}`} loading="lazy" /><figcaption>主体 {index + 1} · {subject.role}{subject.detail && <small>{subject.detail}</small>}</figcaption></figure>)}
     <figure><ImagePreview src={original.image} alt="本次参考模板" loading="lazy" /><figcaption>参考模板</figcaption></figure>
-  </div> : <figure><ImagePreview src={original.image} alt="本次生成的原始输入" /><figcaption>{job.mode === "recreate" ? "逆向参考图（未发送生图）" : "本次主体图"}</figcaption></figure>
+  </div> : <figure><ImagePreview src={original.image} alt="本次生成的原始输入" /><figcaption>{job.mode === "recreate" ? "逆向参考图（未发送生图）" : job.mode === "session" ? "本次风格参考图" : "本次主体图"}</figcaption></figure>
     : <p role="status">{comparisonError || "正在读取原图…"}</p>;
   const copyNotice = copyError && <div className="error" role="alert">{copyError}{imagePath && <p className="file-path">{imagePath}</p>}</div>;
 
@@ -187,7 +187,7 @@ export default function GenerationPanel({ targetGeneration, onTargetSelected, jo
       <div className="modal-head"><img src={logo} alt="" /><h2>本次生成信息</h2><button className="close-btn" aria-label="关闭窗口" onClick={() => setModal(undefined)}>×</button></div>
       <div className="generation-details">
         <p className="hint">模型：{modal.model || job.model || "未记录"} · 语言：{modal.language === "zh" ? "中文" : "英文"}</p>
-        <p className="hint">输入：{job.mode === "recreate" ? "纯文字，不附参考图" : multi ? `${modal.subjects?.length || 0} 张主体图 + 参考模板` : "生成时的主体图 + 参考图"}</p>
+        <p className="hint">输入：{job.mode === "recreate" ? "纯文字，不附参考图" : job.mode === "session" ? "风格参考图 + 会话专属提示词" : multi ? `${modal.subjects?.length || 0} 张主体图 + 参考模板` : "生成时的主体图 + 参考图"}</p>
         <div className="prompt-box"><div className="prompt-text">{modal.prompt || "此记录未保存提示词快照。"}</div><div className="negative"><p>排除项：{modal.negativePrompt || "无"}</p></div></div>
       </div>
     </dialog>}

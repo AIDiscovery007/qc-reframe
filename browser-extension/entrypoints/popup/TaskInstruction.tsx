@@ -2,6 +2,7 @@ import { useId } from "react";
 import type { Mode } from "../../lib/types";
 
 export const defaultInstructions: Record<Mode, string> = {
+  session: "提取参考图的风格，结合所选会话的完整上下文，生成符合本次创作目标的图片提示词。",
   style: "提取参考图的配色、光影、笔触和材质表现，生成可迁移的风格提示词；如提供主体图，保留主体的身份、内容、姿态、表情、服饰、构图与背景结构，仅迁移参考图的画法。",
   recreate: "分析参考图的主体、内容、构图、配色、光影与材质，生成可独立用于文生图的完整复刻提示词。",
   reenact: "以图 1 为主体，以图 2 为风格参考模板，生成基于图 1 的风格转换与主体重演提示词。",

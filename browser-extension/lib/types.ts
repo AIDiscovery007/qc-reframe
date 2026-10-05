@@ -1,4 +1,8 @@
-export type Mode = "style" | "recreate" | "reenact" | "multi-reenact";
+export type SessionSummary = { id: string; title: string; updatedAt: number };
+export type SessionPage = { data: SessionSummary[]; nextCursor: string | null };
+export type SessionContext = { sources: SessionSummary[]; snapshotId?: string; hash?: string; capturedAt?: string; messageCount?: number; attachmentCount?: number };
+
+export type Mode = "style" | "recreate" | "reenact" | "multi-reenact" | "session";
 export type MultiSubject = { id: string; subjectImage: string; role: string; detail: string };
 export type SavedSubject = Omit<MultiSubject, "subjectImage"> & { subjectAsset: string };
 export type SubjectInput = {
@@ -8,7 +12,8 @@ export type SubjectInput = {
   promptSourceJobId?: string;
 };
 export type Preferences = { token: string; mode: Mode };
-export type ProjectInput = { instruction: string; subjectError?: string; subjectImage?: string; subjects?: MultiSubject[] };
+export type ProjectInput = {
+  sessions?: SessionSummary[]; instruction: string; subjectError?: string; subjectImage?: string; subjects?: MultiSubject[] };
 export type Selection = {
   id: string;
   projectId?: string;
@@ -36,6 +41,7 @@ export type Result = {
   uncertainties: string[];
 };
 export type Job = {
+  sessionContext?: SessionContext;
   id: string;
   projectId?: string;
   imageAsset?: string;

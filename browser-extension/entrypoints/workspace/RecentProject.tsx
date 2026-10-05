@@ -16,6 +16,6 @@ export default function RecentProject({ project, active, disabled, onOpen, curre
     return () => { stopped = true; observer.disconnect(); };
   }, [project.id]);
   const mode = active ? currentMode : Object.keys(project.modes)[0];
-  const label = !project.jobCount ? "待逆向" : mode ? ({ style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演" }[mode] || "待创作") : "待创作";
+  const label = !project.jobCount ? "待逆向" : mode ? ({ style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" }[mode] || "待创作") : "待创作";
   return <button ref={button} className={`project-button ${active ? "active" : ""}`} title={project.title} aria-label={`打开项目：${project.title}`} aria-current={active ? "page" : undefined} disabled={disabled} onClick={onOpen}>{image ? <img src={image} alt="" /> : <span className="recent-image-placeholder" />}<span><strong>{project.title}</strong><small>{project.busy ? "● 任务执行中" : label}{project.hidden ? " · 已隐藏" : ""}</small></span></button>;
 }

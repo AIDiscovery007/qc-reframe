@@ -33,11 +33,12 @@ function fixture(overrides = {}) {
   const state = { modes: {}, versions: {}, subjects: {}, multi: {}, instructions: {}, selections: [], busy: [], inputRevisions: {}, refreshNonce: 0 };
   const selectionRevision = { current: 0 }, referenceContext = { current: { key: 'old:style:v1' } };
   const requests = [], exports = {};
-  const next = { id: 'next', projectId: 'old', image: 'new-image', inputRevision: 8, inputVersions: { style: 'new', recreate: 'new', reenact: 'new', 'multi-reenact': 'new' } };
+  const next = { id: 'next', projectId: 'old', image: 'new-image', inputRevision: 8, inputVersions: { style: 'new', recreate: 'new', reenact: 'new', 'multi-reenact': 'new', session: 'new' } };
   runInNewContext(compiled, {
     exports, blocked: false, selection: { projectId: 'old', inputRevision: 7, error: '读取失败' }, displayImage: undefined, inputSaving: { current: false }, taskInstruction: () => 'default-instruction', selectionRevision, referenceContext,
     useRef: () => referenceContext, modeJob: () => ({ id: 'v1' }),
     request: async message => { requests.push(message); return next; },
+    selectedSessions: () => [{id: '11111111-1111-4111-8111-111111111111', title: '小说', updatedAt: 1}],
     subjectImage: () => 'retained-subject', multiSubjects: [{ id: 'a', subjectImage: 'a', role: '人物', detail: '帽子' }, { id: 'b', subjectImage: 'b', role: '物品', detail: '' }],
     setBusy: value => state.busy.push(value), setError: value => { state.error = value; }, setHistoryOpen: value => { state.historyOpen = value; }, setGalleryOpen: value => { state.galleryOpen = value; },
     setSelection: value => state.selections.push(value),
@@ -53,7 +54,7 @@ function fixture(overrides = {}) {
 }
 
 test('reference replacement uses CAS and keeps project identity across every mode', async () => {
-  for (const mode of ['style', 'reenact', 'recreate', 'multi-reenact']) {
+  for (const mode of ['style', 'reenact', 'recreate', 'multi-reenact', 'session']) {
     const ui = fixture();
     await ui.applyReferenceUpload('new-image', mode, 'retained-instruction');
     assert.equal(ui.requests[0].type, 'alchemy:update-project-input');
@@ -66,7 +67,8 @@ test('reference replacement uses CAS and keeps project identity across every mod
     assert.equal(ui.requests[0].referenceJobId, 'v1');
     assert.equal(ui.requests[0].instruction, 'retained-instruction');
     if (mode === 'multi-reenact') assert.deepEqual(Array.from(ui.requests[0].subjects, item => `${item.id}:${item.role}:${item.detail}`), ['a:人物:帽子', 'b:物品:']);
-    else assert.equal(ui.requests[0].subjectImage, mode === 'recreate' ? undefined : 'retained-subject');
+    else assert.equal(ui.requests[0].subjectImage, ['recreate', 'session'].includes(mode) ? undefined : 'retained-subject');
+    if (mode === 'session') assert.deepEqual(Array.from(ui.requests[0].sessionIds), ['11111111-1111-4111-8111-111111111111']);
     for (const key of ['subjects', 'multi', 'instructions']) assert.equal(Object.keys(ui.state[key]).length, 0, 'durable input must not be duplicated in session drafts');
     assert.deepEqual(ui.state.busy, [true, false]);
     assert.equal(ui.state.error, '');

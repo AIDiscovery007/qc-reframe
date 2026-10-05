@@ -64,7 +64,7 @@ test("edited inputs keep project identity, historical snapshots and restart stat
   assert.equal(selection.id, `${project.id}:2`);
   assert.equal(selection.inputRevision, 2);
   assert.equal(selection.image, rotated);
-  assert.deepEqual(Object.values(selection.inputVersions), Array(4).fill("new"));
+  assert.deepEqual(Object.values(selection.inputVersions), Array(5).fill("new"));
   assert.equal((await request("/jobs", post({ projectId: project.id, image: rotated, mode: "recreate", inputRevision: 0 }))).status, 409);
   assert.equal((await request("/jobs", post({ projectId: project.id, image, mode: "recreate", inputRevision: 2 }))).status, 400);
   const second = await (await request("/jobs", post({ projectId: project.id, image: rotated, mode: "recreate", inputRevision: 2 }))).json();
@@ -234,7 +234,7 @@ test("all input modes enforce the same four-megabyte reference limit", async t =
   const { request } = await setup(t);
   const project = await (await request("/projects", post({ image }))).json();
   const oversized = `data:image/png;base64,${Buffer.concat([decodeImage(image).bytes, Buffer.alloc(4 * 1024 * 1024)]).toString("base64")}`;
-  for (const mode of ["style", "recreate", "reenact", "multi-reenact"])
+  for (const mode of ["style", "recreate", "reenact", "multi-reenact", "session"])
     assert.equal((await request(`/projects/${project.id}/input`, post({ expectedRevision: 0, image: oversized, mode, instruction: "" }))).status, 400);
   assert.equal((await (await request(`/projects/${project.id}/reference`)).json()).inputRevision, 0);
 });
@@ -362,7 +362,7 @@ for (const emptyInput of [true, false]) test(`changing a legacy reference preser
   assert.equal(selection.inputs["multi-reenact"].instruction, "preserve roles");
   assert.deepEqual(selection.inputs["multi-reenact"].subjects.map(subject => subject.subjectImage), Array(2).fill(variant("latest generation subject")));
   assert.deepEqual(selection.inputs.style, emptyInput ? { instruction: "" } : undefined);
-  assert.deepEqual(Object.values(selection.inputVersions), Array(4).fill("new"));
+  assert.deepEqual(Object.values(selection.inputVersions), Array(5).fill("new"));
 });
 
 test("post-commit collection failure does not turn a saved input into a failed request", async t => {
@@ -391,4 +391,39 @@ test("post-commit collection failure does not turn a saved input into a failed r
   await settled(request, job.id);
   await request("/projects", post({ image: variant("replacement") }));
   assert.equal((await readdir(join(dir, "images"))).length, 1, "pending collection retries when the next task settles");
+});
+
+test("session history keeps immutable sources while input edits and reference changes stay in the current project", async t => {
+  const firstId = "11111111-1111-4111-8111-111111111111", nextId = "22222222-2222-4222-8222-222222222222";
+  const sources = ids => ids.map(id => ({ id, title: id === firstId ? "第一篇小说" : "第二篇小说", updatedAt: 1 }));
+  const sessions = {
+    metadata: async ids => sources(ids),
+    capture: async (sources, { jobId }) => ({ sources, jobId, capturedAt: "2026-10-05T00:00:00.000Z", hash: jobId, messageCount: 1, attachmentCount: 0, messages: [{ threadId: sources[0].id, role: "user", text: "故事正文" }] }),
+  };
+  const { request, restart } = await setup(t, { sessions });
+  const first = await (await request("/jobs", post({ image, mode: "session", instruction: "配图", sessionIds: [firstId] }))).json();
+  await settled(request, first.id);
+  const path = `/projects/${first.projectId}`;
+  const latest = await (await request("/jobs", post({ projectId: first.projectId, inputRevision: 1, image, mode: "session", instruction: "配图", sessionIds: [nextId] }))).json();
+  await settled(request, latest.id);
+  const unrelated = await (await request("/jobs", post({ projectId: first.projectId, inputRevision: 2, image, mode: "recreate", instruction: "复刻" }))).json();
+  await settled(request, unrelated.id);
+  const historical = await (await request(`${path}/input`, post({ expectedRevision: 3, referenceJobId: first.id, mode: "session", instruction: "配图", sessionIds: [firstId] }))).json();
+  assert.equal(historical.inputVersions.session, "new");
+  assert.equal(historical.inputVersions.recreate, unrelated.id);
+  assert.deepEqual(historical.inputs.session.sessions, sources([firstId]));
+  const oldRerun = await (await request("/jobs", post({ projectId: first.projectId, referenceJobId: first.id, inputRevision: 4, image, mode: "session", instruction: "历史另稿", sessionIds: [firstId] }))).json();
+  await settled(request, oldRerun.id);
+  assert.equal((await (await request(`${path}/reference`)).json()).inputRevision, 4, "historical rerun cannot overwrite current input");
+  const current = await (await request("/jobs", post({ projectId: first.projectId, inputRevision: 4, image, mode: "session", instruction: "配图", sessionIds: [nextId] }))).json();
+  await settled(request, current.id);
+  const replaced = await (await request(`${path}/input`, post({ expectedRevision: 5, image: variant("new reference"), mode: "recreate", instruction: "" }))).json();
+  assert.equal(replaced.inputVersions.session, "new");
+  assert.deepEqual(replaced.inputs.session.sessions, sources([nextId]));
+  await restart();
+  const restored = await (await request(`${path}/reference`)).json();
+  assert.equal(restored.inputRevision, 6);
+  assert.deepEqual(restored.inputs.session.sessions, sources([nextId]));
+  assert.deepEqual((await (await request(`/jobs/${first.id}/reference`)).json()).sessions, sources([firstId]));
+  assert.deepEqual((await (await request(`/jobs/${latest.id}/reference`)).json()).sessions, sources([nextId]));
 });

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
+import ts from "typescript";
 
 const build = new URL("../.output/chrome-mv3/", import.meta.url);
 
@@ -48,6 +49,88 @@ test("model messages stay authenticated in background and only reach allowed end
   assert.ok((await send({ type: "alchemy:model-verify", model: 42 })).error);
   assert.ok((await send({ type: "alchemy:query", path: "/models/../../token" })).error);
   assert.equal(calls.length, 3);
+});
+
+test("local Codex session listing is extension-only and cannot use generic query endpoints", async () => {
+  const calls = [];
+  const { handlers } = await background(async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, json: async () => ({ data: [], nextCursor: null }) };
+  });
+  const workspace = { id: "test", url: "chrome-extension://test/workspace.html" };
+  const content = { id: "test", frameId: 0, url: "https://pinterest.com/", tab: { id: 4 } };
+  const send = (message, sender = workspace) => new Promise(resolve => handlers.message(message, sender, resolve));
+  const message = { type: "alchemy:sessions-list", searchTerm: "小说", archived: true, cursor: "next-page", token: "forged", path: "/private", transcript: "forged body" };
+  for (const sender of [content, { ...content, frameId: 1 }, { ...workspace, id: "other" }, { ...workspace, url: "chrome-extension://test.evil/workspace.html" }, { id: "test" }])
+    assert.equal(handlers.message(message, sender, () => assert.fail("untrusted session listing reply")), undefined);
+  assert.equal(calls.length, 0);
+  for (const sender of [workspace, { ...workspace, url: "chrome-extension://test/popup.html" }])
+    assert.equal((await send(message, sender)).ok, true);
+  assert.ok(calls.every(call => call.url.endsWith("/sessions/list") && call.options.headers.Authorization === "Bearer test"));
+  assert.deepEqual(JSON.parse(calls[0].options.body), { searchTerm: "小说", archived: true, cursor: "next-page" });
+  for (const sender of [workspace, content]) for (const path of ["/sessions", "/sessions/list", "/sessions/known-session", "/jobs/../sessions/list"])
+    assert.match((await send({ type: "alchemy:query", path }, sender)).error, /无效/);
+  assert.equal(calls.length, 2, "generic query cannot bypass the dedicated session source check");
+});
+
+test("session input and reverse messages forward chosen IDs with persisted reference and revision only", async () => {
+  const projectId = "a".repeat(64), calls = [];
+  const sessionIds = ["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"];
+  const reference = { id: "input-8", projectId, image: "saved-reference", inputRevision: 8, inputVersions: { session: "new" }, inputs: { session: { instruction: "为定稿配图", sessions: sessionIds.map(id => ({ id, title: "示例", updatedAt: 1 })) } } };
+  const { handlers, chrome } = await background(async (url, options) => {
+    calls.push({ url, options });
+    const value = url.endsWith("/jobs") ? { id: "new-job", projectId, mode: "session", instruction: "为定稿配图", stage: "started" } : reference;
+    return { ok: true, json: async () => value };
+  });
+  const storage = { preferences: { token: "secret", mode: "recreate" }, selection: { id: "input-7", projectId, inputRevision: 7 } };
+  chrome.storage.local.get = async () => storage;
+  chrome.storage.local.set = async value => Object.assign(storage, value);
+  const sender = { id: "test", url: "chrome-extension://test/workspace.html" };
+  const send = message => new Promise(resolve => handlers.message(message, sender, resolve));
+  const forged = { transcript: "untrusted transcript", sessionContext: { messages: ["forged"] }, path: "/private", token: "forged" };
+  const saved = await send({ type: "alchemy:update-project-input", projectId, expectedRevision: 7, mode: "session", sessionIds, instruction: "为定稿配图", ...forged });
+  assert.equal(saved.ok, true);
+  assert.deepEqual(JSON.parse(calls[0].options.body), { expectedRevision: 7, mode: "session", sessionIds, instruction: "为定稿配图" });
+  assert.equal(storage.selection.inputRevision, 8);
+  assert.equal(storage.selection.inputs, undefined, "local storage must not duplicate server inputs");
+  const started = await send({ type: "alchemy:start", projectId, id: "input-8", inputRevision: 8, mode: "session", sessionIds, instruction: "为定稿配图", image: "forged-image", ...forged });
+  assert.equal(started.ok, true);
+  const submitted = calls.findLast(call => call.url.endsWith("/jobs"));
+  assert.deepEqual(JSON.parse(submitted.options.body), { image: "saved-reference", mode: "session", sessionIds, instruction: "为定稿配图", projectId, inputRevision: 8 });
+  assert.equal(submitted.options.headers.Authorization, "Bearer secret");
+  assert.equal(started.value.job.mode, "session");
+  const count = calls.filter(call => call.url.endsWith("/jobs")).length;
+  assert.match((await send({ type: "alchemy:start", projectId, mode: "session", sessionIds, inputRevision: 7 })).error, /已在其他窗口更新/);
+  assert.equal(calls.filter(call => call.url.endsWith("/jobs")).length, count);
+});
+
+test("session lane and its version survive project-view saving and explicit workspace handoff", async () => {
+  const { handlers, chrome, tabs, sessionStorage } = await background(() => assert.fail("workspace handoff must not read sessions or start inference"));
+  const projectId = "a".repeat(64), jobId = "00000000-0000-0000-0000-000000000001";
+  const storage = { preferences: { token: "secret", mode: "style" }, selection: { id: "input-3", projectId, inputRevision: 3 } };
+  chrome.storage.local.get = async () => storage;
+  chrome.storage.local.set = async value => Object.assign(storage, value);
+  const workspace = { id: "test", url: "chrome-extension://test/workspace.html" };
+  const content = { id: "test", frameId: 0, url: "https://pinterest.com/", tab: { id: 4 } };
+  const send = (message, sender = workspace) => new Promise(resolve => handlers.message(message, sender, resolve));
+  assert.equal((await send({ type: "alchemy:save-project-view", projectId, view: { mode: "session", versions: { session: jobId }, inputRevision: 3 } })).ok, true);
+  assert.equal(storage[`projectView:${projectId}`].mode, "session");
+  assert.equal((await send({ type: "alchemy:mode", mode: "session" })).ok, true);
+  assert.equal(storage.preferences.mode, "session");
+  const context = { mode: "session", selection: storage.selection };
+  const draft = { versions: { [`${projectId}:session`]: jobId }, instructions: { [`${projectId}:session:${jobId}`]: "创作要求" } };
+  for (const explicit of [false, true]) {
+    assert.equal((await send({ type: "alchemy:open-workspace", ...(explicit ? { context, draft } : {}) }, content)).ok, true);
+    const id = new URL(tabs.at(-1).url).searchParams.get("handoff");
+    assert.equal(sessionStorage[`workspace:${id}`].mode, "session");
+    const restored = (await send({ type: "alchemy:workspace-handoff", id })).value;
+    assert.equal(restored.mode, "session");
+    assert.equal(restored.selection.projectId, projectId);
+    assert.equal(restored.selection.inputRevision, 3);
+    if (explicit) assert.deepEqual(restored.draft, draft);
+    assert.equal(sessionStorage[`workspace:${id}`], undefined);
+  }
+  assert.equal(JSON.stringify(sessionStorage).includes("secret"), false);
 });
 
 test("deleting projects validates ids and clears only the deleted active selection after success", async () => {
@@ -198,6 +281,7 @@ async function background(fetch = async () => ({ ok: true, json: async () => ({ 
       id: "test",
       getContexts: async () => [],
       getURL: (path) => `chrome-extension://test${path}`,
+      onConnect: { addListener: fn => { handlers.connect = fn; } },
       onInstalled: {
         addListener: (fn) => {
           handlers.installed = fn;
@@ -253,10 +337,10 @@ async function background(fetch = async () => ({ ok: true, json: async () => ({ 
     chrome,
     console,
     crypto,
-    AbortSignal,
+    AbortSignal, AbortController,
     TextEncoder,
     URLSearchParams,
-    setTimeout, clearTimeout,
+    setTimeout, clearTimeout, setInterval, clearInterval,
     fetch: (url, options) => String(url).includes("/task-feed") ? Promise.resolve({ ok: true, json: async () => ({ revision: "test", tasks: [] }) }) : fetch(url, options),
     ...globals,
   });
@@ -1228,4 +1312,128 @@ test("service restart explains an old bridge route and preserves actionable serv
   assert.match((await send()).error, /npm stop.*npm start/);
   error = "任务执行中，请等待完成";
   assert.equal((await send()).error, error);
+});
+
+const clientCode = ts.transpileModule(await readFile(new URL('../lib/client.ts', import.meta.url), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+function requestClock() {
+  let now = 0, id = 0;
+  const timers = new Map();
+  return {
+    setTimeout(fn, delay) { timers.set(++id, { fn, at: now + delay }); return id; },
+    clearTimeout(key) { timers.delete(key); },
+    tick(ms) { now += ms; for (const [key, timer] of [...timers]) if (timer.at <= now) { timers.delete(key); timer.fn(); } },
+  };
+}
+function portClient(bg, clock, sender = { id: 'test', url: 'chrome-extension://test/workspace.html' }) {
+  const event = () => {
+    const listeners = new Set();
+    return { addListener: fn => listeners.add(fn), removeListener: fn => listeners.delete(fn), emit: value => [...listeners].forEach(fn => fn(value)) };
+  };
+  const ports = [];
+  const runtime = {
+    sendMessage: message => new Promise(resolve => bg.handlers.message(message, sender, resolve)),
+    connect({ name }) {
+      let closed = false;
+      const ui = { onMessage: event(), onDisconnect: event() };
+      const worker = { name, sender, onMessage: event(), onDisconnect: event() };
+      ui.postMessage = message => { if (!closed) worker.onMessage.emit(message); };
+      worker.postMessage = message => { if (!closed) ui.onMessage.emit(message); };
+      ui.disconnect = () => { if (!closed) { closed = true; worker.onDisconnect.emit(); } };
+      worker.disconnect = () => { if (!closed) { closed = true; ui.onDisconnect.emit(); } };
+      ports.push({ ui, worker }); bg.handlers.connect(worker); return ui;
+    },
+  };
+  const exports = {};
+  runInNewContext(clientCode, { exports, require: () => ({ browser: { runtime } }), DOMException, ...clock });
+  return { request: exports.request, ports };
+}
+const flushRequest = () => new Promise(resolve => setImmediate(resolve));
+const transportProject = 'a'.repeat(64);
+const transportReference = { id: 'input-1', projectId: transportProject, image: 'reference', inputRevision: 1 };
+const transportMessages = [
+  { type: 'alchemy:sessions-list' },
+  { type: 'alchemy:update-project-input', projectId: transportProject, expectedRevision: 1, mode: 'session', sessionIds: ['00000000-0000-0000-0000-000000000001'], instruction: '封面' },
+  { type: 'alchemy:start', projectId: transportProject, id: 'input-1', inputRevision: 1, mode: 'session', sessionIds: ['00000000-0000-0000-0000-000000000001'], instruction: '封面' },
+];
+async function slowTransport() {
+  const clock = requestClock(), pending = [];
+  let writes = 0;
+  const bg = await background(async (url, options) => {
+    if (url.endsWith('/reference')) return { ok: true, json: async () => transportReference };
+    return new Promise((resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      pending.push({ signal: options.signal, complete() {
+        if (options.signal.aborted) return;
+        const value = url.endsWith('/sessions/list') ? { data: [{ id: 'chosen', title: '小说', updatedAt: 1 }], nextCursor: null }
+          : url.endsWith('/jobs') ? { id: 'job', mode: 'session', projectId: transportProject, stage: 'started' }
+          : { ...transportReference, inputRevision: 2 };
+        if (!url.endsWith('/sessions/list')) writes++;
+        resolve({ ok: true, json: async () => value });
+      } });
+    });
+  }, { AbortSignal: { any: AbortSignal.any, timeout(ms) {
+    const controller = new AbortController(); clock.setTimeout(() => controller.abort(new DOMException('timeout', 'TimeoutError')), ms); return controller.signal;
+  } } });
+  bg.chrome.storage.local.get = async () => ({ preferences: { token: 'test' }, selection: transportReference });
+  return { ...portClient(bg, clock), clock, pending, bg, get writes() { return writes; } };
+}
+
+for (const message of transportMessages) {
+  test(`${message.type} client→built background→HTTP accepts a 60-second read without the old 35-second failure`, async () => {
+    const flow = await slowTransport();
+    let settled = false;
+    const result = flow.request(message).finally(() => { settled = true; });
+    await flushRequest();
+    assert.equal(flow.pending.length, 1);
+    flow.ports[0].worker.postMessage({ pending: true });
+    flow.clock.tick(60_000); await flushRequest();
+    assert.equal(settled, false, 'the UI must still await the authoritative result');
+    assert.equal(flow.pending[0].signal.aborted, false);
+    flow.pending[0].complete();
+    const value = await result;
+    assert.ok(value);
+    assert.equal(flow.writes, message.type === 'alchemy:sessions-list' ? 0 : 1);
+  });
+  test(`${message.type} HTTP deadline reaches UI and prevents the delayed read from writing`, async () => {
+    const flow = await slowTransport();
+    const result = assert.rejects(flow.request(message), /请求超时/);
+    await flushRequest(); flow.clock.tick(120_000); await result;
+    assert.equal(flow.pending[0].signal.aborted, true);
+    flow.pending[0].complete(); await flushRequest();
+    assert.equal(flow.writes, 0);
+  });
+  test(`${message.type} closing the UI port aborts HTTP before a delayed write`, async () => {
+    const flow = await slowTransport();
+    const result = assert.rejects(flow.request(message), /结果尚未确认/);
+    await flushRequest();
+    flow.ports[0].worker.disconnect(); await result;
+    // A browser disconnection also reaches the worker side of the connection.
+    flow.ports[0].worker.onDisconnect.emit();
+    assert.equal(flow.pending[0].signal.aborted, true);
+    flow.pending[0].complete(); await flushRequest();
+    assert.equal(flow.writes, 0);
+  });
+}
+
+test('cancelled session search aborts only its own HTTP request; a replacement gets its own result', async () => {
+  const flow = await slowTransport(), controller = new AbortController();
+  const first = assert.rejects(flow.request({ type: 'alchemy:sessions-list', searchTerm: '旧' }, controller.signal), { name: 'AbortError' });
+  await flushRequest(); controller.abort(); await first;
+  const second = flow.request({ type: 'alchemy:sessions-list', searchTerm: '新' });
+  await flushRequest();
+  assert.equal(flow.pending[0].signal.aborted, true);
+  assert.equal(flow.pending[1].signal.aborted, false);
+  flow.pending[0].complete(); flow.pending[1].complete();
+  assert.equal((await second).data[0].title, '小说');
+});
+
+test('request port cannot let a content script query local sessions or invoke arbitrary actions', async () => {
+  const flow = await slowTransport();
+  const content = portClient(flow.bg, flow.clock, { id: 'test', frameId: 0, tab: { id: 1 }, url: 'https://example.com/' });
+  await assert.rejects(content.request({ type: 'alchemy:sessions-list' }), /无效请求/);
+  const port = flow.ports;
+  assert.equal(port.length, 0);
+  assert.equal(flow.pending.length, 0);
 });

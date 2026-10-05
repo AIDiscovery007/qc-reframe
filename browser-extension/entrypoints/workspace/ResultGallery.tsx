@@ -8,7 +8,7 @@ import SelectField from "../popup/SelectField";
 import GalleryImage, { thumbnailLoader } from "./GalleryImage";
 import useGallery from "./useGallery";
 
-const modes = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演" };
+const modes = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
 const day = (value: string) => new Date(value).toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
 
 export default function ResultGallery({ connected, revision, showHidden, hiddenProjectIds, visibilityToggle, onOpen }: {

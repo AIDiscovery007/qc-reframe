@@ -9,11 +9,12 @@ import ImagePreview from "../popup/ImagePreview";
 import PromptSheet from "./PromptSheet";
 import useEditorExpansion from "./useEditorExpansion";
 
-const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演" };
-export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contextKey, mode, image, subjectImage, subjects, selected, onSelect, instruction, disabled, modeDisabled, reverseDisabled, running, cancelling, status, error, errorTaskId, stale, hasPrompt, promptEditing, reduced, versions, prompt, generationActions, onMode, onInstruction, onSubject, onAvailability, onSubjects, onReference, onReferenceRotate, onSwap, onReverse, onExtract, onCancel, onRetryReference }: {
+const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
+export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contextKey, mode, image, subjectImage, subjects, selected, onSelect, instruction, disabled, modeDisabled, reverseDisabled, running, cancelling, status, error, errorTaskId, stale, hasPrompt, promptEditing, reduced, versions, prompt, generationActions, onMode, onInstruction, onSubject, onAvailability, onSubjects, onReference, onReferenceRotate, onSwap, onReverse, onExtract, onCancel, onRetryReference, sessionTitle, onSessions }: {
   revealPrompt?: number; onPromptRevealed?(): void; contextKey: string; mode: Mode; image?: string; subjectImage: string; subjects: MultiSubject[]; selected: string; onSelect(id: string): void;
   instruction: string; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; running: boolean; cancelling: boolean;
   status?: string; error?: string; errorTaskId?: string; stale: boolean; hasPrompt: boolean; promptEditing: boolean; reduced: boolean;
+  sessionTitle?: string; onSessions?(): void;
   versions: ReactNode; prompt: ReactNode; generationActions(element: HTMLDivElement | null): void;
   onMode(mode: Mode): void; onInstruction(value: string): void; onSubject(image: string): void | Promise<void>; onAvailability(available: boolean): void;
   onSubjects(subjects: MultiSubject[]): void | Promise<void>; onReference(image: string): Promise<void>; onReferenceRotate(image: string): Promise<void>; onSwap(id?: string): void;
@@ -41,10 +42,10 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
   const settingsTrigger = useRef<HTMLButtonElement>(null);
   const settingsPanel = useRef<HTMLDivElement>(null);
   const current = mode === "multi-reenact" ? subjects.find(item => item.id === selected) : undefined;
-  const isSubject = mode !== "recreate" && (mode === "multi-reenact" ? !!current : selected === "subject");
+  const isSubject = (mode !== "recreate" && mode !== "session") && (mode === "multi-reenact" ? !!current : selected === "subject");
   const currentImage = isSubject ? current?.subjectImage ?? subjectImage : image;
   const index = current ? subjects.indexOf(current) : -1;
-  const label = isSubject ? current ? `主体 ${index + 1}` : "主体图" : mode === "style" || mode === "recreate" ? "参考图" : "参考模板";
+  const label = isSubject ? current ? `主体 ${index + 1}` : "主体图" : mode === "style" || mode === "recreate" || mode === "session" ? "参考图" : "参考模板";
   const locked = disabled || uploading || open;
   useEffect(() => {
     const before = previous.current;
@@ -134,10 +135,11 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
             : !isSubject ? <LoadingPlaceholder active={!error}>{error || "正在读取参考图…"}</LoadingPlaceholder>
             : <button className="canvas-upload" disabled={locked} onClick={() => choose(current?.id || "subject")}><Icon name="plus" />上传{label}</button>}
         </div>
-        <div className="canvas-filmstrip" role="group" aria-label="图片图条" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); target.current = mode === "multi-reenact" ? "add" : mode === "recreate" ? "reference" : "subject"; void readFiles([...event.dataTransfer.files]); }}>
-          {mode !== "recreate" && (mode === "multi-reenact" ? subjects.map((item, i) => <button key={item.id} aria-label={`查看主体 ${i + 1}`} aria-pressed={current?.id === item.id} onClick={() => select(item.id)}>{item.subjectImage ? <img src={item.subjectImage} alt="" /> : <Icon name="plus" />}主体 {i + 1}</button>) : <button aria-label="查看主体图" aria-pressed={isSubject} onClick={() => select("subject")}>{subjectImage ? <img src={subjectImage} alt="" /> : <Icon name="plus" />}主体图{mode === "style" ? " · 可选" : ""}</button>)}
+        <div className="canvas-filmstrip" role="group" aria-label="图片图条" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); target.current = mode === "multi-reenact" ? "add" : (mode === "recreate" || mode === "session") ? "reference" : "subject"; void readFiles([...event.dataTransfer.files]); }}>
+          {(mode !== "recreate" && mode !== "session") && (mode === "multi-reenact" ? subjects.map((item, i) => <button key={item.id} aria-label={`查看主体 ${i + 1}`} aria-pressed={current?.id === item.id} onClick={() => select(item.id)}>{item.subjectImage ? <img src={item.subjectImage} alt="" /> : <Icon name="plus" />}主体 {i + 1}</button>) : <button aria-label="查看主体图" aria-pressed={isSubject} onClick={() => select("subject")}>{subjectImage ? <img src={subjectImage} alt="" /> : <Icon name="plus" />}主体图{mode === "style" ? " · 可选" : ""}</button>)}
           {mode === "multi-reenact" && <button disabled={locked || subjects.length >= 6} aria-label="添加主体图" onClick={() => choose("add")}><Icon name="plus" /></button>}
           <button aria-label="查看参考图" aria-pressed={!isSubject} onClick={() => select("reference")}>{image ? <img src={image} alt="" /> : <Icon name="image" />}参考图</button>
+          {mode === "session" && <button className="session-entry" aria-label="选择对话会话" aria-haspopup="dialog" disabled={locked} onClick={onSessions} title={sessionTitle || "选择对话会话"}><Icon name={sessionTitle ? "check" : "plus"} /><span>{sessionTitle || "选择对话会话"}</span></button>}
         </div>
       </div>
       <div className="canvas-controls">
@@ -147,8 +149,8 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
         </SelectField>
         <span className="canvas-tool-divider" />
         <button className="quiet-button" disabled={locked} aria-label={currentImage ? "替换当前图片" : "上传当前图片"} title={currentImage ? "替换当前图片" : "上传当前图片"} onClick={() => choose(isSubject ? current?.id || "subject" : "reference")}><Icon name="image" /><span>{currentImage ? "替换" : "上传"}</span></button>
-        {mode !== "recreate" && <button className="quiet-button canvas-icon-tool" aria-label="互换主体与参考" title="互换主体与参考" disabled={locked || !image || (mode === "multi-reenact" ? !current?.subjectImage : !subjectImage)} onClick={() => onSwap(current?.id)}><Icon name="swap" /></button>}
-        {mode !== "recreate" && <button className="quiet-button canvas-icon-tool" aria-label="移除主体" title="移除主体" disabled={locked || !isSubject} onClick={() => void remove()}><Icon name="trash" /></button>}
+        {(mode !== "recreate" && mode !== "session") && <button className="quiet-button canvas-icon-tool" aria-label="互换主体与参考" title="互换主体与参考" disabled={locked || !image || (mode === "multi-reenact" ? !current?.subjectImage : !subjectImage)} onClick={() => onSwap(current?.id)}><Icon name="swap" /></button>}
+        {(mode !== "recreate" && mode !== "session") && <button className="quiet-button canvas-icon-tool" aria-label="移除主体" title="移除主体" disabled={locked || !isSubject} onClick={() => void remove()}><Icon name="trash" /></button>}
         {mode === "multi-reenact" && <button ref={settingsTrigger} className="quiet-button canvas-icon-tool" aria-label="主体设置" title="主体设置" aria-expanded={settings} disabled={locked || !current} onClick={() => setSettings(!settings)}><Icon name="settings" /></button>}
         {versions && <><span className="canvas-tool-divider" /><div className="canvas-versions">{versions}</div></>}
         {settings && current && <div ref={settingsPanel} className="canvas-subject-settings" role="group" aria-label="主体设置" onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setSettings(false); settingsTrigger.current?.focus(); } }}>

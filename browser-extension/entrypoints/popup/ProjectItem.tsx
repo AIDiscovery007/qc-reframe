@@ -54,7 +54,7 @@ export default function ProjectItem({ project, disabled, selected, onSelect, onD
     {image ? <img className="project-thumbnail" src={image} alt="项目参考模板" decoding="async" /> : <span className="project-thumbnail placeholder">模板</span>}
     <span className="project-description"><strong>{project.title}</strong>
       <small>{new Date(project.updatedAt).toLocaleString("zh-CN")} · {project.jobCount ? `${project.jobCount} 次逆向` : "待逆向"}{project.busy ? " · 任务进行中" : ""}{project.hidden ? " · 已隐藏" : ""}</small>
-      {project.jobCount > 0 && <small>{([['style', '风格'], ['recreate', '复刻'], ['reenact', '重演'], ['multi-reenact', '多图']] as const).flatMap(([mode, name]) => {
+      {project.jobCount > 0 && <small>{([['style', '风格'], ['recreate', '复刻'], ['reenact', '重演'], ['multi-reenact', '多图'], ['session', '会话']] as const).flatMap(([mode, name]) => {
         const lane = project.modes[mode];
         return lane ? [`${name} ${lane.status === 'running' ? '逆向中' : lane.status !== 'completed' ? '待重试' : lane.hasImage ? '图已生成' : '词已生成'}`] : [];
       }).join(' · ')}</small>}

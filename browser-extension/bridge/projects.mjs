@@ -8,7 +8,7 @@ const inputFor = (job) => {
   const instruction = job.instruction ?? job.reenact?.basePrompt;
   const subjectAsset = job.generations?.findLast((generation) => generation.subjectAsset)?.subjectAsset || job.subjectAsset;
   const subjects = job.generations?.findLast((generation) => generation.subjects)?.subjects || job.reenact?.subjects;
-  return { ...(instruction !== undefined ? { instruction } : {}), ...(subjectAsset ? { subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
+  return { ...(instruction !== undefined ? { instruction } : {}), ...(subjectAsset ? { subjectAsset } : {}), ...(subjects ? { subjects } : {}), ...(job.sessionContext ? { sessions: job.sessionContext.sources } : {}) };
 };
 
 // Finish interrupted deletions before legacy jobs can recreate their projects.
@@ -18,7 +18,7 @@ export async function recoverProjectDeletion(dataDir, legacyDir = dataDir) {
   try { files = JSON.parse(await readFile(path, "utf8")); }
   catch (error) { if (error.code === "ENOENT") return; throw error; }
   if (!Array.isArray(files) || files.some((file) => typeof file !== "string" ||
-    !/^(?:project-[a-f0-9]{64}|[a-f0-9-]{36}(?:-subject)?|[\w-]+-generated)[.](?:json|png|jpeg|webp)$/.test(file)))
+    !/^(?:project-[a-f0-9]{64}|[a-f0-9-]{36}(?:-subject|-session-context)?|[\w-]+-generated)[.](?:json|png|jpeg|webp)$/.test(file)))
     throw new Error("项目删除记录无效，已停止清理");
   for (const file of files) await rm(join(file.endsWith(".json") ? dataDir : legacyDir, file), { force: true });
   await rm(path);
@@ -134,7 +134,7 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
     let cover, coverDate = "";
     let updatedAt = project.updatedAt;
     for (const job of history) {
-      if (["style", "recreate", "reenact", "multi-reenact"].includes(job.mode) && !modes[job.mode]) {
+      if (["style", "recreate", "reenact", "multi-reenact", "session"].includes(job.mode) && !modes[job.mode]) {
         modes[job.mode] = { status: job.status, hasImage: Boolean(job.generations?.some((generation) => generation.status === "completed")) };
       }
       if (job.createdAt > updatedAt) updatedAt = job.createdAt;
@@ -166,16 +166,17 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
       const history = projectJobs(id);
       const currentJob = (mode) => history.find((job) => job.mode === mode && (previous.inputVersions?.[mode] === undefined || job.id === previous.inputVersions[mode]));
       const inputs = { ...previous.inputs };
-      for (const mode of ["style", "recreate", "reenact", "multi-reenact"]) {
+      for (const mode of ["style", "recreate", "reenact", "multi-reenact", "session"]) {
         const job = currentJob(mode);
         if (!Object.hasOwn(inputs, mode) && job) inputs[mode] = inputFor(job);
       }
-      const arrangementChanged = mode === "multi-reenact" && JSON.stringify(input.subjects || []) !== JSON.stringify(inputs[mode]?.subjects || []);
+      const arrangementChanged = (mode === "multi-reenact" && JSON.stringify(input.subjects || []) !== JSON.stringify(inputs[mode]?.subjects || [])) ||
+        (mode === "session" && JSON.stringify(input.sessions || []) !== JSON.stringify(inputs[mode]?.sessions || []));
       const previousJob = currentJob(mode);
       const historical = referenceJobId !== undefined && referenceJobId !== (previous.inputVersions?.[mode] ?? previousJob?.id);
       const instruction = inputs[mode]?.instruction;
       const inputVersions = { ...previous.inputVersions };
-      if (referenceChanged) for (const mode of ["style", "recreate", "reenact", "multi-reenact"]) inputVersions[mode] = "new";
+      if (referenceChanged) for (const mode of ["style", "recreate", "reenact", "multi-reenact", "session"]) inputVersions[mode] = "new";
       else if (historical || arrangementChanged || (instruction !== undefined && input.instruction !== instruction)) inputVersions[mode] = "new";
       else inputVersions[mode] ??= previousJob?.id || "new";
       const project = { ...previous, imageAsset, extension: image?.extension || previous.extension,
@@ -217,7 +218,7 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
       const images = (prefix) => ["png", "jpeg", "webp"].map((extension) => `${prefix}.${extension}`);
       const files = ids.flatMap((id) => [`project-${id}.json`, ...images(`project-${id}`)]);
       for (const job of history) {
-        files.push(`${job.id}.json`, ...images(job.id), ...images(`${job.id}-subject`));
+        files.push(`${job.id}.json`, `${job.id}-session-context.json`, ...images(job.id), ...images(`${job.id}-subject`));
         for (const generation of job.generations || []) {
           if (/^[\w-]+$/.test(generation.id)) files.push(...images(`${generation.id}-generated`));
           if (/^[a-f0-9-]{36}$/.test(generation.id)) files.push(...images(`${generation.id}-subject`));

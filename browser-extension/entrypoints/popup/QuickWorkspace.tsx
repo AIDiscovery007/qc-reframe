@@ -7,7 +7,7 @@ import LoadingPlaceholder from "./LoadingPlaceholder";
 import SelectField from "./SelectField";
 import Icon from "./Icon";
 
-const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演" };
+const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
 
 export default function QuickWorkspace({ revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, instruction, job, disabled, modeDisabled, reverseDisabled, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, generationDisabled, generationHint }: {
   revealPrompt?: number; targetGeneration?: string; contextKey: string; selection?: Selection; title?: string; mode: Mode; subject: string; instruction: string; job?: Job;
@@ -67,7 +67,7 @@ export default function QuickWorkspace({ revealPrompt, targetGeneration, context
   const rotateSubject = async (image: string) => {
     if (!await saveSubject(async () => image, true)) throw new Error("当前输入已切换，请重新调整图片");
   };
-  const multi = mode === "multi-reenact";
+  const multi = mode === "multi-reenact" || mode === "session";
   const paired = mode === "style" || mode === "reenact";
   const image = selected === "subject" && paired ? subject : selection?.image;
   const label = selected === "subject" && paired ? "主体图" : "参考图";
@@ -92,7 +92,7 @@ export default function QuickWorkspace({ revealPrompt, targetGeneration, context
     <input ref={referenceFile} hidden type="file" accept="image/png,image/jpeg,image/webp" aria-label="上传参考图" onChange={e => { onReference(e.target.files?.[0]); e.target.value = ""; }} />
     <input ref={subjectFile} hidden type="file" accept="image/png,image/jpeg,image/webp" aria-label="上传主体图" onChange={e => { void uploadSubject(e.target.files?.[0]); e.target.value = ""; }} />
     {(error || selection?.error || job?.error) && <p data-reminder-task={!error && job?.error && job.status === "failed" ? job.id : undefined} className="error" role="alert">{error || job?.error || selection?.error}</p>}
-    {multi ? <div className="quick-handoff"><span>多图编排在工作台继续</span><button className="primary" disabled={uploading} onClick={onWorkspace}>打开工作台<Icon name="arrow" /></button></div> : selection ? <div className="quick-compose">
+    {multi ? <div className="quick-handoff"><span>{mode === "session" ? "会话创作在工作台继续" : "多图编排在工作台继续"}</span><button className="primary" disabled={uploading} onClick={onWorkspace}>打开工作台<Icon name="arrow" /></button></div> : selection ? <div className="quick-compose">
       <textarea aria-label="任务指令" rows={2} value={instruction} disabled={locked} onChange={e => onInstruction(e.target.value)} />
       <div className="quick-submit"><span role="status">{status || (stale ? "输入已修改" : job?.status === "cancelled" ? "已取消" : "")}</span>{job?.status === "running" ? <button className="text-button" disabled={cancelling} onClick={onCancel}>{cancelling ? "正在取消…" : "取消"}</button> : <button className="primary" disabled={reverseDisabled || uploading} onClick={onReverse}>{job?.result ? "重新生成" : "生成提示词"}<Icon name="arrow" /></button>}</div>
     </div> : <p className="quick-empty-hint">也可从网页图片打开快捷面板</p>}
@@ -111,7 +111,7 @@ function QuickResult({ targetGeneration, job, lang, subject, disabled, hint, onS
   const generation = job.generations?.find(item => item.id === targetGeneration) || running || job.generations?.at(-1);
   const generic = job.mode === "style" && !job.reenact;
   const incomplete = /\[SUBJECT\]/i.test(lang === "zh" ? job.result?.promptZh || "" : job.result?.promptEn || "");
-  const inputsReady = job.mode === "recreate" || !!subject;
+  const inputsReady = (job.mode === "recreate" || job.mode === "session") || !!subject;
   const pending = useRef(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -130,7 +130,7 @@ function QuickResult({ targetGeneration, job, lang, subject, disabled, hint, onS
     pending.current = true;
     setCancelling(true); setError("");
     try { const updated = await request<Job>({ type: cancel ? "alchemy:generation-cancel" : "alchemy:generate", id: job.id, generationId: cancel ? running?.id : undefined,
-      ...(!cancel ? { language: lang, aspectRatio: generation?.aspectRatio, ...(job.mode !== "recreate" ? { subjectImage: subject } : {}) } : {}) }); if (mounted.current) onUpdate(updated); }
+      ...(!cancel ? { language: lang, aspectRatio: generation?.aspectRatio, ...(job.mode !== "recreate" && job.mode !== "session" ? { subjectImage: subject } : {}) } : {}) }); if (mounted.current) onUpdate(updated); }
     catch (error) { if (mounted.current) setError((error as Error).message); }
     finally { pending.current = false; if (mounted.current) setCancelling(false); }
   };

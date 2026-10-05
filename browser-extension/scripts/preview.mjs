@@ -123,13 +123,13 @@ createServer(async (req, res) => {
           if(state==='generation-completed'||state==='alignment')job.generations=[{id:'preview-generation',createdAt:job.createdAt,prompt:job.result.promptZh,negativePrompt:job.result.negativePrompt,model:'preview-vision',status:'completed',stage:'图片已生成',language:'zh',extension:'png'}];
         }
         const alignment = ${JSON.stringify(alignment)};
-        if(state==='alignment') {
+        if(state==='alignment'||state.startsWith('session')) {
           job.mode='recreate';job.instruction='分析参考图的主体、内容、构图、配色、光影与材质，生成可用于文生图的完整提示词。';
           job.result.title='双画布对齐示例';
-          job.generations=Array.from({length:Math.min(12,Math.max(1,Number(previewOptions.get('results'))||1))},(_,i)=>({...job.generations[0],id:'alignment-result-'+i}));
+          if(state==='alignment')job.generations=Array.from({length:Math.min(12,Math.max(1,Number(previewOptions.get('results'))||1))},(_,i)=>({...job.generations[0],id:'alignment-result-'+i}));
         }
         const gallery = ${JSON.stringify(gallery)};
-        const template = state==='alignment'?alignment[0].image:state === 'gallery' || state.startsWith('multi') ? gallery.reference : ${JSON.stringify(image)};
+        const template = state==='alignment'||state.startsWith('session')?alignment[0].image:state === 'gallery' || state.startsWith('multi') ? gallery.reference : ${JSON.stringify(image)};
         const subject = state === 'gallery' ? gallery.subject : template;
         const projectId='a'.repeat(64), secondId='b'.repeat(64);
         job.projectId=projectId;
@@ -174,8 +174,14 @@ createServer(async (req, res) => {
         const summary=(project)=>{
           const {jobs,image,...metadata}=project;
           const completed=jobs.flatMap(job=>(job.generations||[]).filter(g=>g.status==='completed').map(g=>({jobId:job.id,generationId:g.id,createdAt:g.createdAt}))).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0];
-          return {...metadata,cover:completed?{jobId:completed.jobId,generationId:completed.generationId}:undefined,busy:jobs.some(j=>j.status==='running'||j.generations?.some(g=>g.status==='running')),jobCount:jobs.length,modes:Object.fromEntries(['style','recreate','reenact','multi-reenact'].flatMap(mode=>{const item=jobs.find(j=>j.mode===mode);return item?[[mode,{status:item.status,hasImage:!!item.generations?.some(g=>g.status==='completed')}]]:[]}))};
+          return {...metadata,cover:completed?{jobId:completed.jobId,generationId:completed.generationId}:undefined,busy:jobs.some(j=>j.status==='running'||j.generations?.some(g=>g.status==='running')),jobCount:jobs.length,modes:Object.fromEntries(['style','recreate','reenact','multi-reenact','session'].flatMap(mode=>{const item=jobs.find(j=>j.mode===mode);return item?[[mode,{status:item.status,hasImage:!!item.generations?.some(g=>g.status==='completed')}]]:[]}))};
         };
+        const sessionRows=[
+          {id:'11111111-1111-4111-8111-111111111111',title:'雨夜来信 · 小说创作',updatedAt:1791181920},
+          {id:'22222222-2222-4222-8222-222222222222',title:'海边小城的 48 小时 · 视频剪辑',updatedAt:1791108360},
+          {id:'33333333-3333-4333-8333-333333333333',title:'星际邮差 · 漫画设定',updatedAt:1790997600},
+        ];
+        const selectedSessionRows=ids=>(ids||[]).map(id=>sessionRows.find(row=>row.id===id)).filter(Boolean);
         const collected=new Map();
         let failedPage=false;
         const projectPage=async(message)=>{
@@ -213,7 +219,11 @@ createServer(async (req, res) => {
         globalThis.chrome = {storage:{local:{
           get:async()=>{throw new Error('Access to storage is not allowed from this context.');},
           set:async()=>{throw new Error('Access to storage is not allowed from this context.');}
-        }},runtime:{id:'preview',getManifest:()=>({name:'QC-Reframe preview',version:'0.1.18'}),onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)},sendMessage:async(message)=>{
+        }},runtime:{connect:()=>{
+          const messages=new Set(),disconnects=new Set();let closed=false;
+          return {onMessage:{addListener:fn=>messages.add(fn),removeListener:fn=>messages.delete(fn)},onDisconnect:{addListener:fn=>disconnects.add(fn),removeListener:fn=>disconnects.delete(fn)},
+            disconnect:()=>{closed=true;},postMessage:message=>{void chrome.runtime.sendMessage(message).then(value=>{if(!closed)messages.forEach(fn=>fn(value));},error=>{if(!closed)messages.forEach(fn=>fn({error:error.message}));});}};
+        },id:'preview',getManifest:()=>({name:'QC-Reframe preview',version:'0.1.18'}),onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)},sendMessage:async(message)=>{
           if(message.type.startsWith('alchemy:reminder-')) {
             const preferences=JSON.parse(localStorage.getItem('preview-reminders')||'{"sound":false,"tone":"calm","volume":30}');
             if(preferences.tone==='soft')preferences.tone='calm';
@@ -249,6 +259,13 @@ createServer(async (req, res) => {
           if(message.type==='alchemy:quick-draft'){const key=location.pathname.includes('popup')?'quick-popup':'quick-panel';if(message.context){sessionStorage.setItem(key,JSON.stringify({...message.context,draft:message.draft}));return {ok:true};}return {ok:true,value:JSON.parse(sessionStorage.getItem(key)||'null')};}
           if(message.type==='alchemy:open-workspace'){sessionStorage.setItem('workspace-draft',JSON.stringify({...message.context,draft:message.draft,projects,data}));const params=new URLSearchParams({handoff:'preview',...(message.view?{view:message.view}:{})});if(location.pathname==='/workspace.html'||location.pathname==='/'){params.set('request',crypto.randomUUID());location.hash='workspace='+params;}else location.href='/workspace.html?state='+state+'&'+params;return {ok:true};}
           if(message.type==='alchemy:workspace-handoff'){const saved=JSON.parse(sessionStorage.getItem('workspace-draft')||'null');sessionStorage.removeItem('workspace-draft');return {ok:true,value:saved};}
+          if(message.type==='alchemy:sessions-list') {
+            if(state==='session-error')return {error:'示例：本机会话读取失败，请重试'};
+            await new Promise(resolve=>setTimeout(resolve,100));
+            const rows=(message.archived?sessionRows.slice(2):sessionRows).filter(row=>!message.searchTerm||row.title.includes(message.searchTerm));
+            const offset=Number(message.cursor)||0;
+            return {ok:true,value:{data:rows.slice(offset,offset+2),nextCursor:offset+2<rows.length?String(offset+2):null}};
+          }
           if(message.type==='alchemy:update-project-input') {
             if(previewOptions.get('swap')==='failed')return {error:'保存失败（预览），原输入已保留'};
             const p=projects.find(p=>p.id===message.projectId);
@@ -256,9 +273,9 @@ createServer(async (req, res) => {
             const before=p.inputs?.[message.mode]||p.jobs.find(j=>j.mode===message.mode)?.reenact;
             const changed=message.image && message.image!==(p.image||template);
             p.inputVersions={...p.inputVersions};
-            if(changed)['style','recreate','reenact','multi-reenact'].forEach(mode=>p.inputVersions[mode]='new');
-            else if(message.mode==='multi-reenact'||before?.instruction!==message.instruction)p.inputVersions[message.mode]='new';
-            p.inputs={...p.inputs,[message.mode]:{instruction:message.instruction,subjectImage:message.subjectImage,subjects:structuredClone(message.subjects)}};
+            if(changed)['style','recreate','reenact','multi-reenact','session'].forEach(mode=>p.inputVersions[mode]='new');
+            else if(message.mode==='session'||message.mode==='multi-reenact'||before?.instruction!==message.instruction)p.inputVersions[message.mode]='new';
+            p.inputs={...p.inputs,[message.mode]:{instruction:message.instruction,subjectImage:message.subjectImage,subjects:structuredClone(message.subjects),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};
             if(message.image)p.image=message.image;
             p.inputRevision=(p.inputRevision||0)+1;touch(p);data.selection=selection(p);
             return {ok:true,value:structuredClone(data.selection)};
@@ -330,9 +347,9 @@ createServer(async (req, res) => {
           if(message.type==='alchemy:start') {
             await new Promise(resolve=>setTimeout(resolve,Math.min(10000,Math.max(0,Number(previewOptions.get('startDelay'))||0))));
             const project=projects.find(p=>p.id===message.projectId);
-            const next={id:'preview-'+Date.now(),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,instruction:message.instruction,reenact:message.reenact?structuredClone(message.reenact):undefined};
-            project.jobs.unshift(next);project.inputs={...project.inputs,[message.mode]:{instruction:message.instruction,...structuredClone(message.reenact)}};project.inputVersions={...project.inputVersions,[message.mode]:next.id};project.inputRevision=(project.inputRevision||0)+1;touch(project);data.selection={...selection(project),jobId:next.id,reenact:structuredClone(message.reenact)};
-            setTimeout(()=>{if(next.status==='running'){next.status='completed';next.stage='逆向完成';next.result={...${JSON.stringify(result)},title:message.mode+' 新提示词',promptZh:'当前路径 '+message.mode+' 的独立提示词',promptEn:'Use the supplied subjects and reference template.'};touch(project);}},1500);
+            const next={id:'preview-'+Date.now(),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,instruction:message.instruction,...(message.mode==='session'?{sessionContext:{sources:selectedSessionRows(message.sessionIds),capturedAt:new Date().toISOString(),hash:'preview-snapshot',messageCount:6,attachmentCount:0}}:{}),reenact:message.reenact?structuredClone(message.reenact):undefined};
+            project.jobs.unshift(next);project.inputs={...project.inputs,[message.mode]:{instruction:message.instruction,...structuredClone(message.reenact),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};project.inputVersions={...project.inputVersions,[message.mode]:next.id};project.inputRevision=(project.inputRevision||0)+1;touch(project);data.selection={...selection(project),jobId:next.id,reenact:structuredClone(message.reenact)};
+            setTimeout(()=>{if(next.status==='running'){next.status='completed';next.stage='逆向完成';next.result={...${JSON.stringify(result)},title:message.mode+' 新提示词',promptZh:message.mode==='session'?'以海边小城的旅行成片为内容，清晨码头、沿海骑行与夕阳灯塔呼应，天空留白；迁移参考图的配色、光影与笔触。':'当前路径 '+message.mode+' 的独立提示词',promptEn:message.mode==='session'?'Illustrate a quiet coastal journey in the visual style of the reference image.':'Use the supplied subjects and reference template.'};touch(project);}},1500);
             return {ok:true,value:{selection:{...data.selection,image:next.image},currentSelection:selection(project),job:structuredClone(next)}};
           }
           if(message.type==='alchemy:cancel'){

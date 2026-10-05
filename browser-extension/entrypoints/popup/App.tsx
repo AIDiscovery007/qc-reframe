@@ -9,6 +9,7 @@ import { pollWhileVisible } from "../../lib/visible-poll";
 import { createPortal } from "react-dom";
 import { normalizeImage } from "../../lib/image";
 import NewProject from "../workspace/NewProject";
+import SessionPicker from "../workspace/SessionPicker";
 import CanvasWorkspace from "../workspace/CanvasWorkspace";
 import PromptEditor from "../workspace/PromptEditor";
 import RecentProject from "../workspace/RecentProject";
@@ -33,12 +34,13 @@ const laneStatus = (job?: Job) => !job ? "待生成" : job.status === "running" 
   : job.generations?.some((item) => item.status === "running") ? "生图中"
   : job.status !== "completed" ? "待重试"
   : job.generations?.some((item) => item.status === "completed") ? "提示词 + 图片" : "提示词已就绪";
-const modeName = (mode: Mode) => ({ style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演" })[mode];
+const modeName = (mode: Mode) => ({ style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" })[mode];
 
 export default function App({ embedded = false, workspace = false }: { embedded?: boolean; workspace?: boolean }) {
   const { reduced } = useMotion();
   const reminderRoot = useRef<HTMLDivElement>(null);
   const reminders = useTaskReminders(reminderRoot);
+  const [sessionPicker, setSessionPicker] = useState<string>();
   const [targetPrompt, setTargetPrompt] = useState<{ jobId: string; request: number }>();
   const [targetGeneration, setTargetGeneration] = useState<{ jobId: string; id: string }>();
   const noticeNavigation = useRef<((params: URLSearchParams) => Promise<void>) | undefined>(undefined);
@@ -147,6 +149,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     return subjectDrafts[subjectDraftKey(mode)] ?? (currentInput(mode) ? currentInput(mode)?.subjectImage || "" : undefined) ?? saved?.generationSubjectImage ?? saved?.reenact?.subjectImage ?? "";
   };
   const instructionKey = (mode: Mode) => `${subjectKey(mode)}:${modeJob(mode)?.id || "new"}`;
+  const selectedSessions = () => currentInput("session")?.sessions ?? modeJob("session")?.sessionContext?.sources ?? [];
   const taskInstruction = (mode: Mode) => {
     const saved = modeJob(mode);
     return instructions[instructionKey(mode)] ?? currentInput(mode)?.instruction ?? saved?.instruction ?? saved?.reenact?.basePrompt ?? defaultInstructions[mode];
@@ -522,7 +525,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         const key = `${next.projectId}:${preferences.mode}`;
         setVersions(items => ({ ...items, [key]: "new" }));
         setInstructions(items => ({ ...items, [`${key}:new`]: taskInstruction(preferences.mode) }));
-        if (preferences.mode !== "recreate") setSubjectDrafts(items => ({ ...items, [`${key}:new`]: subjectImage(preferences.mode) }));
+        if (preferences.mode !== "recreate" && preferences.mode !== "session") setSubjectDrafts(items => ({ ...items, [`${key}:new`]: subjectImage(preferences.mode) }));
       }
       selectionRevision.current++;
       setProjectMode(next.projectId, preferences.mode);
@@ -531,14 +534,14 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     finally { setBusy(false); }
   };
   const saveInput = async (mode: Mode, image: string | undefined, instruction: string,
-    subject: string = subjectImage(mode), subjects: MultiSubject[] = multiSubjects) => {
+    subject: string = subjectImage(mode), subjects: MultiSubject[] = multiSubjects, sessionIds = mode === "session" ? selectedSessions().map(item => item.id) : undefined) => {
     if (blocked || inputSaving.current || !selection?.projectId) throw new Error("当前无法修改图片，请稍后重试");
     const revision = selectionRevision.current, context = referenceContext.current, id = selection.projectId;
     inputSaving.current = true; setBusy(true);
     try {
       const next = await request<Selection>({ type: "alchemy:update-project-input", projectId: id,
         expectedRevision: selection.inputRevision || 0, referenceJobId: modeJob(mode)?.id, image, mode, instruction,
-        ...(mode === "multi-reenact" ? { subjects } : mode !== "recreate" ? { subjectImage: subject } : {}),
+        ...(mode === "session" ? { sessionIds } : mode === "multi-reenact" ? { subjects } : mode !== "recreate" ? { subjectImage: subject } : {}),
       });
       if (revision !== selectionRevision.current || context !== referenceContext.current) return;
       selectionRevision.current++;
@@ -611,7 +614,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     setError("");
     try {
       const value = await request<{ selection: Selection; currentSelection: Selection; job: Job }>({
-        type: "alchemy:start", id: selection.id, projectId: activeProject.id, mode, reenact, instruction: taskInstruction(mode),
+        type: "alchemy:start", id: selection.id, projectId: activeProject.id, mode, reenact, instruction: taskInstruction(mode), ...(mode === "session" ? { sessionIds: selectedSessions().map(item => item.id) } : {}),
         inputRevision: selection.inputRevision || 0, referenceJobId: modeJob(mode)?.id,
       });
       setReferences(items => ({ ...items, [value.job.id]: value.selection }));
@@ -764,7 +767,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const exportResult = () => {
     if (!job?.result) return;
     const r = job.result;
-    const inputs = job.mode === "multi-reenact" ? `\n使用方法：依次附图 1–${job.reenact?.subjects?.length || 0}（主体图），最后附参考模板，再使用下方提示词。此 Markdown 不包含图片文件。\n` : job.reenact ? "\n使用方法：生成图片时，先附图 1（用户主体图），再附图 2（原始参考图），然后使用下方提示词。此 Markdown 不包含图片文件。\n" : "";
+    const inputs = job.mode === "session" ? "\n使用方法：附图 1（风格参考图），再使用下方提示词；会话中的创作内容已写入提示词。此 Markdown 不包含会话原文或图片文件。\n" : job.mode === "multi-reenact" ? `\n使用方法：依次附图 1–${job.reenact?.subjects?.length || 0}（主体图），最后附参考模板，再使用下方提示词。此 Markdown 不包含图片文件。\n` : job.reenact ? "\n使用方法：生成图片时，先附图 1（用户主体图），再附图 2（原始参考图），然后使用下方提示词。此 Markdown 不包含图片文件。\n" : "";
     const markdown = `# ${r.title}\n\n来源：${job.sourceUrl || "网页图片"}\n模式：${modeName(job.mode)}\n${inputs}\n## 视觉观察\n${r.observations.map((x) => `- ${x}`).join("\n")}\n\n## 中文提示词\n${r.promptZh}\n\n## English prompt\n${r.promptEn}\n\n## 排除项\n${r.negativePrompt || "无"}\n\n## 不确定性\n${r.uncertainties.join("\n") || "无额外说明"}\n`;
     const url = URL.createObjectURL(
       new Blob([markdown], { type: "text/markdown;charset=utf-8" }),
@@ -788,6 +791,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     : subjectUnavailable[subjectKey(preferences.mode)] ? "主体图尚未就绪，请完成上传。"
     : preferences.mode === "reenact" && !subjectImage("reenact") ? "先上传主体图。"
     : preferences.mode === "multi-reenact" && (multiSubjects.length < 2 || multiSubjects.some(item => !item.subjectImage)) ? "请添加至少 2 张可用的主体图。"
+    : preferences.mode === "session" && !selectedSessions().length ? "先选择对话会话。"
     : !taskInstruction(preferences.mode).trim() ? "填写任务指令后可生成提示词。"
     : "";
   const reverseDisabled = blocked || !!reverseHint || !!promptDraft;
@@ -795,7 +799,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     if (reverseDisabled) return;
     const mode = preferences.mode;
     void start(mode, mode === "multi-reenact" ? { subjects: multiSubjects, basePrompt: multiPrompt }
-      : mode !== "recreate" && subjectImage(mode) ? { subjectImage: subjectImage(mode), basePrompt: taskInstruction(mode) } : undefined);
+      : mode !== "recreate" && mode !== "session" && subjectImage(mode) ? { subjectImage: subjectImage(mode), basePrompt: taskInstruction(mode) } : undefined);
   };
   const extractStyle = () => {
     if (blocked || !selection?.image || promptDraft || !taskInstruction("style").trim()) return;
@@ -838,7 +842,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const generationPanel = activeJob?.result ? <GenerationPanel key={activeJob.id} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace}
                   drawerOpen={drawerOpen} requestError={drawer.error} requestPending={drawer.pending}
                   onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabled={blocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
-                  subjectImage={activeJob.mode === "recreate" ? undefined : subjectImage(activeJob.mode)}
+                  subjectImage={(activeJob.mode === "recreate" || activeJob.mode === "session") ? undefined : subjectImage(activeJob.mode)}
                   inputPreview={multiPreview}
                   subjects={activeJob.mode === "multi-reenact" ? multiSubjects : undefined}
                   onUpdate={(updated, image, subjects) => {
@@ -951,6 +955,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       {(visibilityNotice || (!tasksOpen && visibilityError)) && <ProjectVisibilityToast notice={visibilityNotice} error={tasksOpen ? "" : visibilityError} busy={busy} containerRef={visibilityFeedback}
         onDismiss={() => { setVisibilityNotice(undefined); setVisibilityError(""); }}
         onUndo={() => { if (visibilityNotice) void setProjectsHidden(visibilityNotice.ids, !visibilityNotice.hidden, true).catch(error => setVisibilityError(error.message)); }} />}
+      {workspace && sessionPicker === drawerKey && preferences.mode === "session" && <SessionPicker value={selectedSessions()} onClose={() => setSessionPicker(undefined)} onConfirm={ids => saveInput("session", undefined, taskInstruction("session"), "", [], ids)} />}
       {workspace && newProjectOpen && <NewProject busy={busy} error={error} onClose={() => setNewProjectOpen(false)} onUpload={() => referenceInput.current?.click()} />}
       {workspace && settings && <SettingsCenter connected={connected} serviceBusy={serviceBusy} onClose={() => setSettings(false)} onConnected={() => setPreferences(value => ({ ...value, paired: true }))} />}
       {tasksOpen && <TaskCenter visibilityError={visibilityError} unread={reminders.unread} onNoticeOpen={openNotice} showHidden={showHidden} hiddenProjectIds={hiddenProjectIds} busy={busy} onToggleHidden={() => void toggleHiddenProjects()} onClose={() => setTasksOpen(false)} onUpdate={updateJob} onOpen={async (_projectId, _mode, jobId, generationId) => {
@@ -979,11 +984,12 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         {historyOpen ? (
           <ProjectHistory searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
         ) : workspace && selection ? <CanvasWorkspace onPromptRevealed={() => setTargetPrompt(undefined)} revealPrompt={targetPrompt?.jobId === activeJob?.id ? targetPrompt?.request : undefined} contextKey={drawerKey} mode={preferences.mode}
+          sessionTitle={selectedSessions().length === 1 ? selectedSessions()[0]!.title : selectedSessions().length ? `已选 ${selectedSessions().length} 个会话` : undefined} onSessions={() => setSessionPicker(drawerKey)}
           image={displayImage} subjectImage={subjectImage(preferences.mode)} subjects={multiSubjects}
           selected={canvasSelections[subjectKey(preferences.mode)] || "reference"} onSelect={id => setCanvasSelections(items => ({ ...items, [subjectKey(preferences.mode)]: id }))}
           instruction={taskInstruction(preferences.mode)} onInstruction={value => changeInstruction(preferences.mode, value)}
           disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy} reverseDisabled={reverseDisabled} running={!!running} cancelling={cancelling}
-          status={reverseStatus || (promptDraft ? "编辑未保存" : reverseHint || genericHint || (job?.status === "cancelled" ? "已取消" : ""))}
+          status={reverseStatus || (promptDraft ? "编辑未保存" : reverseHint || genericHint || (preferences.mode === "session" && job?.sessionContext?.attachmentCount ? `会话含 ${job.sessionContext.attachmentCount} 个附件，未读取附件内容` : "") || (job?.status === "cancelled" ? "已取消" : ""))}
           error={referenceError || currentInput(preferences.mode)?.subjectError || selection.error || job?.error} errorTaskId={!referenceError && !selection.error && job?.status === "failed" ? job.id : undefined} stale={instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt}
           hasPrompt={!!result} promptEditing={!!promptDraft} reduced={reduced} versions={versionSelector} generationActions={setGenerationActions}
           onMode={mode => void saveMode(mode)} onSubject={changeSubject}
@@ -991,7 +997,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           onSubjects={changeSubjects}
           onReference={image => applyReferenceUpload(image, preferences.mode, taskInstruction(preferences.mode))}
           onReferenceRotate={image => applyReferenceRotation(image, preferences.mode, taskInstruction(preferences.mode))}
-          onSwap={id => { if (preferences.mode !== "recreate") void swapImages(preferences.mode, taskInstruction(preferences.mode), id); }}
+          onSwap={id => { if (preferences.mode !== "recreate" && preferences.mode !== "session") void swapImages(preferences.mode, taskInstruction(preferences.mode), id); }}
           onReverse={reverse} onExtract={extractStyle} onCancel={cancel}
           onRetryReference={referenceError ? () => setReferenceErrors(items => { const next = { ...items }; delete next[job!.id]; return next; }) : undefined}
           prompt={result && activeJob && <PromptEditor taskId={activeJob.id} sheet result={result} draft={promptDraft} lang={lang} copied={copied} saving={!!savingPrompt} disabled={!connected} versionSelector={null} onExport={exportResult}
@@ -1005,7 +1011,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           onAvailability={available => setSubjectUnavailable(items => ({ ...items, [subjectKey(preferences.mode)]: !available }))}
           onInstruction={value => changeInstruction(preferences.mode, value)} onReference={file => void uploadReference(file, false)}
           onRotateReference={image => applyReferenceRotation(image, preferences.mode, taskInstruction(preferences.mode))}
-          onSwap={() => { if (preferences.mode !== "recreate") void swapImages(preferences.mode, taskInstruction(preferences.mode)); }}
+          onSwap={() => { if (preferences.mode !== "recreate" && preferences.mode !== "session") void swapImages(preferences.mode, taskInstruction(preferences.mode)); }}
           onReverse={reverse} onCancel={cancel} onCopy={copy} onLanguage={setLang} onWorkspace={() => void openWorkspace()} onUpdate={value => { setTargetGeneration(undefined); updateJob(value); }}
           generationHint={promptDraft ? "未保存的提示词请在工作台继续编辑" : instructionStale ? "输入已修改，请重新生成提示词" : reverseStatus || (!connected ? "请先连接服务" : !selectedModel ? "请在工作台选择模型" : "")}
           generationDisabled={!connected || !selectedModel || blocked || !!promptDraft || needsPrompt || !!subjectUnavailable[subjectKey(preferences.mode)]}

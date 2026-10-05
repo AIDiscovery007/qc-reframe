@@ -195,3 +195,24 @@ test("cancelling RPC aborts an active handler and prevents subsequent work and t
   assert.equal(nextStage, false);
   assert.ok((await calls()).every(m => m.id !== "active"));
 });
+
+for (const outcome of ["cancel", "timeout"]) test(`RPC ${outcome} terminates its actual child process`, async t => {
+  const { dir } = await fakeCodex(t, `send({method:'test/pid',params:{pid:process.pid}});`);
+  const controller = new AbortController(), started = Promise.withResolvers();
+  const running = withCodex({ cwd: dir, signal: controller.signal, timeoutMs: 1500,
+    onNotification(message) { if (message.method === "test/pid") started.resolve(message.params.pid); },
+  }, async request => {
+    await request("turn/start", {});
+    await new Promise(() => {});
+  });
+  const rejected = assert.rejects(running, outcome === "cancel" ? /取消/ : /超时/);
+  const pid = await started.promise;
+  if (outcome === "cancel") controller.abort();
+  await rejected;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try { process.kill(pid, 0); }
+    catch (error) { assert.equal(error.code, "ESRCH"); return; }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.fail("Codex child survived the operation");
+});

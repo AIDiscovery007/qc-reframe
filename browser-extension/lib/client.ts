@@ -6,10 +6,34 @@ export type UiState = {
   selection?: Selection;
 };
 
-export async function request<T>(message: Record<string, unknown>): Promise<T> {
+// The bridge owns the deadline for slow reads and writes. A UI-side race could
+// discard a successful write while the background request is still running.
+function connectedRequest(message: Record<string, unknown>, signal?: AbortSignal): Promise<any> {
+  signal?.throwIfAborted();
+  const port = browser.runtime.connect({ name: "alchemy:request" });
+  return new Promise((resolve, reject) => {
+    const finish = (response?: unknown, error?: unknown) => {
+      port.onMessage.removeListener(receive);
+      port.onDisconnect.removeListener(disconnect);
+      signal?.removeEventListener("abort", abort);
+      port.disconnect();
+      if (error) reject(error); else resolve(response);
+    };
+    const receive = (response: any) => { if (!response?.pending) finish(response); };
+    const disconnect = () => finish(undefined, new Error(browser.runtime.lastError?.message || "扩展连接中断，结果尚未确认，请重新打开项目或任务中心检查。"));
+    const abort = () => finish(undefined, signal?.reason || new DOMException("已取消", "AbortError"));
+    port.onMessage.addListener(receive);
+    port.onDisconnect.addListener(disconnect);
+    signal?.addEventListener("abort", abort, { once: true });
+    try { port.postMessage(message); } catch (error) { finish(undefined, error); }
+  });
+}
+
+export async function request<T>(message: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   try {
-    const response = await Promise.race([
+    const response = ["alchemy:sessions-list", "alchemy:update-project-input", "alchemy:start"].includes(String(message.type))
+      ? await connectedRequest(message, signal) : await Promise.race([
       browser.runtime.sendMessage(message),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error("扩展响应超时，请重新加载扩展并刷新网页。")), 35_000);

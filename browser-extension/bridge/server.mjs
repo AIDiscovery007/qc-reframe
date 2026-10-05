@@ -1,3 +1,4 @@
+import { createSessionStore, sessionIds } from "./sessions.mjs";
 import { prepareRestart } from "./restart.mjs";
 import { createTaskFeed } from "./task-feed.mjs";
 import { createServer } from "node:http";
@@ -107,9 +108,13 @@ export async function createBridge({
   imageAction = openGeneratedImage,
   models,
   cli,
+  sessions,
+  sessionReadTimeoutMs = 120_000,
 } = {}) {
   const instanceId = randomUUID();
   const paths = await migrateStorage(dataDir);
+  sessions ||= createSessionStore({ cwd: root, dataDir: paths.records });
+  let sessionReaders = 0;
   models ||= await createModelStore({ dataDir: paths.config, cwd: root });
   cli ||= createCliManager({ onUpdated: () => models.reset() });
   await recoverProjectDeletion(paths.records, dataDir);
@@ -221,7 +226,12 @@ export async function createBridge({
   let cliStarting = false;
   const cliBusy = () => cliStarting || cli.busy;
   const server = createServer(async (req, res) => {
-    let releaseMutation;
+    let releaseMutation, sessionReadController, sessionReadTimer;
+    const abortSessionRead = () => sessionReadController?.abort(bad("会话请求已取消", 499));
+    const assertSessionRequestActive = () => {
+      if (res.destroyed || req.aborted) throw bad("会话请求已取消", 499);
+      sessionReadController?.signal.throwIfAborted();
+    };
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
     const json = (status, value) => {
@@ -276,6 +286,24 @@ export async function createBridge({
         if (shuttingDown) throw bad("服务正在停止，请重新启动后再试。", 503);
         if (deletionFailed) throw bad("项目清理未完成，请重启本机服务后重试", 503);
       }
+      const readSessions = async action => {
+        const controller = sessionReadController = new AbortController();
+        res.once("close", abortSessionRead);
+        sessionReadTimer = setTimeout(() => controller.abort(bad("读取会话超时，请重试", 504)), sessionReadTimeoutMs);
+        sessionReaders++;
+        releaseMutation?.(); releaseMutation = undefined;
+        let result;
+        try { assertSessionRequestActive(); result = await action(controller.signal); }
+        catch (error) { controller.signal.throwIfAborted(); throw error; }
+        finally {
+          releaseMutation = await acquireMutation();
+          sessionReaders--;
+        }
+        assertSessionRequestActive();
+        if (shuttingDown || deletionFailed) throw bad("服务状态已变化，请重新打开项目后重试", 503);
+        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+        return result;
+      };
       if (req.method === "GET" && path === "/health") {
         validateQuery(["includeHidden"]);
         const showHidden = includeHidden();
@@ -302,6 +330,13 @@ export async function createBridge({
         });
         return;
       }
+      if (req.method === "POST" && path === "/sessions/list") {
+        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+        const body = await readBody(req);
+        try { json(200, await readSessions(signal => sessions.list(body, signal))); }
+        catch (error) { throw bad(error.status ? error.message : "无法读取本机 Codex 会话，请检查 CLI 后重试", error.status || 503); }
+        return;
+      }
       if (req.method === "GET" && path === "/models") {
         if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
         try { json(200, await models.list()); } catch (error) { throw bad(error.message, 503); }
@@ -314,7 +349,7 @@ export async function createBridge({
       if (req.method === "POST" && ["/cli/check", "/cli/update"].includes(path)) {
         const body = await readBody(req);
         if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) throw bad("Codex 管理操作不接受命令或路径参数。");
-        if (path.endsWith("/update") && (controllers.size || models.busy)) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
+        if (path.endsWith("/update") && (controllers.size || models.busy || sessionReaders)) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
         if (path.endsWith("/update")) {
           cliStarting = true;
           try { json(202, await cli.update()); }
@@ -324,7 +359,7 @@ export async function createBridge({
       }
       if (req.method === "POST" && ["/models/refresh", "/models/verify"].includes(path)) {
         if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-        if (controllers.size || models.busy) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
+        if (controllers.size || models.busy || sessionReaders) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
         const body = await readBody(req);
         if (path.endsWith("/verify") && (typeof body.model !== "string" || body.model.length > 200)) throw bad("请选择有效模型");
         try { json(path.endsWith("/verify") ? 202 : 200, path.endsWith("/verify") ? await models.start(body.model, body.reasoningEffort) : await models.refresh()); }
@@ -333,7 +368,7 @@ export async function createBridge({
       }
       if (req.method === "POST" && path === "/restart") {
         if (!allowShutdown || !restart) throw bad("此服务不支持插件内重启。请在原终端停止，再在插件目录运行 npm start。", 409);
-        if (controllers.size || models.busy || cliBusy()) throw bad("任务、模型验证或 Codex 操作执行中，请等待完成后再重启。", 409);
+        if (controllers.size || models.busy || cliBusy() || sessionReaders) throw bad("任务、模型验证或 Codex 操作执行中，请等待完成后再重启。", 409);
         const nextRestartId = randomUUID();
         let commit;
         try { commit = await restart({ root, dataDir, port: server.address().port, instanceId, restartId: nextRestartId, skillPath, generationSkillPath }); }
@@ -355,7 +390,7 @@ export async function createBridge({
         return;
       }
       if (req.method === "POST" && path === "/shutdown" && allowShutdown) {
-        if (controllers.size || models.busy || cliBusy()) throw bad("任务或 Codex 升级执行中，请等待完成后再停止服务。", 409);
+        if (controllers.size || models.busy || cliBusy() || sessionReaders) throw bad("任务或 Codex 升级执行中，请等待完成后再停止服务。", 409);
         shuttingDown = true;
         json(200, { stopped: true });
         server.close();
@@ -439,24 +474,32 @@ export async function createBridge({
         const body = await readBody(req);
         if (!Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0) throw bad("项目输入版本无效");
         if (body.expectedRevision !== project.inputRevision) throw bad("项目输入已在其他窗口更新，请重新打开项目", 409);
-        if (!["style", "recreate", "reenact", "multi-reenact"].includes(body.mode)) throw bad("无效逆向模式");
+        if (!["style", "recreate", "reenact", "multi-reenact", "session"].includes(body.mode)) throw bad("无效逆向模式");
         if (body.referenceJobId !== undefined && jobs.get(body.referenceJobId)?.projectId !== project.id) throw bad("历史参考图不属于当前项目");
         if (typeof body.instruction !== "string" || body.instruction.length > 20000) throw bad("任务指令必须是文本且最多 20000 字符");
         const image = body.image === undefined ? undefined : decodeImage(body.image);
         const referenceBytes = image?.bytes.length ?? (await images.read(project.imageAsset)).length;
         if (referenceBytes > 4 * 1024 * 1024) throw bad("参考图最多 4 MB，请压缩后重试");
         const input = { instruction: body.instruction };
+        if (body.mode === "session") {
+          if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+          const ids = sessionIds(body.sessionIds ?? []);
+          try { input.sessions = ids.length ? await readSessions(signal => sessions.metadata(ids, signal)) : []; }
+          catch (error) { throw bad(error.status ? error.message : "无法读取所选会话，请刷新后重试", error.status || 503); }
+        } else if (body.sessionIds !== undefined) throw bad("当前模式不接受会话输入");
         if (body.mode === "multi-reenact") {
           if (body.subjectImage !== undefined) throw bad("多图重演请使用主体列表");
           input.subjects = await saveSubjects(decodeSubjects(body.subjects ?? [], referenceBytes, true));
         } else {
-          if (body.subjects !== undefined || (body.mode === "recreate" && body.subjectImage)) throw bad("当前模式不支持此主体输入");
+          if (body.subjects !== undefined || (["recreate", "session"].includes(body.mode) && body.subjectImage)) throw bad("当前模式不支持此主体输入");
           if (body.subjectImage) {
             const subject = decodeImage(body.subjectImage);
             if (referenceBytes > 4 * 1024 * 1024 || subject.bytes.length > 2 * 1024 * 1024) throw bad("参考图最多 4 MB，主体图最多 2 MB，请压缩后重试");
             input.subjectAsset = await images.put(subject);
           } else if (body.subjectImage !== undefined && body.subjectImage !== "") throw bad("主体图片无效");
         }
+        if (projects.summary(project.id)?.inputRevision !== body.expectedRevision) throw bad("项目输入已在其他窗口更新，请重新打开项目", 409);
+        if (body.mode === "session") assertSessionRequestActive();
         await projects.saveInput(project.id, { image, mode: body.mode, input, referenceJobId: body.referenceJobId });
         collectionPending = true;
         if (!controllers.size) {
@@ -548,8 +591,8 @@ export async function createBridge({
             json(200, { image: await storedImage(job), subjects: await restoreSubjects(generation.subjects) });
             return;
           }
-          if (job.mode !== "recreate" && !generation.subjectAsset && !generation.subjectExtension) throw bad("此生图记录没有保存主体图快照", 404);
-          json(200, { image: await storedImage(job.mode === "recreate" ? job : generation, job.mode !== "recreate") });
+          if (!["recreate", "session"].includes(job.mode) && !generation.subjectAsset && !generation.subjectExtension) throw bad("此生图记录没有保存主体图快照", 404);
+          json(200, { image: await storedImage(["recreate", "session"].includes(job.mode) ? job : generation, !["recreate", "session"].includes(job.mode)) });
           return;
         }
         const fileAction = req.method === "POST" && ["open", "reveal"].includes(generationMatch[3]);
@@ -600,6 +643,7 @@ export async function createBridge({
           || aspectRatio.width / aspectRatio.height < 1 / 20 || aspectRatio.width / aspectRatio.height > 20))
           throw bad("宽高须为 1–10000 的整数，比例须在 1:20 至 20:1 之间");
         if (job.mode === "recreate" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("完整复刻使用纯文生图，不接受主体图");
+        if (job.mode === "session" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("会话创作不接受主体图");
         if (job.mode !== "multi-reenact" && body.subjects !== undefined) throw bad("此模式不接受多张主体图");
         if (job.mode === "multi-reenact" && body.subjectImage !== undefined) throw bad("多图重演需要主体图列表");
         const { negativePrompt } = job.result;
@@ -637,7 +681,7 @@ export async function createBridge({
         json(202, job);
         void (async () => {
           try {
-            const output = await generator({ imagePath, subjectImagePath, subjectImagePaths, subjects, prompt, negativePrompt: next.negativePrompt,
+            const output = await generator({ mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, prompt, negativePrompt: next.negativePrompt,
               skillPath: generationSkillPath, cwd: root, signal: controller.signal, modelSettings,
               onProgress: (update) => { if (next.status === "running") { Object.assign(next, update); projects.updateJob(job); } },
             });
@@ -690,7 +734,7 @@ export async function createBridge({
               subjectError = error.message;
             }
           }
-          json(200, { id: job.id, jobId: job.id, projectId: job.projectId, image, sourceUrl: job.sourceUrl, capture: job.capture, instruction: job.instruction ?? job.reenact?.basePrompt, reenact, subjectError, generationSubjectImage });
+          json(200, { id: job.id, jobId: job.id, projectId: job.projectId, image, sourceUrl: job.sourceUrl, capture: job.capture, instruction: job.instruction ?? job.reenact?.basePrompt, ...(job.sessionContext ? { sessions: job.sessionContext.sources } : {}), reenact, subjectError, generationSubjectImage });
           return;
         }
         if (req.method === "POST" && idMatch[2] === "/cancel") {
@@ -713,11 +757,20 @@ export async function createBridge({
       if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
       if (models.busy) throw bad("正在验证模型，请稍候", 409);
       const body = await readBody(req);
-      if (!["style", "recreate", "reenact", "multi-reenact"].includes(body.mode)) throw bad("无效逆向模式");
+      if (!["style", "recreate", "reenact", "multi-reenact", "session"].includes(body.mode)) throw bad("无效逆向模式");
       const submittedInstruction = body.instruction ?? body.reenact?.basePrompt;
       if (body.instruction === null || (submittedInstruction !== undefined && typeof submittedInstruction !== "string")) throw bad("任务指令必须是文本");
       if (submittedInstruction?.length > 20000) throw bad("任务指令最多 20000 字符");
       const instruction = submittedInstruction?.trim();
+      let selectedSessions;
+      if (body.mode === "session") {
+        if (body.reenact !== undefined || body.subjectImage !== undefined || body.subjects !== undefined) throw bad("会话创作只使用一张参考图，不接受主体图");
+        if (!instruction) throw bad("请填写会话创作目标");
+        const ids = sessionIds(body.sessionIds, true);
+        try { selectedSessions = await readSessions(signal => sessions.metadata(ids, signal)); }
+        catch (error) { throw bad(error.status ? error.message : "无法读取所选会话，请刷新后重试", error.status || 503); }
+        if (models.busy) throw bad("正在验证模型，请稍候", 409);
+      } else if (body.sessionIds !== undefined) throw bad("当前模式不接受会话输入");
       const { bytes, extension } = decodeImage(body.image);
       let project;
       if (body.projectId !== undefined) {
@@ -761,12 +814,14 @@ export async function createBridge({
       }
       const modelSettings = models.selection();
       const sourceUrl = sourceUrlFor(body.sourceUrl);
+      if (selectedSessions) assertSessionRequestActive();
       project ||= await projects.register({ bytes, extension }, { sourceUrl, capture: body.capture });
       const imageAsset = await images.put({ bytes, extension });
       const currentJobId = project.inputVersions?.[body.mode] ?? projects.get(project.id).jobs.find((job) => job.mode === body.mode)?.id;
       const historical = body.referenceJobId !== undefined && body.referenceJobId !== currentJobId;
       const subjectAsset = subject ? await images.put(subject) : undefined;
       if (multi) reenact.subjects = await saveSubjects(decodedSubjects);
+      if (selectedSessions) assertSessionRequestActive();
       const id = randomUUID();
       const controller = new AbortController();
       controller.projectId = project.id;
@@ -788,6 +843,7 @@ export async function createBridge({
         capture: body.capture === "screenshot" ? "screenshot" : "original",
         ...(instruction !== undefined ? { instruction } : {}),
         ...(reenact ? { reenact } : {}),
+        ...(selectedSessions ? { sessionContext: { sources: selectedSessions } } : {}),
       };
       try {
         await save(job);
@@ -806,7 +862,19 @@ export async function createBridge({
       json(202, job);
       void (async () => {
         try {
+          let sessionContext;
+          if (selectedSessions) {
+            job.stage = "正在读取所选会话…";
+            projects.updateJob(job);
+            sessionContext = await sessions.capture(selectedSessions, { jobId: id, signal: controller.signal });
+            controller.signal.throwIfAborted();
+            const { sources, hash, capturedAt, messageCount, attachmentCount } = sessionContext;
+            job.sessionContext = { sources, snapshotId: id, hash, capturedAt, messageCount, attachmentCount };
+            await save(job);
+          }
+          controller.signal.throwIfAborted();
           const result = await agent({
+            sessionContext,
             imagePath,
             subjectImagePath,
             subjectImagePaths: reenact?.subjects?.map((item) => images.path(item.subjectAsset)),
@@ -845,11 +913,13 @@ export async function createBridge({
         }
       })();
     } catch (error) {
-      if (!res.headersSent)
+      if (!res.headersSent && !res.destroyed)
         json(error.status || 500, {
           error: error.status ? error.message : "本机服务异常，请检查终端日志",
         });
     } finally {
+      clearTimeout(sessionReadTimer);
+      res.off("close", abortSessionRead);
       releaseMutation?.();
     }
   });

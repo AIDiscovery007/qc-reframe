@@ -1,0 +1,24 @@
+/* Only the new session input and modal. The workspace uses production CSS unchanged. */
+.canvas-filmstrip .session-entry { border:1px dashed var(--line);max-width:260px; }
+.session-entry span { overflow:hidden;text-overflow:ellipsis; }
+.app .session-picker { width:min(620px,calc(100% - 32px));height:fit-content;max-height:85dvh; }
+.session-picker-body { padding:4px 24px 20px;overflow:auto; }
+.session-picker-body > input { width:100%;height:38px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface); }
+.session-picker-body .hint { margin:10px 0 16px; }
+.session-list { display:grid;gap:6px; }
+.session-row { display:flex;align-items:center;gap:12px;padding:14px 12px;border:1px solid transparent;border-radius:8px;cursor:pointer; }
+.session-row:hover { background:var(--surface-muted); }
+.session-row:has(input:checked) { background:var(--surface-muted);border-color:#b5a26c; }
+.session-row input { width:16px;height:16px;accent-color:#b99926;flex:none; }
+.session-row span { min-width:0;flex:1; }
+.session-row strong { display:block;font-size:13px;font-weight:600; }
+.session-row small { display:block;margin-top:6px;font-size:11px;color:var(--muted); }
+.session-row time { font-size:10px;color:var(--muted);white-space:nowrap; }
+.session-picker-footer { display:flex;align-items:center;gap:10px;padding:16px 24px;border-top:1px solid var(--line); }
+.session-picker-footer > span { flex:1;font-size:11px;color:var(--muted); }
+.session-picker-footer .primary { width:auto;padding:10px 16px; }
+.session-empty { text-align:center;padding:30px;color:var(--muted);font-size:12px; }
+@media(max-width:500px) { .session-row { flex-wrap:wrap; }.session-row time { margin-left:28px; }.session-picker-footer { flex-wrap:wrap; }.session-picker-footer > span { flex-basis:100%; } }
+.session-picker-hint { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.session-picker-hint label { display:flex;align-items:center;gap:5px;white-space:nowrap; }
+.session-picker-hint input { accent-color:#b99926; }

@@ -15,7 +15,7 @@ import type {
   Selection,
 } from "../lib/types";
 
-const modes = ["style", "recreate", "reenact", "multi-reenact"];
+const modes = ["style", "recreate", "reenact", "multi-reenact", "session"];
 const subjectRoles = ["自动", "人物", "物品", "服饰", "场景", "细节"];
 const validSubjectImage = (image: unknown) => {
   if (typeof image !== "string" || image.length > 3 * 1024 * 1024 || !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image)) return false;
@@ -130,7 +130,7 @@ export default defineBackground(() => {
     if (typeof id !== "string" || !/^[\da-f]{64}$/.test(id)) throw new Error("无效项目");
     return bridge<Selection>(`/projects/${id}/reference`, token);
   };
-  const start = async (id: string, mode: Mode, referenceJobId?: string, reenact?: SubjectInput, projectId?: string, instruction?: string, inputRevision?: number) => {
+  const start = async (id: string, mode: Mode, referenceJobId?: string, reenact?: SubjectInput, projectId?: string, instruction?: string, inputRevision?: number, sessionIds?: string[], signal?: AbortSignal) => {
     if (selecting) throw new Error("正在处理图片，请稍候");
     selecting = true;
     try {
@@ -156,16 +156,16 @@ export default defineBackground(() => {
         throw new Error("所选图片已变化，请重试");
       const job = await bridge<Job>("/jobs", stored.preferences?.token || "", {
         image: selection.image,
-        mode,
+        mode, sessionIds,
         sourceUrl: selection.sourceUrl,
         capture: selection.capture,
         instruction,
         projectId: selection.projectId,
         inputRevision: inputRevision ?? current?.inputRevision, referenceJobId,
-        reenact: mode !== "recreate" ? reenact : undefined,
-      });
+        reenact: mode !== "recreate" && mode !== "session" ? reenact : undefined,
+      }, signal);
       const next = { ...selection, projectId: job.projectId || selection.projectId, jobId: job.id, stage: job.stage, error: undefined, instruction: job.instruction,
-        reenact: mode !== "recreate" ? reenact : undefined, subjectError: undefined, generationSubjectImage: undefined, generationSubjects: undefined };
+        reenact: mode !== "recreate" && mode !== "session" ? reenact : undefined, subjectError: undefined, generationSubjectImage: undefined, generationSubjects: undefined };
       const currentSelection = await projectReference(job.projectId || selection.projectId!, stored.preferences?.token || "").catch(() => current || selection);
       if (!projectId || stored.selection?.projectId === projectId)
         await browser.storage.local.set({ selection: storedInput(currentSelection) }).catch(() => {});
@@ -234,7 +234,7 @@ export default defineBackground(() => {
       return value && Date.now() - value.createdAt <= 24 * 60 * 60 * 1000 ? value : undefined;
     });
   };
-  const uiMessage = async (message: Record<string, any>, source = "popup", sourceTab?: number) => {
+  const uiMessage = async (message: Record<string, any>, source = "popup", sourceTab?: number, signal?: AbortSignal) => {
     // Expose only this public preference; content scripts cannot read local storage.
     if (message.type === "alchemy:get-motion-preference") {
       const { motionPreference } = await browser.storage.local.get("motionPreference");
@@ -305,6 +305,8 @@ export default defineBackground(() => {
           return next;
         } finally { selecting = false; }
       }
+      case "alchemy:sessions-list":
+        return bridge("/sessions/list", token, { searchTerm: message.searchTerm, cursor: message.cursor, archived: message.archived }, signal);
       case "alchemy:update-project-input": {
         if (selecting) throw new Error("正在处理图片，请稍候");
         if (typeof message.projectId !== "string" || !/^[a-f0-9]{64}$/.test(message.projectId)
@@ -314,8 +316,8 @@ export default defineBackground(() => {
         try {
           const next = await bridge<Selection>(`/projects/${message.projectId}/input`, token, {
             expectedRevision: message.expectedRevision, referenceJobId: message.referenceJobId, image: message.image, mode: message.mode,
-            instruction: message.instruction, subjectImage: message.subjectImage, subjects: message.subjects,
-          });
+            instruction: message.instruction, subjectImage: message.subjectImage, subjects: message.subjects, sessionIds: message.sessionIds,
+          }, signal);
           try {
             const latest = (await browser.storage.local.get("selection")).selection as Selection | undefined;
             if (latest?.projectId === message.projectId && (latest.inputRevision || 0) <= message.expectedRevision)
@@ -524,15 +526,39 @@ export default defineBackground(() => {
           : bridge(`${path}/${message.generationId}/cancel`, token, {});
       }
       case "alchemy:start":
-        return start(message.id, message.mode, message.referenceJobId, message.reenact, message.projectId, message.instruction, message.inputRevision);
+        return start(message.id, message.mode, message.referenceJobId, message.reenact, message.projectId, message.instruction, message.inputRevision, message.sessionIds, signal);
     }
   };
+  browser.runtime.onConnect.addListener(port => {
+    if (port.name !== "alchemy:request") return;
+    const sender = port.sender;
+    const extensionSender = sender?.id === browser.runtime.id && sender.url?.startsWith(browser.runtime.getURL("/"));
+    const contentSender = sender?.id === browser.runtime.id && sender.tab?.id != null && sender.frameId === 0 && /^https?:/.test(sender.url || sender.tab.url || "");
+    if (!extensionSender && !contentSender) { port.disconnect(); return; }
+    const controller = new AbortController();
+    let started = false;
+    let keepAlive: ReturnType<typeof setInterval>;
+    port.onDisconnect.addListener(() => { controller.abort(); clearInterval(keepAlive); });
+    port.onMessage.addListener(message => {
+      if (started) return;
+      started = true;
+      if (!["alchemy:update-project-input", "alchemy:start", ...(extensionSender ? ["alchemy:sessions-list"] : [])].includes(message?.type)) {
+        port.postMessage({ error: "无效请求" }); return;
+      }
+      const reply = (value: unknown) => { if (!controller.signal.aborted) port.postMessage(value); };
+      // Port traffic keeps the MV3 worker alive only while this bounded read runs.
+      keepAlive = setInterval(() => reply({ pending: true }), 20_000);
+      void uiMessage(message, contentSender ? `tab:${sender!.tab!.id}` : "popup", sender?.tab?.id, controller.signal)
+        .then(value => reply({ ok: true, value }), error => reply({ error: error.message }))
+        .finally(() => clearInterval(keepAlive));
+    });
+  });
   browser.runtime.onMessage.addListener((message, sender, reply) => {
     // Only extension pages and this extension's top-frame content scripts.
     if (sender.id !== browser.runtime.id) return;
     const contentSender = sender.tab?.id != null && sender.frameId === 0 && /^https?:/.test(sender.url || sender.tab.url || "");
     const extensionSender = sender.url?.startsWith(browser.runtime.getURL("/"));
-    if (extensionSender && message?.type === "alchemy:workspace-handoff") {
+    if (extensionSender && ["alchemy:workspace-handoff", "alchemy:sessions-list"].includes(message?.type)) {
       uiMessage(message).then(value => reply({ ok: true, value }), error => reply({ error: error.message }));
       return true;
     }
