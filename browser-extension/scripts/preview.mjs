@@ -181,6 +181,7 @@ createServer(async (req, res) => {
           {id:'22222222-2222-4222-8222-222222222222',title:'海边小城的 48 小时 · 视频剪辑',updatedAt:1791108360},
           {id:'33333333-3333-4333-8333-333333333333',title:'星际邮差 · 漫画设定',updatedAt:1790997600},
         ];
+        if(previewOptions.get('sessions')==='many')sessionRows.push(...Array.from({length:9},(_,i)=>({id:'preview-session-'+i,title:i===0?'示例 · 城市漫游纪录片与旅行故事的封面及完整视觉设计讨论':'示例创作会话 '+(i+4),updatedAt:1790997600-i*86400})));
         const selectedSessionRows=ids=>(ids||[]).map(id=>sessionRows.find(row=>row.id===id)).filter(Boolean);
         const collected=new Map();
         let failedPage=false;
