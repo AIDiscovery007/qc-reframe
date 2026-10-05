@@ -12,10 +12,10 @@
 .workspace-app .template-replace > .loading-placeholder { width:100%;height:100%; }
 
 /* Both columns share the same four tracks; the drawer only changes their widths. */
-.workspace-app { --result-drawer-width:50cqw;--canvas-label-height:26px;--canvas-strip-height:56px;--canvas-controls-height:170px;--canvas-gap:8px;--canvas-half-gap:12px;--drawer-duration:380ms;--drawer-ease:cubic-bezier(.32,.72,0,1); }
+.workspace-app { --result-drawer-width:50cqw;--canvas-label-height:26px;--canvas-strip-height:56px;--canvas-controls-height:min(270px,38dvh);--canvas-gap:8px;--canvas-half-gap:12px;--drawer-duration:380ms;--drawer-ease:cubic-bezier(.32,.72,0,1); }
 .workspace-body { --canvas-rows:var(--canvas-label-height) minmax(0,1fr) var(--canvas-strip-height) var(--canvas-controls-height); }
 .workspace-app .workspace-body:not([data-history="true"]) { display:flex;flex-direction:row;overflow:clip;padding:0 28px 16px;container-type:size; }
-.workspace-body:has(.canvas-workspace[data-prompt-open="true"]) { --canvas-controls-height:min(398px,calc(100cqh - 170px)); }
+.workspace-body:has(.canvas-workspace[data-prompt-open="true"]) { --canvas-controls-height:calc(var(--prompt-editor-height) + 38px); }
 .workspace-app .workspace-editor { flex:1; }
 .workspace-app [data-results-open="true"] .workspace-editor { padding-right:var(--canvas-half-gap); }
 .workspace-app .workspace-editor main { overflow-x:hidden; }

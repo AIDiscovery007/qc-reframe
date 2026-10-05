@@ -39,9 +39,10 @@
 .canvas-subject-settings select { width:140px;height:32px;min-height:0;font-size:11px; }
 .canvas-subject-settings input { min-width:0;height:34px;border:0;background:var(--surface-muted);border-radius:6px;padding:0 9px;font-size:11px; }
 .canvas-subject-settings > button { padding:0; }
-.canvas-composer { min-height:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:10px 12px;display:grid;grid-template-rows:minmax(0,1fr) 34px;gap:8px; }
+.canvas-composer-slot { min-height:0;display:grid; }
+.canvas-composer { min-width:0;min-height:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:16px;display:grid;grid-template-rows:minmax(0,1fr) 34px;gap:12px; }
 .workspace-app .canvas-composer .task-instruction { margin:0;min-height:0; }
-.workspace-app .canvas-composer .task-instruction textarea { display:block;resize:none;width:100%;height:100%;min-height:0;padding:0;border:0;border-radius:0;background:transparent;font-size:12px;line-height:1.8; }
+.workspace-app .canvas-composer .task-instruction textarea { display:block;resize:none;width:100%;height:100%;min-height:0;padding:0;border:0;border-radius:0;background:transparent;font-size:14px;line-height:1.85; }
 .canvas-composer-bar { display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0; }
 .canvas-composer-bar > span { flex:1;min-width:0;font-size:10px;color:var(--muted);overflow:auto;max-height:34px;line-height:16px; }
 .canvas-composer-bar > span:empty { display:none; }
@@ -61,8 +62,10 @@
 .canvas-prompt-notice button { flex:none;font-size:11px; }
 .workspace-app .canvas-prompt-content .prompt-box { background:var(--paper);border-radius:8px;overflow:visible; }
 .workspace-app .canvas-prompt-content .prompt-tools { position:sticky;top:0;z-index:1;background:var(--paper);padding:4px 8px; }
-.workspace-app .canvas-prompt-content .prompt-text { max-height:none;padding:10px 12px; }
-.workspace-app .canvas-prompt-content .prompt-draft { min-height:150px;resize:vertical;background:var(--paper);padding:10px 12px; }
+.workspace-app .canvas-prompt-content .prompt-text { max-height:none; }
+.workspace-app .canvas-prompt-content .prompt-draft { min-height:calc(var(--prompt-editor-height) - 180px);resize:vertical;background:var(--paper); }
+.workspace-app .canvas-prompt-content .prompt-text,.workspace-app .canvas-prompt-content .prompt-draft { font-size:14px;line-height:1.9;padding:16px; }
+.canvas-prompt-sheet[data-expanded="true"] .canvas-prompt-content .prompt-draft { min-height:calc(100dvh - 390px); }
 .workspace-app .canvas-prompt-content .negative { padding:6px 12px; }
 .workspace-app .canvas-prompt-content .prompt-save { position:sticky;bottom:0;background:var(--surface); }
 .canvas-generation-actions { display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:8px;padding-top:12px;flex:none; }
@@ -94,7 +97,7 @@
  .canvas-floating-tools > .select-field { flex-basis:100px; }
  .canvas-floating-tools > .select-field select { width:100px; }
  .canvas-versions { width:96px; }
- .workspace-app .canvas-composer .task-instruction textarea { font-size:11px; }
+
  .canvas-composer-bar { gap:4px; }
  .workspace-app .canvas-generic { max-width:50px;line-height:1.3; }
  .workspace-app .canvas-generate { padding:0 8px; }
@@ -104,4 +107,21 @@
 }
 @media(max-height:580px) {
  .workspace-app .workspace-head { height:48px; }
+}
+
+/* Approved B: editors use the workspace width, independent of the result column. */
+.workspace-app { --prompt-editor-height:max(240px,min(56dvh,calc(100dvh - 420px),600px)); }
+.canvas-composer,.canvas-prompt-sheet { transform-origin:top left; }
+.workspace-app .canvas-editor-expand { margin-left:auto;border:0;background:transparent;font-size:12px;flex:none;padding:6px 10px;color:inherit; }
+.canvas-prompt-heading { display:flex;align-items:center;justify-content:space-between;gap:10px;height:34px;flex:none;font-size:12px;color:var(--muted); }
+.canvas-prompt-sheet[popover] { position:fixed;inset:auto;left:var(--editor-left);bottom:var(--editor-bottom,0px);width:var(--editor-width);height:var(--prompt-editor-height);max-height:calc(100dvh - 150px);margin:0;box-sizing:border-box;color:var(--ink);background:#fffefa;padding:0 20px 16px; }
+.canvas-prompt-sheet[popover]:popover-open { display:flex; }
+.canvas-prompt-sheet[popover]::backdrop,.canvas-composer[popover]::backdrop { background:transparent;pointer-events:none; }
+.canvas-prompt-sheet[data-expanded="true"] { height:calc(100dvh - 165px); }
+.canvas-composer[popover]:popover-open { position:fixed;inset:auto;left:var(--editor-left);width:var(--editor-width);bottom:calc(var(--editor-bottom,0px) + 8px);height:min(54dvh,550px);display:grid;background:var(--surface);color:var(--ink);margin:0;box-sizing:border-box;box-shadow:0 -8px 35px #26241f20; }
+.canvas-composer[data-restoring="true"]:popover-open { left:var(--inline-left);top:var(--inline-top);bottom:auto;width:var(--inline-width);height:var(--inline-height); }
+.workspace-editor[inert] .canvas-composer[popover],.workspace-editor[inert] .canvas-prompt-sheet[popover] { visibility:hidden!important;pointer-events:none; }
+@media(max-width:700px) {
+ .canvas-prompt-sheet[popover] { padding:0 12px 12px; }
+ .workspace-app .canvas-editor-expand { padding:6px; }
 }

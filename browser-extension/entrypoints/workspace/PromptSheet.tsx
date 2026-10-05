@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
+import useEditorExpansion from './useEditorExpansion';
 
 type Props = {
+  contextKey: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
@@ -9,8 +11,9 @@ type Props = {
 };
 type Drag = { id: number; origin: number; base: number; y: number; samples: { y: number; t: number }[] };
 
-export default function PromptSheet({ open, onOpenChange, children, returnFocus, reduced }: Props) {
+export default function PromptSheet({ contextKey, open, onOpenChange, children, returnFocus, reduced }: Props) {
   const sheet = useRef<HTMLElement>(null);
+  const expansion = useEditorExpansion(sheet, reduced, contextKey);
   const handle = useRef<HTMLButtonElement>(null);
   const animation = useRef<Animation | null>(null);
   const drag = useRef<Drag | null>(null);
@@ -18,6 +21,7 @@ export default function PromptSheet({ open, onOpenChange, children, returnFocus,
   const suppressClick = useRef(false);
   const keyboard = useRef(false);
   const mounted = useRef(true);
+  const focusFrame = useRef(0);
   const latest = useRef({ onOpenChange, returnFocus, reduced });
   latest.current = { onOpenChange, returnFocus, reduced };
 
@@ -37,6 +41,8 @@ export default function PromptSheet({ open, onOpenChange, children, returnFocus,
   function move(next: boolean, immediate = false, spring = false, velocity = 0) {
     const el = sheet.current;
     if (!el) return;
+    expansion.settle();
+    if (next && !el.matches(':popover-open')) el.showPopover();
     const from = freeze();
     const wasOpen = opened.current;
     const restore = !next && el.contains(document.activeElement);
@@ -46,7 +52,8 @@ export default function PromptSheet({ open, onOpenChange, children, returnFocus,
     el.setAttribute('aria-hidden', String(!next));
     el.style.visibility = 'visible';
     if (next && !wasOpen) handle.current?.focus({ preventScroll: true });
-    if (restore) requestAnimationFrame(() => {
+    cancelAnimationFrame(focusFrame.current);
+    if (restore) focusFrame.current = requestAnimationFrame(() => {
       // Wait for the parent to reveal the composer and clear inert before restoring focus.
       if (mounted.current && !opened.current && (el.contains(document.activeElement) || document.activeElement === document.body)) {
         latest.current.returnFocus()?.focus({ preventScroll: true });
@@ -56,6 +63,7 @@ export default function PromptSheet({ open, onOpenChange, children, returnFocus,
     el.style.transform = `translateY(${target}px)`;
     if (immediate || latest.current.reduced) {
       el.style.visibility = next ? 'visible' : 'hidden';
+      if (!next && el.matches(':popover-open')) el.hidePopover();
       return;
     }
     const frames = spring ? Array.from({ length: 43 }, (_, i) => {
@@ -69,6 +77,7 @@ export default function PromptSheet({ open, onOpenChange, children, returnFocus,
       if (animation.current !== active) return;
       animation.current = null;
       el.style.visibility = opened.current ? 'visible' : 'hidden';
+      if (!opened.current && el.matches(':popover-open')) el.hidePopover();
     };
   }
   function close(immediate = false) {
@@ -82,6 +91,7 @@ export default function PromptSheet({ open, onOpenChange, children, returnFocus,
   }
   function down(event: ReactPointerEvent<HTMLButtonElement>) {
     if (event.button !== 0 || !event.isPrimary || drag.current || !opened.current) return;
+    expansion.settle();
     const position = freeze();
     const base = position < 0 ? 160 * Math.log(Math.max(.001, 1 + position / 80)) : position;
     suppressClick.current = false;
@@ -118,8 +128,21 @@ export default function PromptSheet({ open, onOpenChange, children, returnFocus,
   }, [reduced]);
   useEffect(() => {
     mounted.current = true;
-    const pointer = () => { keyboard.current = false; };
-    const click = (event: MouseEvent) => { keyboard.current = event.detail === 0; };
+    let outside: { id: number; x: number; y: number } | undefined;
+    const isOutside = (event: Event) => !event.composedPath().includes(sheet.current!);
+    const pointer = (event: PointerEvent) => {
+      keyboard.current = false;
+      outside = opened.current && event.isPrimary && event.button === 0 && isOutside(event)
+        ? { id: event.pointerId, x: event.clientX, y: event.clientY } : undefined;
+    };
+    const clearOutside = () => { outside = undefined; };
+    const click = (event: MouseEvent) => {
+      keyboard.current = event.detail === 0;
+      const start = outside;
+      outside = undefined;
+      if (opened.current && start && isOutside(event) && (!('pointerId' in event) || event.pointerId === start.id)
+        && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) close();
+    };
     const key = (event: KeyboardEvent) => {
       keyboard.current = true;
       if (event.key !== 'Escape' || !opened.current || event.defaultPrevented) return;
@@ -133,17 +156,21 @@ export default function PromptSheet({ open, onOpenChange, children, returnFocus,
     const visibility = () => { if (document.hidden) settle(); };
     window.addEventListener('pointerdown', pointer, true);
     window.addEventListener('click', click, true);
+    window.addEventListener('pointercancel', clearOutside, true);
     window.addEventListener('keydown', key);
     window.addEventListener('blur', settle);
     window.addEventListener('resize', settle);
     document.addEventListener('visibilitychange', visibility);
     return () => {
       mounted.current = false;
+      cancelAnimationFrame(focusFrame.current);
       animation.current?.cancel();
       animation.current = null;
       releaseCapture();
       window.removeEventListener('pointerdown', pointer, true);
       window.removeEventListener('click', click, true);
+      window.removeEventListener('pointercancel', clearOutside, true);
+      if (sheet.current?.matches(':popover-open')) sheet.current.hidePopover();
       window.removeEventListener('keydown', key);
       window.removeEventListener('blur', settle);
       window.removeEventListener('resize', settle);
@@ -151,7 +178,7 @@ export default function PromptSheet({ open, onOpenChange, children, returnFocus,
     };
   }, []);
 
-  return <section ref={sheet} id="workspace-prompt-sheet" className="canvas-prompt-sheet" aria-label="提示词面板" aria-hidden={!open} inert={!open} style={{ visibility: 'hidden', transform: 'translateY(110%)' }}>
+  return <section ref={sheet} id="workspace-prompt-sheet" className="canvas-prompt-sheet" popover="manual" aria-label="提示词面板" aria-hidden={!open} inert={!open} style={{ visibility: 'hidden', transform: 'translateY(110%)' }}>
     <button ref={handle} type="button" className="canvas-prompt-handle" aria-label="收起提示词面板" aria-expanded={open}
       onPointerDown={down} onPointerMove={track} onPointerUp={up}
       onPointerCancel={event => { if (drag.current?.id === event.pointerId) cancelDrag(); }}
@@ -161,6 +188,7 @@ export default function PromptSheet({ open, onOpenChange, children, returnFocus,
         close(event.detail === 0);
       }}
       onKeyDown={event => { if (event.key === 'ArrowDown') { event.preventDefault(); close(true); } }}><span /></button>
+    <div className="canvas-prompt-heading"><span>提示词</span><button type="button" className="quiet-button canvas-editor-expand" aria-expanded={expansion.expanded} onClick={event => expansion.toggle(event.detail === 0)}>{expansion.expanded ? "恢复大小" : "放大编辑"}</button></div>
     {children}
   </section>;
 }
