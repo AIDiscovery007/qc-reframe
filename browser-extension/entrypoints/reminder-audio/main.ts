@@ -1,27 +1,38 @@
 import { browser } from 'wxt/browser';
+import { reminderTone } from '../../lib/task-reminders';
 
-let context: AudioContext | undefined;
 let playing = false;
 browser.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== browser.runtime.id || message?.type !== 'alchemy:reminder-audio') return;
   void (async () => {
-    if (playing) return;
-    const { tone, volume } = message.preferences || {};
-    if (!['soft', 'bell'].includes(tone) || !Number.isFinite(volume) || volume < 0 || volume > 100) throw new Error('无效提示音');
-    playing = true;
+    let audio: HTMLAudioElement | undefined, timeout: ReturnType<typeof setTimeout> | undefined;
+    let ownsPlayback = false;
     try {
-      context ||= new AudioContext();
-      await context.resume();
-      if (context.state !== 'running') throw new Error('浏览器阻止了声音播放，请在设置中重试试听。');
-      const oscillator = context.createOscillator(), gain = context.createGain();
-      const now = context.currentTime;
-      oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(tone === 'bell' ? 784 : 523.25, now);
-      oscillator.frequency.exponentialRampToValueAtTime(tone === 'bell' ? 659.25 : 440, now + .45);
-      gain.gain.setValueAtTime(0, now); gain.gain.linearRampToValueAtTime(volume / 100 * .15, now + .03);
-      gain.gain.exponentialRampToValueAtTime(.0001, now + .65);
-      oscillator.connect(gain); gain.connect(context.destination); oscillator.start(now); oscillator.stop(now + .7);
-      await new Promise<void>(resolve => { oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); resolve(); }; });
-    } finally { playing = false; }
-  })().then(() => reply({ ok: true }), error => reply({ error: error.message }));
+      const { volume } = message.preferences || {};
+      const tone = reminderTone(message.preferences?.tone);
+      if (!tone || !Number.isInteger(volume) || volume < 0 || volume > 100) throw new Error('无效提示音');
+      if (!playing && volume > 0) {
+        playing = ownsPlayback = true;
+        audio = new Audio(browser.runtime.getURL(`/sounds/akx/${tone.file}`));
+        audio.volume = volume / 100 * tone.gain;
+        const player = audio;
+        await new Promise<void>((resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error('提示音播放超时，请重试试听。')), 10_000);
+          player.onended = () => resolve();
+          player.onerror = () => reject(new Error('提示音读取失败，请重新加载扩展后重试。'));
+          void (async () => {
+            try { await player.play(); }
+            catch { reject(new Error('浏览器阻止了声音播放，请在设置中重试试听。')); }
+          })();
+        });
+      }
+      reply({ ok: true });
+    } catch (error) { reply({ error: (error as Error).message }); }
+    finally {
+      clearTimeout(timeout);
+      if (audio) { audio.onended = null; audio.onerror = null; audio.pause(); audio.removeAttribute('src'); audio.load(); }
+      if (ownsPlayback) playing = false;
+    }
+  })();
   return true;
 });

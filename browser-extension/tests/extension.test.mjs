@@ -165,11 +165,11 @@ test("project messages restore a template and start only the explicitly chosen l
   await send({ type: "alchemy:mode", mode: "reenact" });
   assert.equal(storage.selection.reenact, undefined, "mode selection must not copy another lane's subject");
   await send({ type: "alchemy:start", projectId: id, mode: "recreate", image: "untrusted-image" });
-  const body = JSON.parse(calls.at(-1).options.body);
+  const body = JSON.parse(calls.findLast(call => call.url.endsWith("/jobs")).options.body);
   assert.equal(body.image, "saved-template");
   assert.equal(body.projectId, id);
   assert.equal(body.mode, "recreate");
-  assert.equal(storage.selection.jobId, "new-job");
+  assert.equal(storage.selection.jobId, undefined, "stored current input must not become a historical job snapshot");
   storage.selection = { id: "other-selection", projectId: "b".repeat(64), image: "other-template" };
   const independent = await send({ type: "alchemy:start", projectId: id, mode: "recreate" });
   assert.equal(independent.value.job.projectId, id);
@@ -259,6 +259,7 @@ async function background(fetch = async () => ({ ok: true, json: async () => ({ 
     fetch: (url, options) => String(url).includes("/task-feed") ? Promise.resolve({ ok: true, json: async () => ({ revision: "test", tasks: [] }) }) : fetch(url, options),
     ...globals,
   });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(typeof handlers.message, "function");
   return { handlers, messages, tabs, chrome, sessionStorage };
 }
@@ -295,12 +296,14 @@ test("background starts and opens results when sidePanel API is absent", async (
 test("reruns the current or historical image with the explicitly selected mode", async () => {
   const submitted = [];
   const oldJob = "00000000-0000-0000-0000-000000000001";
-  const historical = { id: oldJob, jobId: oldJob, image: "historical-image", capture: "original", sourceUrl: "https://example.com/old" };
+  const projectId = "a".repeat(64);
+  const historical = { id: oldJob, projectId, jobId: oldJob, image: "historical-image", capture: "original", sourceUrl: "https://example.com/old" };
   const { handlers, chrome } = await background(async (url, options) => {
     if (url.endsWith(`/jobs/${oldJob}/reference`)) return { ok: true, json: async () => historical };
+    if (url.endsWith(`/projects/${projectId}/reference`)) return { ok: true, json: async () => ({ id: `input-${submitted.length}`, projectId, image: "durable-current-image", inputRevision: submitted.length, inputs: { style: { subjectImage: "large-subject" } } }) };
     assert.ok(url.endsWith("/jobs"));
     submitted.push(JSON.parse(options.body));
-    return { ok: true, json: async () => ({ id: `new-${submitted.length}`, mode: submitted.at(-1).mode, instruction: submitted.at(-1).instruction, status: "running", stage: "started" }) };
+    return { ok: true, json: async () => ({ id: `new-${submitted.length}`, projectId, mode: submitted.at(-1).mode, instruction: submitted.at(-1).instruction, status: "running", stage: "started" }) };
   });
   const storage = { preferences: { token: "secret", mode: "style" }, selection: { id: "current", image: "current-image", sourceUrl: "https://example.com/current", capture: "original" } };
   chrome.storage.local.get = async () => storage;
@@ -312,11 +315,13 @@ test("reruns the current or historical image with the explicitly selected mode",
   assert.equal(submitted[0].image, "current-image");
   assert.equal(submitted[0].mode, "recreate");
   assert.equal(submitted[0].instruction, "保留构图，移除文字");
-  assert.equal(storage.selection.instruction, "保留构图，移除文字");
-  assert.equal(storage.selection.jobId, "new-1");
+  assert.equal(current.value.selection.instruction, "保留构图，移除文字");
+  assert.equal(storage.selection.id, "input-1");
+  assert.equal(storage.selection.inputs, undefined);
+  assert.equal(storage.selection.jobId, undefined);
   const restored = await send({ type: "alchemy:reference", id: oldJob });
   assert.equal(restored.value.image, "historical-image");
-  assert.equal(storage.selection.id, "current", "opening history must not replace the current image");
+  assert.equal(storage.selection.id, "input-1", "opening history must not replace the current image");
   const rerun = await send({ type: "alchemy:start", id: oldJob, referenceJobId: oldJob, mode: "recreate" });
   assert.equal(rerun.value.job.id, "new-2");
   assert.equal(submitted[1].image, "historical-image");
@@ -330,7 +335,8 @@ test("reruns the current or historical image with the explicitly selected mode",
   assert.equal(replay.value.job.mode, "reenact");
   assert.deepEqual(submitted[2].reenact, reenact);
   assert.equal(submitted[2].image, "historical-image");
-  assert.equal(storage.selection.reenact.subjectImage, "subject-image");
+  assert.equal(replay.value.selection.reenact.subjectImage, "subject-image");
+  assert.equal(storage.selection.reenact, undefined);
   const withoutInputs = await send({ type: "alchemy:start", id: storage.selection.id, mode: "reenact" });
   assert.match(withoutInputs.error, /主体图/);
   assert.equal(submitted.length, 3);
@@ -339,12 +345,12 @@ test("reruns the current or historical image with the explicitly selected mode",
   assert.equal(style.value.job.mode, "style");
   assert.deepEqual(submitted[3].reenact, transfer);
   assert.equal(submitted[3].image, "historical-image");
-  assert.equal(storage.selection.reenact.subjectImage, "style-subject");
+  assert.equal(style.value.selection.reenact.subjectImage, "style-subject");
   assert.match((await send({ type: "alchemy:start", id: storage.selection.id, mode: "style", reenact: { basePrompt: "missing subject" } })).error, /主体图/);
   assert.equal(submitted.length, 4);
-  await send({ type: "alchemy:start", id: storage.selection.id, mode: "style", instruction: "只提取配色" });
+  const generic = await send({ type: "alchemy:start", id: storage.selection.id, mode: "style", instruction: "只提取配色" });
   assert.equal(submitted[4].instruction, "只提取配色");
-  assert.equal(storage.selection.instruction, "只提取配色");
+  assert.equal(generic.value.selection.instruction, "只提取配色");
   assert.equal(submitted[4].reenact, undefined, "generic extraction must not receive stale subject inputs");
   assert.equal(storage.selection.reenact, undefined);
   await send({ type: "alchemy:start", id: storage.selection.id, mode: "recreate", reenact: transfer });
@@ -387,6 +393,7 @@ for (const mode of ["style", "reenact", "recreate"]) test(`hover in ${mode} mode
   const { handlers, chrome } = await background(async (url) => {
     calls.push(url);
     if (url.endsWith("/projects")) return { ok: true, json: async () => ({ id: "a".repeat(64), jobs: [] }) };
+    if (url.endsWith("/reference")) return { ok: true, json: async () => ({ id: "a".repeat(64), projectId: "a".repeat(64), image: "data:image/png;base64,iVBORw==", inputRevision: 2, inputs: { style: { subjectImage: "stored-subject" } } }) };
     return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "Content-Type": "image/png" } });
   }, {
     Blob, Uint8Array, btoa,
@@ -407,7 +414,9 @@ for (const mode of ["style", "reenact", "recreate"]) test(`hover in ${mode} mode
   assert.equal(storage.selection.jobId, undefined);
   assert.match(storage.selection.stage, /参考模板/);
   assert.equal(storage.selection.projectId, "a".repeat(64));
-  assert.deepEqual(calls, ["https://example.com/template.png", "http://127.0.0.1:43187/projects"]);
+  assert.equal(storage.selection.inputRevision, 2);
+  assert.equal(storage.selection.inputs, undefined);
+  assert.deepEqual(calls, ["https://example.com/template.png", "http://127.0.0.1:43187/projects", `http://127.0.0.1:43187/projects/${"a".repeat(64)}/reference`]);
 });
 
 
@@ -448,7 +457,7 @@ test("workspace handoff preserves drafts only in session storage and is consumed
   const id = url.searchParams.get("handoff");
   assert.match(id, /^[\da-f-]{36}$/);
   assert.equal(url.searchParams.size, 1, "drafts and credentials must not appear in the URL");
-  const expected = { source: "quick:tab:4", mode: "reenact", selection: { id: selection.id, projectId: selection.projectId, sourceUrl: "", capture: undefined }, draft, createdAt: sessionStorage[`workspace:${id}`].createdAt };
+  const expected = { source: "quick:tab:4", mode: "reenact", selection: { id: selection.id, projectId: selection.projectId, sourceUrl: "", capture: undefined, inputRevision: undefined }, draft, createdAt: sessionStorage[`workspace:${id}`].createdAt };
   assert.equal(typeof expected.createdAt, "number");
   assert.deepEqual(sessionStorage[`workspace:${id}`], expected);
   assert.ok(!JSON.stringify(sessionStorage).includes("saved-reference"), "handoff must not duplicate the durable reference image");
@@ -486,7 +495,8 @@ test("reference uploads validate image input and register an authenticated proje
   const projectId = "c".repeat(64);
   const { handlers, chrome } = await background(async (url, options) => {
     calls.push({ url, options });
-    return { ok: !fail, json: async () => fail ? { error: "Cannot save image" } : { id: projectId } };
+    return { ok: !fail, json: async () => fail ? { error: "Cannot save image" } : url.endsWith("/reference")
+      ? { id: "current-input", projectId, image: "data:image/png;base64,Y3VycmVudA==", sourceUrl: "", inputRevision: 4, inputs: { style: { subjectImage: "stored-subject" } } } : { id: projectId } };
   });
   const storage = { preferences: { token: "private-token", mode: "style" }, selection: { id: "old" } };
   chrome.storage.local.get = async () => storage;
@@ -504,14 +514,17 @@ test("reference uploads validate image input and register an authenticated proje
   const result = await send({ type: "alchemy:upload-reference", image, sourceUrl: "file:///private", projectId: "forged" });
   assert.equal(result.ok, true);
   assert.equal(result.value.projectId, projectId);
-  assert.equal(storage.selection.image, image);
+  assert.equal(storage.selection.image, "data:image/png;base64,Y3VycmVudA==", "reusing an existing project restores its adjusted current input");
   assert.equal(storage.selection.jobId, undefined);
   assert.equal(storage.selection.sourceUrl, "");
-  assert.ok(calls.every(call => call.url === "http://127.0.0.1:43187/projects" && call.options.headers.Authorization === "Bearer private-token"));
+  assert.equal(result.value.inputs.style.subjectImage, "stored-subject");
+  assert.equal(storage.selection.inputs, undefined);
+  assert.equal(storage.selection.inputRevision, 4);
+  assert.ok(calls.every(call => call.url.startsWith("http://127.0.0.1:43187/projects") && call.options.headers.Authorization === "Bearer private-token"));
   assert.deepEqual(JSON.parse(calls[1].options.body), { image, sourceUrl: "", capture: "original" });
   storage.preferences.token = "";
   assert.match((await send({ type: "alchemy:upload-reference", image })).error, /配对码/);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(handlers.message({ type: "alchemy:upload-reference", image }, { ...sender, id: "other" }, () => assert.fail("untrusted upload")), undefined);
 });
 
@@ -779,9 +792,12 @@ for (const scenario of ["saved", "moved", "screenshot-error"]) test(`collection 
 test("multi-image messages preserve order and roles, enforce image bounds and keep bridge authentication", async () => {
   const calls = [];
   const id = "00000000-0000-0000-0000-000000000001";
+  const projectId = "a".repeat(64);
   const { handlers, chrome } = await background(async (url, options) => {
     calls.push({ url, options });
-    return { ok: true, json: async () => ({ id, mode: "multi-reenact", stage: "started" }) };
+    return { ok: true, json: async () => url.endsWith("/reference")
+      ? { id: "selected", projectId, image: "saved-template", inputRevision: 1, inputs: { "multi-reenact": { subjects, instruction: "让人物拿着杯子" } } }
+      : { id, projectId, mode: "multi-reenact", stage: "started" } };
   });
   const storage = { preferences: { token: "private-token", mode: "style" }, selection: { id: "selected", image: "saved-template" } };
   chrome.storage.local.get = async () => storage;
@@ -799,11 +815,11 @@ test("multi-image messages preserve order and roles, enforce image bounds and ke
   assert.equal(started.ok, true);
   assert.deepEqual(JSON.parse(calls[0].options.body).reenact, start.reenact);
   assert.equal(started.value.selection.reenact.subjects[1].id, "cup");
-  assert.equal(storage.selection.reenact.subjects, undefined, "restore image bytes from bridge instead of exhausting local storage quota");
-  assert.equal(storage.selection.reenact.basePrompt, start.reenact.basePrompt);
+  assert.equal(storage.selection.inputs, undefined, "restore image bytes from bridge instead of exhausting local storage quota");
+  assert.equal(started.value.currentSelection.inputs["multi-reenact"].subjects.length, 2);
   const generate = { type: "alchemy:generate", id, language: "zh", subjects: [...subjects].reverse() };
   assert.equal((await send(generate)).ok, true);
-  assert.deepEqual(JSON.parse(calls[1].options.body), { language: "zh", subjects: generate.subjects });
+  assert.deepEqual(JSON.parse(calls[2].options.body), { language: "zh", subjects: generate.subjects });
   assert.ok(calls.every(call => call.options.headers.Authorization === "Bearer private-token"));
   const invalidSubjects = [null, [], [subjects[0]], Array.from({ length: 7 }, (_, i) => ({ ...subjects[0], id: String(i) })),
     [subjects[0], subjects[0]], [subjects[0], { ...subjects[1], id: "../asset" }],
@@ -818,7 +834,7 @@ test("multi-image messages preserve order and roles, enforce image bounds and ke
   }
   assert.ok((await send({ ...generate, subjectImage: subjects[0].subjectImage })).error);
   assert.ok((await send({ ...start, reenact: { subjects, basePrompt: "x".repeat(20001) } })).error);
-  assert.equal(calls.length, 2, "invalid inputs must not reach the bridge");
+  assert.equal(calls.length, 3, "invalid inputs must not reach the bridge");
   assert.equal(handlers.message(generate, { ...sender, id: "other" }, () => assert.fail("untrusted generation")), undefined);
   const state = await send({ type: "alchemy:state", selectionId: storage.selection.id, selectionJobId: storage.selection.jobId });
   assert.equal(state.value.selection.reenact, undefined, "polling must not resend all images");
@@ -974,4 +990,166 @@ test("plain workspace entry restores the selected project's path instead of the 
   assert.equal((await send({ type: "alchemy:open-workspace" })).ok, true);
   const firstId = new URL(tabs.at(-1).url).searchParams.get("handoff");
   assert.equal(sessionStorage[`workspace:${firstId}`].mode, "style", "unvisited project must not inherit global mode");
+});
+
+test("existing project edits preserve identity, authenticate CAS and store only compact current selection", async () => {
+  const projectId = "a".repeat(64), image = "data:image/png;base64,iVBORw==";
+  const calls = [], writes = [];
+  let fail = false, finish;
+  const next = { id: "input-8", projectId, image, inputRevision: 8, inputVersions: { style: "new" }, inputs: { style: { subjectImage: image, instruction: "edited" } } };
+  const { handlers, chrome } = await background(async (url, options) => {
+    calls.push({ url, options });
+    if (finish === null) await new Promise(resolve => { finish = resolve; });
+    return { ok: !fail, json: async () => fail ? { error: "项目输入已变化" } : next };
+  });
+  const storage = { preferences: { token: "secret" }, selection: { id: "input-7", projectId, inputRevision: 7, image: "old" } };
+  chrome.storage.local.get = async () => storage;
+  chrome.storage.local.set = async value => { writes.push(value); Object.assign(storage, value); };
+  const sender = { id: "test", url: "chrome-extension://test/workspace.html" };
+  const send = message => new Promise(resolve => handlers.message(message, sender, resolve));
+  const message = { type: "alchemy:update-project-input", projectId, expectedRevision: 7, mode: "style", referenceJobId: "00000000-0000-0000-0000-000000000001", image, subjectImage: image, instruction: "edited", path: "/projects", token: "forged" };
+  for (const invalid of [{ projectId: "../private" }, { expectedRevision: -1 }, { expectedRevision: "7" }, { expectedRevision: 1.5 }, { mode: "unknown" }])
+    assert.match((await send({ ...message, ...invalid })).error, /无效项目输入/);
+  assert.equal(calls.length, 0);
+  fail = true;
+  assert.match((await send(message)).error, /项目输入已变化/);
+  assert.equal(writes.length, 0);
+  assert.equal(storage.selection.image, "old");
+  fail = false;
+  const result = await send(message);
+  assert.equal(result.ok, true);
+  assert.equal(result.value.inputs.style.subjectImage, image);
+  assert.equal(storage.selection.id, "input-8");
+  assert.equal(storage.selection.projectId, projectId);
+  assert.equal(storage.selection.inputs, undefined);
+  assert.equal(storage.selection.inputVersions.style, "new");
+  assert.ok(calls.every(call => call.url.endsWith(`/projects/${projectId}/input`) && call.options.headers.Authorization === "Bearer secret"));
+  assert.deepEqual(JSON.parse(calls[1].options.body), { expectedRevision: 7, referenceJobId: message.referenceJobId, mode: "style", image, subjectImage: image, instruction: "edited" });
+  const writeCount = writes.length;
+  finish = null;
+  const pending = send(message);
+  await new Promise(resolve => setImmediate(resolve));
+  const callCount = calls.length;
+  assert.match((await send(message)).error, /正在处理图片/);
+  assert.equal(calls.length, callCount, "a pending save excludes another input transaction");
+  storage.selection = { id: "newer-input", projectId, inputRevision: 9, image: "newer" };
+  finish(); await pending;
+  assert.equal(writes.length, writeCount, "an old save cannot overwrite a newer selection revision");
+  storage.selection = { id: "other", projectId: "b".repeat(64), inputRevision: 1 };
+  await send(message);
+  assert.equal(writes.length, writeCount, "editing one workspace must not take over another selected project");
+  assert.equal(handlers.message(message, { ...sender, id: "other" }, () => assert.fail("untrusted update")), undefined);
+});
+
+test("legacy ensure-project restores the current project reference without duplicating composition in storage", async () => {
+  const projectId = "c".repeat(64), calls = [];
+  let fail = false;
+  const { handlers, chrome } = await background(async (url, options) => {
+    calls.push({ url, options });
+    return { ok: !fail, json: async () => fail ? { error: "保存失败" } : url.endsWith("/reference")
+      ? { id: "durable-id", projectId, image: "adjusted-current-image", inputRevision: 3, inputs: { reenact: { subjectImage: "subject" } } }
+      : { id: projectId } };
+  });
+  const storage = { preferences: { token: "secret" }, selection: { id: "legacy-selection", image: "original-image", sourceUrl: "https://example.com" } };
+  chrome.storage.local.get = async () => storage;
+  chrome.storage.local.set = async value => Object.assign(storage, value);
+  const sender = { id: "test", url: "chrome-extension://test/popup.html" };
+  const send = () => new Promise(resolve => handlers.message({ type: "alchemy:ensure-project", id: "legacy-selection" }, sender, resolve));
+  fail = true;
+  assert.match((await send()).error, /保存失败/);
+  assert.equal(storage.selection.projectId, undefined);
+  fail = false;
+  const result = await send();
+  assert.equal(result.ok, true);
+  assert.equal(result.value.inputs.reenact.subjectImage, "subject");
+  assert.equal(storage.selection.image, "adjusted-current-image");
+  assert.equal(storage.selection.id, "legacy-selection");
+  assert.equal(storage.selection.inputRevision, 3);
+  assert.equal(storage.selection.inputs, undefined);
+  assert.equal(calls.at(-1).url.endsWith(`/projects/${projectId}/reference`), true);
+});
+
+test("starting jobs distinguishes current and historical references and rejects obsolete or foreign inputs", async () => {
+  const projectId = "a".repeat(64), jobId = "00000000-0000-0000-0000-000000000001";
+  const current = { id: "input-7", projectId, image: "current-image", inputRevision: 7, inputs: { style: { subjectImage: "current-subject" } } };
+  const historical = { id: jobId, projectId, image: "historical-image", capture: "original", sourceUrl: "https://example.com/old" };
+  const posts = [];
+  const { handlers, chrome } = await background(async (url, options) => {
+    if (url.endsWith(`/projects/${projectId}/reference`)) return { ok: true, json: async () => current };
+    if (url.endsWith(`/jobs/${jobId}/reference`)) return { ok: true, json: async () => historical };
+    assert.ok(url.endsWith("/jobs"));
+    posts.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ id: "new-job", projectId, mode: "recreate" }) };
+  });
+  const storage = { preferences: { token: "secret" }, selection: { ...current } };
+  chrome.storage.local.get = async () => storage;
+  chrome.storage.local.set = async value => Object.assign(storage, value);
+  const sender = { id: "test", url: "chrome-extension://test/workspace.html" };
+  const send = extra => new Promise(resolve => handlers.message({ type: "alchemy:start", id: current.id, projectId, mode: "recreate", inputRevision: 7, ...extra }, sender, resolve));
+  assert.match((await send({ inputRevision: 6 })).error, /其他窗口更新/);
+  assert.equal(posts.length, 0);
+  const live = await send();
+  assert.equal(live.ok, true);
+  assert.equal(posts[0].image, "current-image");
+  assert.equal(posts[0].inputRevision, 7);
+  const replay = await send({ referenceJobId: jobId });
+  assert.equal(replay.ok, true);
+  assert.equal(posts[1].image, "historical-image");
+  assert.equal(posts[1].projectId, projectId);
+  assert.equal(posts[1].referenceJobId, jobId);
+  assert.equal(replay.value.selection.image, "historical-image");
+  assert.equal(replay.value.currentSelection.image, "current-image");
+  assert.equal(storage.selection.image, "current-image");
+  assert.equal(storage.selection.inputs, undefined);
+  historical.projectId = "b".repeat(64);
+  assert.match((await send({ referenceJobId: jobId })).error, /不属于当前项目/);
+  assert.equal(posts.length, 2);
+});
+
+test("a missing current image retains the revision needed to repair the same project", async () => {
+  const id = "d".repeat(64), image = "data:image/png;base64,aW1hZ2U=";
+  const { handlers, chrome } = await background(async (url, options) => {
+    if (url.endsWith("/reference")) return { ok: false, json: async () => ({ error: "原图已丢失" }) };
+    if (url.endsWith("/input")) {
+      assert.equal(JSON.parse(options.body).expectedRevision, 7);
+      return { ok: true, json: async () => ({ id: `${id}:8`, projectId: id, image, inputRevision: 8 }) };
+    }
+    return { ok: true, json: async () => ({ id, inputRevision: 7, inputVersions: { style: "new" }, jobs: [] }) };
+  });
+  const storage = { preferences: { token: "secret" } };
+  chrome.storage.local.get = async () => storage;
+  chrome.storage.local.set = async value => Object.assign(storage, value);
+  const send = message => new Promise(resolve => handlers.message(message, { id: "test", url: "chrome-extension://test/popup.html" }, resolve));
+  const opened = await send({ type: "alchemy:open-project", id });
+  assert.equal(opened.value.inputRevision, 7);
+  assert.match(opened.value.error, /原图已丢失/);
+  const repaired = await send({ type: "alchemy:update-project-input", projectId: id, expectedRevision: opened.value.inputRevision, image, mode: "style", instruction: "修复参考图" });
+  assert.equal(repaired.value.projectId, id);
+  assert.equal(repaired.value.inputRevision, 8);
+});
+
+for (const failure of ['get', 'set']) test(`durable input save succeeds despite subsequent selection cache ${failure} failure`, async () => {
+  const projectId = 'a'.repeat(64);
+  let saved = false, cacheAttempted = false;
+  const next = { id: 'input-8', projectId, inputRevision: 8, inputs: { style: { instruction: 'saved' } } };
+  const { handlers, chrome } = await background(async url => {
+    assert.ok(url.endsWith(`/projects/${projectId}/input`));
+    saved = true;
+    return { ok: true, json: async () => next };
+  });
+  chrome.storage.local.get = async key => {
+    if (key === 'selection' && failure === 'get') { cacheAttempted = true; throw new Error('cache get failed'); }
+    return { preferences: { token: 'secret' }, selection: { projectId, inputRevision: 7 } };
+  };
+  chrome.storage.local.set = async () => { cacheAttempted = true; throw new Error('cache set failed'); };
+  const sender = { id: 'test', url: 'chrome-extension://test/workspace.html' };
+  const message = { type: 'alchemy:update-project-input', projectId, expectedRevision: 7, mode: 'style', instruction: 'saved' };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await new Promise(resolve => handlers.message(message, sender, resolve));
+    assert.equal(saved, true);
+    assert.equal(cacheAttempted, true);
+    assert.equal(result.ok, true);
+    assert.equal(result.value.inputRevision, 8);
+    assert.equal(result.value.inputs.style.instruction, 'saved');
+  }
 });

@@ -8,9 +8,13 @@ export type SubjectInput = {
   promptSourceJobId?: string;
 };
 export type Preferences = { token: string; mode: Mode };
+export type ProjectInput = { instruction: string; subjectError?: string; subjectImage?: string; subjects?: MultiSubject[] };
 export type Selection = {
   id: string;
   projectId?: string;
+  inputRevision?: number;
+  inputVersions?: Partial<Record<Mode, string>>;
+  inputs?: Partial<Record<Mode, ProjectInput>>;
   sourceUrl: string;
   image?: string;
   capture?: "original" | "screenshot";
@@ -53,6 +57,9 @@ export type Job = {
 };
 export type ProjectSummary = {
   id: string;
+  imageAsset?: string;
+  inputRevision?: number;
+  inputVersions?: Partial<Record<Mode, string>>;
   hidden?: boolean;
   title: string;
   createdAt: string;

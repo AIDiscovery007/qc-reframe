@@ -169,7 +169,7 @@ createServer(async (req, res) => {
         if(previewOptions.has('hidden')) projects.slice(0,Number(previewOptions.get('hidden'))||1).forEach(p=>p.hidden=true);
         const visibleProjects=()=>projects.filter(p=>showHiddenProjects||!p.hidden);
         let projectsRevision=1;
-        projects.forEach(project=>project.revision='preview-1');
+        projects.forEach(project=>{project.revision='preview-1';project.inputRevision=0;project.inputVersions={};project.inputs={};project.jobs.forEach(job=>job.image=project.image||template);});
         const touch=(project)=>{projectsRevision++;if(project){project.revision='preview-'+projectsRevision;project.updatedAt=new Date().toISOString();}};
         const summary=(project)=>{
           const {jobs,image,...metadata}=project;
@@ -188,7 +188,7 @@ createServer(async (req, res) => {
           const pageSize=message.limit||24,page=Math.min(Math.max(1,message.page||1),Math.max(1,Math.ceil(filtered.length/pageSize)));
           return {items:filtered.slice((page-1)*pageSize,page*pageSize).map(summary),total:filtered.length,page,pageSize,revision:'preview-'+projectsRevision};
         };
-        const selection=(project)=>({id:project.id,projectId:project.id,image:project.image||template,capture:'original',sourceUrl:project.sourceUrl});
+        const selection=(project)=>({id:project.inputRevision?project.id+':'+project.inputRevision:project.id,projectId:project.id,image:project.image||template,capture:'original',sourceUrl:project.sourceUrl,inputRevision:project.inputRevision||0,inputVersions:structuredClone(project.inputVersions||{}),inputs:structuredClone(project.inputs||{})});
         const data={preferences:{token:state==='empty'?'':'preview',mode:previewOptions.get('mode')|| (state==='alignment'?'recreate':state.startsWith('multi')?'multi-reenact':state.startsWith('reenact')?'reenact':'style')},selection:state==='empty'||state==='library'||state==='works'?undefined:selection(projects[0])};
         if(previewOptions.has('reference') && data.selection) {
           data.selection.image='';
@@ -213,7 +213,9 @@ createServer(async (req, res) => {
           set:async()=>{throw new Error('Access to storage is not allowed from this context.');}
         }},runtime:{id:'preview',getManifest:()=>({name:'QC-Reframe preview',version:'0.1.18'}),onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)},sendMessage:async(message)=>{
           if(message.type.startsWith('alchemy:reminder-')) {
-            const preferences=JSON.parse(localStorage.getItem('preview-reminders')||'{"sound":false,"tone":"soft","volume":30}');
+            const preferences=JSON.parse(localStorage.getItem('preview-reminders')||'{"sound":false,"tone":"calm","volume":30}');
+            if(preferences.tone==='soft')preferences.tone='calm';
+            if(preferences.tone==='bell')preferences.tone='glisten';
             if(message.type==='alchemy:reminder-settings')localStorage.setItem('preview-reminders',JSON.stringify(message.preferences));
             if(message.type==='alchemy:reminder-test')return {error:'界面预览不播放声音；请在实际扩展中试听。'};
             const generation=previewOptions.get('reminderTask')==='image'?job.generations?.[0]:undefined;
@@ -245,6 +247,20 @@ createServer(async (req, res) => {
           if(message.type==='alchemy:quick-draft'){const key=location.pathname.includes('popup')?'quick-popup':'quick-panel';if(message.context){sessionStorage.setItem(key,JSON.stringify({...message.context,draft:message.draft}));return {ok:true};}return {ok:true,value:JSON.parse(sessionStorage.getItem(key)||'null')};}
           if(message.type==='alchemy:open-workspace'){sessionStorage.setItem('workspace-draft',JSON.stringify({...message.context,draft:message.draft,projects,data}));const params=new URLSearchParams({handoff:'preview',...(message.view?{view:message.view}:{})});if(location.pathname==='/workspace.html'||location.pathname==='/'){params.set('request',crypto.randomUUID());location.hash='workspace='+params;}else location.href='/workspace.html?state='+state+'&'+params;return {ok:true};}
           if(message.type==='alchemy:workspace-handoff'){const saved=JSON.parse(sessionStorage.getItem('workspace-draft')||'null');sessionStorage.removeItem('workspace-draft');return {ok:true,value:saved};}
+          if(message.type==='alchemy:update-project-input') {
+            if(previewOptions.get('swap')==='failed')return {error:'保存失败（预览），原输入已保留'};
+            const p=projects.find(p=>p.id===message.projectId);
+            if(message.expectedRevision!==(p.inputRevision||0))return {error:'项目输入已在其他窗口更新，请重新打开项目'};
+            const before=p.inputs?.[message.mode]||p.jobs.find(j=>j.mode===message.mode)?.reenact;
+            const changed=message.image && message.image!==(p.image||template);
+            p.inputVersions={...p.inputVersions};
+            if(changed)['style','recreate','reenact','multi-reenact'].forEach(mode=>p.inputVersions[mode]='new');
+            else if(message.mode==='multi-reenact'||before?.instruction!==message.instruction)p.inputVersions[message.mode]='new';
+            p.inputs={...p.inputs,[message.mode]:{instruction:message.instruction,subjectImage:message.subjectImage,subjects:structuredClone(message.subjects)}};
+            if(message.image)p.image=message.image;
+            p.inputRevision=(p.inputRevision||0)+1;touch(p);data.selection=selection(p);
+            return {ok:true,value:structuredClone(data.selection)};
+          }
           if(message.type==='alchemy:upload-reference'){if(new URLSearchParams(location.search).get('swap')==='failed')return {error:'互换失败（预览），请重试'};let p=projects.find(p=>(p.image||template)===message.image);if(!p){p={id:crypto.randomUUID(),title:'上传的参考图',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),sourceUrl:'',capture:'original',jobs:[],image:message.image};projects.unshift(p);touch(p);}data.selection={...selection(p),image:message.image};return {ok:true,value:data.selection};}
           if(message.type==='alchemy:query'&&message.path==='/cli/status')return {ok:true,value:structuredClone(cli)};
           if(message.type==='alchemy:cli-check'){cli.detectedAt=new Date().toISOString();if(cli.command)cli.checkedAt=cli.detectedAt;return {ok:true,value:structuredClone(cli)};}
@@ -305,15 +321,15 @@ createServer(async (req, res) => {
           }
           if(message.type==='alchemy:reference') {
             const saved=findJob(message.id);
-            return {ok:true,value:{...selection(projects.find(p=>p.id===saved.projectId)),jobId:saved.id,reenact:saved.reenact?(saved.mode==='multi-reenact'?{...saved.reenact,subjects:saved.generations?.at(-1)?.subjects||saved.reenact.subjects}:{...saved.reenact,subjectImage:subject}):undefined,generationSubjectImage:saved.generations?.at(-1)?.subjectImage}};
+            return {ok:true,value:{...selection(projects.find(p=>p.id===saved.projectId)),image:saved.image||template,jobId:saved.id,reenact:saved.reenact?(saved.mode==='multi-reenact'?{...saved.reenact,subjects:saved.generations?.at(-1)?.subjects||saved.reenact.subjects}:{...saved.reenact,subjectImage:subject}):undefined,generationSubjectImage:saved.generations?.at(-1)?.subjectImage}};
           }
           if(message.type==='alchemy:start') {
             await new Promise(resolve=>setTimeout(resolve,Math.min(10000,Math.max(0,Number(previewOptions.get('startDelay'))||0))));
             const project=projects.find(p=>p.id===message.projectId);
-            const next={id:'preview-'+Date.now(),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',instruction:message.instruction,reenact:message.reenact?structuredClone(message.reenact):undefined};
-            project.jobs.unshift(next);touch(project);data.selection={...selection(project),jobId:next.id,reenact:structuredClone(message.reenact)};
+            const next={id:'preview-'+Date.now(),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,instruction:message.instruction,reenact:message.reenact?structuredClone(message.reenact):undefined};
+            project.jobs.unshift(next);project.inputs={...project.inputs,[message.mode]:{instruction:message.instruction,...structuredClone(message.reenact)}};project.inputVersions={...project.inputVersions,[message.mode]:next.id};project.inputRevision=(project.inputRevision||0)+1;touch(project);data.selection={...selection(project),jobId:next.id,reenact:structuredClone(message.reenact)};
             setTimeout(()=>{if(next.status==='running'){next.status='completed';next.stage='逆向完成';next.result={...${JSON.stringify(result)},title:message.mode+' 新提示词',promptZh:'当前路径 '+message.mode+' 的独立提示词',promptEn:'Use the supplied subjects and reference template.'};touch(project);}},1500);
-            return {ok:true,value:{selection:data.selection,job:structuredClone(next)}};
+            return {ok:true,value:{selection:{...data.selection,image:next.image},currentSelection:selection(project),job:structuredClone(next)}};
           }
           if(message.type==='alchemy:cancel'){
             await new Promise(resolve=>setTimeout(resolve,Math.min(10000,Math.max(0,Number(previewOptions.get('cancelDelay'))||0))));

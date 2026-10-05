@@ -12,7 +12,7 @@ const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整�
 export default function QuickWorkspace({ contextKey, selection, title, mode, subject, instruction, job, disabled, modeDisabled, reverseDisabled, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, generationDisabled, generationHint }: {
   contextKey: string; selection?: Selection; title?: string; mode: Mode; subject: string; instruction: string; job?: Job;
   generationHint?: string; generationDisabled: boolean; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; status?: string; stale: boolean; cancelling: boolean; copied: boolean; lang: "zh" | "en"; versions: ReactNode;
-  onMode(mode: Mode): void; onSubject(image: string): void; onAvailability(available: boolean): void;
+  onMode(mode: Mode): void; onSubject(image: string): void | Promise<void>; onAvailability(available: boolean): void;
   onInstruction(value: string): void; onReference(file?: File): void; onRotateReference(image: string): Promise<void>; onSwap(): void;
   onReverse(): void; onCancel(): void; onCopy(): void; onLanguage(lang: "zh" | "en"): void; onWorkspace(): void; onUpdate(job: Job): void;
 }) {
@@ -21,6 +21,9 @@ export default function QuickWorkspace({ contextKey, selection, title, mode, sub
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const revision = useRef(0);
+  const pendingInput = useRef(false);
+  const scope = useRef(contextKey);
+  scope.current = contextKey;
   const subjectFile = useRef<HTMLInputElement>(null);
   const referenceFile = useRef<HTMLInputElement>(null);
   const promptToggle = useRef<HTMLButtonElement>(null);
@@ -33,17 +36,35 @@ export default function QuickWorkspace({ contextKey, selection, title, mode, sub
       pendingJob.current = "";
     }
   }, [job?.id, job?.status]);
-  useEffect(() => { select("reference"); setUploading(false); setError(""); return () => { revision.current++; onAvailability(true); }; }, [contextKey]);
-  const uploadSubject = async (file?: File) => {
-    if (!file || disabled || uploading) return;
-    const current = ++revision.current;
+  useEffect(() => { select("reference"); setUploading(false); setError(""); return () => { revision.current++; pendingInput.current = false; onAvailability(true); }; }, [contextKey]);
+  const saveSubject = async (read: () => Promise<string>, rethrow = false) => {
+    if (disabled || pendingInput.current) return false;
+    const attempt = ++revision.current, context = contextKey;
+    const current = () => attempt === revision.current && context === scope.current;
+    pendingInput.current = true;
     setUploading(true); setError(""); onAvailability(false);
     try {
+      const image = await read();
+      if (!current()) return false;
+      await onSubject(image);
+      return current();
+    } catch (error) {
+      if (current()) setError((error as Error).message);
+      if (rethrow) throw error;
+      return false;
+    } finally { if (current()) { pendingInput.current = false; setUploading(false); onAvailability(true); } }
+  };
+  const uploadSubject = async (file?: File) => {
+    if (!file) return;
+    const saved = await saveSubject(async () => {
       if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size > 20 * 1024 * 1024) throw new Error("请上传不超过20 MB的PNG、JPEG或WebP图片");
-      const image = await normalizeImage(file, 2 * 1024 * 1024);
-      if (current === revision.current) { onSubject(image); select("subject"); subjectTab.current?.focus({ preventScroll: true }); }
-    } catch (error) { if (current === revision.current) { onSubject(""); setError((error as Error).message); } }
-    finally { if (current === revision.current) { setUploading(false); onAvailability(true); } }
+      return normalizeImage(file, 2 * 1024 * 1024);
+    });
+    if (saved) { select("subject"); subjectTab.current?.focus({ preventScroll: true }); }
+  };
+  const removeSubject = async () => { if (await saveSubject(async () => "")) select("reference"); };
+  const rotateSubject = async (image: string) => {
+    if (!await saveSubject(async () => image, true)) throw new Error("当前输入已切换，请重新调整图片");
   };
   const multi = mode === "multi-reenact";
   const paired = mode === "style" || mode === "reenact";
@@ -53,7 +74,7 @@ export default function QuickWorkspace({ contextKey, selection, title, mode, sub
   return <section className="quick-workspace" aria-label="快捷逆向">
     <div className="quick-heading"><h1>{title || "选择参考图"}</h1><SelectField label="" aria-label="逆向模式" value={mode} disabled={modeDisabled || uploading} onChange={e => onMode(e.target.value as Mode)}>{Object.entries(modes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</SelectField></div>
     <div className="quick-canvas">
-      {image ? <ImagePreview src={image} alt={label} rotation={{ maxBytes: selected === "subject" ? 2 * 1024 * 1024 : 4 * 1024 * 1024, disabled: locked, onApply: selected === "subject" ? onSubject : onRotateReference }} />
+      {image ? <ImagePreview src={image} alt={label} rotation={{ maxBytes: selected === "subject" ? 2 * 1024 * 1024 : 4 * 1024 * 1024, disabled: locked, onApply: selected === "subject" ? rotateSubject : onRotateReference }} />
         : selection && !selection.image && !selection.error ? <LoadingPlaceholder>正在读取参考图…</LoadingPlaceholder>
         : <button className="quick-upload" disabled={locked} onClick={() => selected === "subject" ? subjectFile.current?.click() : referenceFile.current?.click()}><Icon name="plus" />{uploading ? "正在读取…" : `上传${label}`}</button>}
     </div>
@@ -64,7 +85,7 @@ export default function QuickWorkspace({ contextKey, selection, title, mode, sub
     <div className="quick-tools">
       {versions}
       <button className="icon-button" aria-label={`替换${label}`} title={`替换${label}`} disabled={locked} onClick={() => selected === "subject" ? subjectFile.current?.click() : referenceFile.current?.click()}><Icon name="plus" /></button>
-      {paired && <><button className="icon-button" aria-label="互换主体与参考" title="互换主体与参考" disabled={locked || !subject || !selection?.image} onClick={onSwap}><Icon name="swap" /></button><button className="icon-button" aria-label="移除主体" title="移除主体" disabled={locked || !subject} onClick={() => { onSubject(""); select("reference"); }}><Icon name="trash" /></button></>}
+      {paired && <><button className="icon-button" aria-label="互换主体与参考" title="互换主体与参考" disabled={locked || !subject || !selection?.image} onClick={onSwap}><Icon name="swap" /></button><button className="icon-button" aria-label="移除主体" title="移除主体" disabled={locked || !subject} onClick={() => void removeSubject()}><Icon name="trash" /></button></>}
       {job?.result && <button ref={promptToggle} className="text-button quick-prompt-toggle" aria-expanded={promptOpen} aria-controls="quick-prompt" onClick={() => setPromptOpen(!promptOpen)}><Icon name="edit" />提示词<Icon name="chevronDown" /></button>}
     </div>
     <input ref={referenceFile} hidden type="file" accept="image/png,image/jpeg,image/webp" aria-label="上传参考图" onChange={e => { onReference(e.target.files?.[0]); e.target.value = ""; }} />

@@ -12,6 +12,14 @@ function slots(record, file) {
   if (record?.id !== id || typeof record.createdAt !== "string" ||
     (record.generations !== undefined && !Array.isArray(record.generations))) throw new Error("图片记录无效");
   const entries = [[record, "imageAsset", file.slice(0, -5)]];
+  for (const input of Object.values(record.inputs || {})) {
+    if (!input || typeof input !== "object") throw new Error("项目输入记录无效");
+    entries.push([input, "subjectAsset"]);
+    if (input.subjects !== undefined) {
+      if (!Array.isArray(input.subjects) || input.subjects.some((subject) => !subject || typeof subject.subjectAsset !== "string")) throw new Error("项目主体记录无效");
+      for (const subject of input.subjects) entries.push([subject, "subjectAsset"]);
+    }
+  }
   if (!project) {
     entries.push([record, "subjectAsset", `${id}-subject`]);
     const subjects = [record.reenact?.subjects, ...(record.generations || []).map((generation) => generation.subjects)];

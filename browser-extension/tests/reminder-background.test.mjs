@@ -241,3 +241,32 @@ test('generic entries and reminders share one queue even when the workspace is o
   assert.ok(h.updates.some(tab => tab.url.includes('tasks=unread')));
   assert.ok(h.updates.some(tab => tab.url.includes('handoff=next')));
 });
+
+for (const [legacy, current] of [['soft', 'calm'], ['bell', 'glisten'], ['unknown', 'calm']]) test(`stored ${legacy} tone restores as ${current} without replay or loss`, async () => {
+  const original = await harness(); await original.snapshot([task('pending')]);
+  const stored = structuredClone(original.local.taskReminders);
+  stored.preferences = { sound: true, tone: legacy, volume: 15 };
+  const restored = await harness({ stored });
+  const view = await restored.message('get');
+  assert.equal(view.preferences.tone, current);
+  assert.equal(view.preferences.sound, true); assert.equal(view.preferences.volume, 15);
+  assert.equal(restored.local.taskReminders.preferences.tone, current);
+  assert.deepEqual(restored.local.taskReminders.unread, stored.unread);
+  assert.deepEqual(restored.local.taskReminders.pending, stored.pending);
+  assert.equal(restored.sounds.length, 0);
+});
+
+test('new choices persist without sounding; preview uses the saved choice and invalid values cannot overwrite it', async () => {
+  const choices = {};
+  runInNewContext(stateCode, { exports: choices });
+  const h = await harness();
+  assert.equal((await h.message('get')).preferences.tone, 'calm');
+  for (const tone of choices.REMINDER_TONES) {
+    const count = h.sounds.length;
+    const view = await h.message('settings', { preferences: { sound: true, tone: tone.id, volume: 60 } });
+    assert.equal(view.preferences.tone, tone.id); assert.equal(h.sounds.length, count);
+    await h.message('test'); assert.equal(h.sounds.at(-1).preferences.tone, tone.id);
+  }
+  for (const tone of ['missing', '__proto__', '../../private.ogg']) await assert.rejects(h.message('settings', { preferences: { sound: true, tone, volume: 60 } }), /无效提醒设置/);
+  assert.equal(h.local.taskReminders.preferences.tone, 'tech');
+});

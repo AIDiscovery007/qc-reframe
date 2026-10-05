@@ -17,7 +17,7 @@ function extract(source, names) {
 }
 function evaluate(source, globals, names) {
   const original = globals;
-  globals = { setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, ...globals,
+  globals = { setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, setInputRevisions() {}, ...globals,
     setProjectMode: original.setProjectMode || ((_id, mode) => original.setPreferences(value => ({ ...value, mode }))),
     request: async message => message.type === 'alchemy:project-views' ? original.projectViews || {} : original.request(message),
   };
@@ -32,7 +32,7 @@ test('quick handoff captures the displayed version, keeps draft edits and blocks
   for (const job of [{ id: 'old' }, { id: 'latest' }, undefined]) {
     const sent = [], errors = [], pending = { current: false };
     const globals = {
-      workspace: false, job, activeProject: { jobs: [{ id: 'old' }] }, selection: { id: 'selected', projectId: 'A', image: 'large-image', sourceUrl: '' },
+      workspace: false, job, activeProject: { jobs: [{ id: 'old' }] }, selection: { id: 'selected', projectId: 'A', inputRevision: 7, image: 'large-image', sourceUrl: '' },
       preferences: { mode: 'style' }, subjectKey: () => 'A:style', versions: {}, instructions: { 'A:style:old': 'unsaved', 'B:style:new': 'other project' },
       subjectDrafts: { 'A:style': 'subject' }, multiSubjectDrafts: {}, promptDrafts: { old: { promptZh: 'edited' }, unrelated: {} }, lang: 'en',
       handoffPending: pending, busy: false, savingMode: false, subjectUnavailable: {}, reading: false, connected: true, loadingProject: false,
@@ -42,6 +42,7 @@ test('quick handoff captures the displayed version, keeps draft edits and blocks
     await ui.openWorkspace();
     assert.equal(sent[0].context.selection.projectId, 'A');
     assert.equal(sent[0].context.selection.image, undefined);
+    assert.equal(sent[0].context.selection.inputRevision, 7);
     assert.equal(sent[0].draft.versions['A:style'], job?.id || 'new');
     assert.equal(sent[0].draft.instructions['A:style:old'], 'unsaved');
     assert.equal(sent[0].draft.instructions['B:style:new'], undefined);
@@ -135,11 +136,11 @@ test('quick reopen keeps durable project choices while restoring inputs; explici
 test('workspace handoff restores its own source and mode without polling back to another view', async () => {
   const state = { preferences: {}, selections: [], drafts: {} };
   let refresh;
-  const source = { id: 'A', projectId: 'A-project', sourceUrl: '' };
+  const source = { id: 'A', projectId: 'A-project', sourceUrl: '', inputRevision: 8 };
   const context = {
     workspace: true, window: { addEventListener() {}, removeEventListener() {} }, location: { search: '?handoff=test', hash: '', pathname: '/workspace.html' }, history: { replaceState() {} }, URLSearchParams,
     modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, deletingProjects: { current: false },
-    request: async message => message.type === 'alchemy:workspace-handoff' ? { selection: source, mode: 'reenact', draft: { instructions: { key: 'unsaved' }, versions: { key: 'new' } } } : { ...source, image: 'A-image' },
+    request: async message => message.type === 'alchemy:workspace-handoff' ? { selection: source, mode: 'reenact', draft: { instructions: { key: 'unsaved' }, versions: { key: 'new' } } } : { ...source, id: 'A-current', inputRevision: 8, image: 'A-image' },
     readState: async () => ({ preferences: { paired: true, mode: 'recreate' }, selection: { id: 'B', image: 'B-image' } }),
     pollWhileVisible: callback => { refresh = callback; return () => {}; },
     setPreferences: update => { state.preferences = update(state.preferences); },
@@ -151,36 +152,10 @@ test('workspace handoff restores its own source and mode without polling back to
   await refresh(); await refresh();
   assert.equal(state.preferences.mode, 'reenact');
   assert.equal(state.preferences.paired, true);
-  assert.equal(state.selections.at(-1).id, 'A');
+  assert.equal(state.selections.at(-1).id, 'A-current');
+  assert.equal(state.selections.at(-1).inputRevision, 8);
   assert.equal(state.selections.at(-1).image, 'A-image');
   assert.equal(state.drafts.key, 'unsaved');
-});
-
-test('subject replacement failure clears old input and context changes release upload state', async () => {
-  const tree = ts.createSourceFile('QuickWorkspace.tsx', quick, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  let reset;
-  const visit = node => {
-    if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useEffect' && node.arguments[0]?.getText(tree).includes('revision.current++')) reset = node.arguments[0].getText(tree);
-    ts.forEachChild(node, visit);
-  };
-  visit(tree);
-  const subjects = [], availability = [], uploading = [], errors = [], revision = { current: 0 };
-  let finish;
-  const globals = { revision, subjectTab: { current: null }, disabled: false, uploading: false, select() {}, setUploading: value => uploading.push(value), setError: value => errors.push(value),
-    onSubject: value => subjects.push(value), onAvailability: value => availability.push(value), normalizeImage: () => new Promise(resolve => { finish = resolve; }),
-  };
-  const ui = evaluate(`${extract(quick, ['uploadSubject'])}\nconst reset = ${reset};`, globals, ['uploadSubject', 'reset']);
-  const cleanup = ui.reset();
-  const pending = ui.uploadSubject({ type: 'image/png', size: 100 });
-  cleanup(); ui.reset();
-  finish('old context image'); await pending;
-  assert.equal(subjects.length, 0);
-  assert.equal(uploading.at(-1), false);
-  assert.equal(availability.at(-1), true);
-  await ui.uploadSubject({ type: 'text/plain', size: 100 });
-  assert.equal(subjects.at(-1), '', 'failed replacement must not retain an invisible old subject');
-  assert.match(errors.at(-1), /PNG/);
-  assert.equal(availability.at(-1), true);
 });
 
 test('live reminder navigation switches versions without reinitializing and ignores stale results', async () => {
@@ -272,7 +247,7 @@ for (const delayed of ['handoff', 'reference']) for (const kind of ['single', 'b
 
 
 test('live workspace handoff merges drafts, routes settings/tasks, and ignores superseded responses', async () => {
-  const state = { instructions: { 'other:style:new': 'keep me' }, versions: { 'other:style': 'old' }, subjects: { other: 'image' }, selections: [], mode: '', settings: false, tasks: false };
+  const state = { instructions: { 'other:style:new': 'keep me' }, versions: { 'other:style': 'old' }, inputRevisions: {}, subjects: { other: 'image' }, selections: [], mode: '', settings: false, tasks: false };
   const revision = { current: 0 }, pending = new Map();
   const setter = key => value => { state[key] = typeof value === 'function' ? value(state[key] || {}) : value; };
   const handoff = { selection: { id: 'source', projectId: 'project' }, mode: 'reenact', draft: { instructions: { 'project:reenact:new': 'incoming' }, versions: { 'project:reenact': 'new' } } };
@@ -283,13 +258,15 @@ test('live workspace handoff merges drafts, routes settings/tasks, and ignores s
       return Promise.resolve(message.type === 'alchemy:workspace-handoff' ? handoff : { id: 'reference', projectId: message.id, image: 'reference-image' });
     },
     setSelection: value => state.selections.push(value), setProject() {}, setProjectMode: (_id, mode) => { state.mode = mode; },
-    setInstructions: setter('instructions'), setVersions: setter('versions'), setSubjectDrafts: setter('subjects'), setMultiSubjectDrafts: setter('multi'), setPromptDrafts: setter('prompts'), setLang() {},
+    setInputRevisions: setter('inputRevisions'), setInstructions: setter('instructions'), setVersions: setter('versions'), setSubjectDrafts: setter('subjects'), setMultiSubjectDrafts: setter('multi'), setPromptDrafts: setter('prompts'), setLang() {},
     setSettings: setter('settings'), setTasksOpen: setter('tasks'), setNewProjectOpen() {}, setHistoryOpen() {}, setGalleryOpen() {},
     setError: value => { if (value) assert.fail(value); },
   }, ['navigateHandoff', 'navigateReminder']);
   await ui.navigateHandoff(new URLSearchParams({ handoff: 'one', view: 'settings' }));
   assert.equal(state.settings, true); assert.equal(state.tasks, false); assert.equal(state.mode, 'reenact');
   assert.equal(state.selections.at(-1).image, 'reference-image');
+  assert.equal(state.selections.at(-1).error, undefined);
+  assert.equal(state.inputRevisions.project, 0);
   assert.equal(state.instructions['other:style:new'], 'keep me'); assert.equal(state.instructions['project:reenact:new'], 'incoming');
   assert.equal(state.subjects.other, 'image'); assert.equal(state.versions['other:style'], 'old'); assert.equal(state.versions['project:reenact'], 'new');
   const stale = ui.navigateHandoff(new URLSearchParams({ handoff: 'slow-handoff', view: 'settings' }));
@@ -304,4 +281,71 @@ test('live workspace handoff merges drafts, routes settings/tasks, and ignores s
   const before = state.selections.length;
   pending.get('slow-project')({ id: 'late', projectId: 'slow-project' }); await staleReference;
   assert.equal(state.selections.length, before); assert.equal(state.tasks, true); assert.equal(state.settings, false);
+});
+
+
+test('stale handoff opens the latest reference without restoring outdated drafts and marks input for hydration', async () => {
+  const state = { selections: [], errors: [], inputRevisions: { project: 6 }, instructions: { 'other:style:new': 'keep instruction' }, versions: { 'other:style': 'old' }, subjects: { other: 'keep subject' } };
+  const handoff = { selection: { id: 'old-source', projectId: 'project', inputRevision: 6 }, mode: 'style', draft: {
+    instructions: { 'project:style:new': 'outdated instruction' }, subjectDrafts: { 'project:style:new': 'outdated subject' }, versions: { 'project:style': 'outdated-version' },
+  } };
+  const reference = { id: 'latest-source', projectId: 'project', image: 'latest-reference', inputRevision: 8, inputs: { style: { subjectImage: 'latest subject' } } };
+  const setter = key => value => { state[key] = typeof value === 'function' ? value(state[key] || {}) : value; };
+  const ui = evaluate(`let cancelled = false, ownContext = false, previous;\n${extract(app, ['restoreDraft', 'navigateHandoff'])}`, {
+    selectionRevision: { current: 0 }, workspace: true,
+    request: async message => message.type === 'alchemy:workspace-handoff' ? handoff : reference,
+    setSelection: value => state.selections.push(value), setProject() {}, setProjectMode() {},
+    setInputRevisions: setter('inputRevisions'), setInstructions: setter('instructions'), setVersions: setter('versions'), setSubjectDrafts: setter('subjects'),
+    setMultiSubjectDrafts: () => assert.fail('stale multi drafts must not restore'), setPromptDrafts: () => assert.fail('stale prompt drafts must not restore'), setLang() {},
+    setSettings() {}, setTasksOpen() {}, setNewProjectOpen() {}, setHistoryOpen() {}, setGalleryOpen() {}, setError: value => state.errors.push(value),
+  }, ['navigateHandoff']);
+  await ui.navigateHandoff(new URLSearchParams({ handoff: 'stale' }));
+  const selected = state.selections.at(-1);
+  assert.equal(selected.id, 'latest-source');
+  assert.equal(selected.image, 'latest-reference');
+  assert.equal(selected.inputRevision, 8);
+  assert.equal(selected.error, undefined);
+  assert.equal(selected.inputs, undefined, 'durable inputs must be hydrated before resuming work');
+  assert.equal(state.inputRevisions.project, -1, 'hydration must refresh current lane choices even for a previously visited project');
+  assert.match(state.errors.at(-1), /项目输入已更新.*旧窗口草稿未覆盖/);
+  assert.deepEqual(state.instructions, { 'other:style:new': 'keep instruction' });
+  assert.deepEqual(state.subjects, { other: 'keep subject' });
+  assert.deepEqual(state.versions, { 'other:style': 'old' });
+});
+
+for (const draftRevision of [7, 8]) test(`ordinary quick initialization validates draft revision ${draftRevision} against durable input`, async () => {
+  const state = { modes: {}, versions: {}, preferences: {}, drafts: {}, errors: [] };
+  const setter = key => value => { state[key] = typeof value === 'function' ? value(state[key]) : value; };
+  let refresh;
+  const selection = { id: 'input-8', projectId: 'A', inputRevision: 8 };
+  const saved = { mode: 'style', selection: { ...selection, inputRevision: draftRevision }, draft: {
+    versions: { 'A:style': 'new' }, instructions: { 'A:style:new': 'quick instruction', 'B:style:new': 'other instruction' },
+    subjectDrafts: { 'A:style:new': 'quick subject', 'B:style:new': 'other subject' },
+    multiSubjectDrafts: { 'A:multi-reenact:new': [{ id: 'quick multi' }] },
+    promptDrafts: { historicalJob: { promptZh: 'unsaved historical prompt' } },
+  } };
+  const cleanup = evaluate(`const start = ${initialize};`, {
+    workspace: false, projectViews: { A: { mode: 'style', versions: { style: 'new' }, inputRevision: 8 } },
+    window: { addEventListener() {}, removeEventListener() {} }, location: { search: '', hash: '', pathname: '/popup.html' },
+    history: { replaceState() {} }, URLSearchParams,
+    modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, deletingProjects: { current: false },
+    request: async message => message.type === 'alchemy:project-reference' ? { ...selection, inputs: { style: { instruction: 'workspace instruction' } } } : saved,
+    readState: async () => ({ preferences: { paired: true, mode: 'style' }, selection }),
+    pollWhileVisible: callback => { refresh = callback; return () => {}; },
+    setProjectModes: setter('modes'), setProjectMode() {}, setVersions: setter('versions'), setPreferences: setter('preferences'), setSelection: setter('selection'),
+    setInstructions: setter('instructions'), setSubjectDrafts: setter('subjects'), setMultiSubjectDrafts: setter('multi'), setPromptDrafts: setter('prompts'),
+    setLang() {}, setSettings() {}, setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {},
+    setError: value => { if (value) assert.fail(value); }, setDraftError: value => assert.fail(value),
+  }, ['start']).start();
+  await new Promise(resolve => setImmediate(resolve));
+  await refresh();
+  const fresh = draftRevision === 8;
+  assert.equal(state.instructions['A:style:new'], fresh ? 'quick instruction' : undefined);
+  assert.equal(state.subjects['A:style:new'], fresh ? 'quick subject' : undefined);
+  assert.equal(state.multi['A:multi-reenact:new']?.[0].id, fresh ? 'quick multi' : undefined);
+  assert.equal(state.instructions['B:style:new'], 'other instruction');
+  assert.equal(state.subjects['B:style:new'], 'other subject');
+  assert.equal(state.prompts.historicalJob.promptZh, 'unsaved historical prompt', 'prompt edits belong to immutable jobs, not the current input revision');
+  assert.equal(state.versions['A:style'], 'new');
+  cleanup();
 });

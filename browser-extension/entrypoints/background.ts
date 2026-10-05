@@ -56,6 +56,7 @@ export default defineBackground(() => {
       browser.contextMenus.create({ id: "alchemy-collect", title: "加入 Reframe", contexts: ["image"] });
     } catch (error) { console.error("无法创建 Reframe 图片菜单", error); }
   });
+  const storedInput = ({ inputs: _inputs, ...selection }: Selection) => selection;
   let selecting = false;
   const showsHiddenProjects = async () => (await browser.storage.session.get("showHiddenProjects")).showHiddenProjects === true;
   const requireVisibleProject = async (project: Project) => {
@@ -74,7 +75,7 @@ export default defineBackground(() => {
     };
     try {
       const { preferences } = await browser.storage.local.get("preferences") as { preferences?: Preferences };
-      await browser.storage.local.set({ selection });
+      await browser.storage.local.set({ selection: storedInput(selection) });
       await browser.tabs
         .sendMessage(tab.id, { type: "alchemy:hide" })
         .catch(() => {});
@@ -94,13 +95,13 @@ export default defineBackground(() => {
           selection = { id: selection.id, sourceUrl: "" };
           throw new Error("该项目已隐藏，请先点击小眼睛显示隐藏项目");
         }
-        selection.projectId = project.id;
+        selection = { ...await projectReference(project.id, preferences.token), id: selection.id };
         selection.stage = "参考模板已就绪，请选择路径生成提示词";
       }
     } catch (error) {
       selection.error = error instanceof Error ? error.message : String(error);
     } finally {
-      try { await browser.storage.local.set({ selection }); }
+      try { await browser.storage.local.set({ selection: storedInput(selection) }); }
       finally { selecting = false; }
       // Open after capture so the floating UI cannot cover the selected image.
       await openResult(tab.id);
@@ -130,7 +131,7 @@ export default defineBackground(() => {
     if (typeof id !== "string" || !/^[\da-f]{64}$/.test(id)) throw new Error("无效项目");
     return bridge<Selection>(`/projects/${id}/reference`, token);
   };
-  const start = async (id: string, mode: Mode, referenceJobId?: string, reenact?: SubjectInput, projectId?: string, instruction?: string) => {
+  const start = async (id: string, mode: Mode, referenceJobId?: string, reenact?: SubjectInput, projectId?: string, instruction?: string, inputRevision?: number) => {
     if (selecting) throw new Error("正在处理图片，请稍候");
     selecting = true;
     try {
@@ -146,9 +147,12 @@ export default defineBackground(() => {
       if (mode === "multi-reenact" && (!validSubjects(reenact?.subjects) || typeof reenact?.basePrompt !== "string" || !reenact.basePrompt.trim() || reenact.basePrompt.length > 20000))
         throw new Error("请添加 2–6 张有效主体图并填写任务指令");
       if (mode === "multi-reenact") reenact = { subjects: reenact!.subjects!.map(({ id, subjectImage, role, detail }) => ({ id, subjectImage, role, detail })), basePrompt: reenact!.basePrompt };
-      const selection = projectId ? await projectReference(projectId, stored.preferences?.token || "") : referenceJobId
-        ? { ...await reference(referenceJobId, stored.preferences?.token || ""), id: crypto.randomUUID() }
-        : stored.selection;
+      const current = projectId ? await projectReference(projectId, stored.preferences?.token || "") : undefined;
+      if (inputRevision !== undefined && current && inputRevision !== (current.inputRevision || 0))
+        throw new Error("项目输入已在其他窗口更新，请刷新后重试");
+      const selection = referenceJobId ? { ...await reference(referenceJobId, stored.preferences?.token || ""), id: crypto.randomUUID() }
+        : current || stored.selection;
+      if (projectId && selection?.projectId !== projectId) throw new Error("历史输入不属于当前项目");
       if (!selection?.image || (!projectId && !referenceJobId && selection.id !== id))
         throw new Error("所选图片已变化，请重试");
       const job = await bridge<Job>("/jobs", stored.preferences?.token || "", {
@@ -158,14 +162,16 @@ export default defineBackground(() => {
         capture: selection.capture,
         instruction,
         projectId: selection.projectId,
+        inputRevision: inputRevision ?? current?.inputRevision, referenceJobId,
         reenact: mode !== "recreate" ? reenact : undefined,
       });
       const next = { ...selection, projectId: job.projectId || selection.projectId, jobId: job.id, stage: job.stage, error: undefined, instruction: job.instruction,
         reenact: mode !== "recreate" ? reenact : undefined, subjectError: undefined, generationSubjectImage: undefined, generationSubjects: undefined };
+      const currentSelection = await projectReference(job.projectId || selection.projectId!, stored.preferences?.token || "").catch(() => current || selection);
       if (!projectId || stored.selection?.projectId === projectId)
-        await browser.storage.local.set({ selection: mode === "multi-reenact" ? { ...next, reenact: { basePrompt: reenact!.basePrompt } } : next });
+        await browser.storage.local.set({ selection: storedInput(currentSelection) }).catch(() => {});
       void reminders.wake();
-      return { selection: next, job };
+      return { selection: next, currentSelection, job };
     } finally {
       selecting = false;
     }
@@ -180,9 +186,10 @@ export default defineBackground(() => {
   const handoffContext = (context: any) => {
     if (!context || !modes.includes(context.mode)) throw new Error("无效工作台模式");
     const value = context.selection;
-    if (value !== null && (!value || typeof value.id !== "string" || value.id.length > 100 || (value.projectId !== undefined && !/^[\da-f]{64}$/.test(value.projectId))))
+    if (value !== null && (!value || typeof value.id !== "string" || value.id.length > 100 || (value.projectId !== undefined && !/^[\da-f]{64}$/.test(value.projectId))
+      || (value.inputRevision !== undefined && (!Number.isSafeInteger(value.inputRevision) || value.inputRevision < 0))))
       throw new Error("无效工作台项目");
-    return { mode: context.mode, selection: value ? { id: value.id, projectId: value.projectId, sourceUrl: typeof value.sourceUrl === "string" ? value.sourceUrl : "", capture: value.capture } : null };
+    return { mode: context.mode, selection: value ? { id: value.id, projectId: value.projectId, sourceUrl: typeof value.sourceUrl === "string" ? value.sourceUrl : "", capture: value.capture, inputRevision: value.inputRevision } : null };
   };
   // Serialize session writes so rapid input and simultaneous panels cannot reorder drafts.
   let sessionWrite: Promise<unknown> = Promise.resolve();
@@ -294,8 +301,27 @@ export default defineBackground(() => {
         try {
           const project = await bridge<Project>("/projects", token, { image: message.image, sourceUrl: "", capture: "original" });
           await requireVisibleProject(project);
-          const next: Selection = { id: crypto.randomUUID(), projectId: project.id, image: message.image, sourceUrl: "", capture: "original" };
-          await browser.storage.local.set({ selection: next });
+          const next: Selection = { ...await projectReference(project.id, token), id: crypto.randomUUID() };
+          await browser.storage.local.set({ selection: storedInput(next) });
+          return next;
+        } finally { selecting = false; }
+      }
+      case "alchemy:update-project-input": {
+        if (selecting) throw new Error("正在处理图片，请稍候");
+        if (typeof message.projectId !== "string" || !/^[a-f0-9]{64}$/.test(message.projectId)
+          || !Number.isSafeInteger(message.expectedRevision) || message.expectedRevision < 0 || !modes.includes(message.mode))
+          throw new Error("无效项目输入");
+        selecting = true;
+        try {
+          const next = await bridge<Selection>(`/projects/${message.projectId}/input`, token, {
+            expectedRevision: message.expectedRevision, referenceJobId: message.referenceJobId, image: message.image, mode: message.mode,
+            instruction: message.instruction, subjectImage: message.subjectImage, subjects: message.subjects,
+          });
+          try {
+            const latest = (await browser.storage.local.get("selection")).selection as Selection | undefined;
+            if (latest?.projectId === message.projectId && (latest.inputRevision || 0) <= message.expectedRevision)
+              await browser.storage.local.set({ selection: storedInput(next) });
+          } catch { /* The bridge already saved the input; local selection is only a cache. */ }
           return next;
         } finally { selecting = false; }
       }
@@ -341,7 +367,8 @@ export default defineBackground(() => {
           || !view || !modes.includes(view.mode) || !view.versions || typeof view.versions !== "object" || Array.isArray(view.versions)
           || Object.entries(view.versions).some(([mode, id]) => !modes.includes(mode)
             || typeof id !== "string" || (id !== "new" && !/^[\da-f-]{36}$/.test(id)))) throw new Error("无效项目选择");
-        await browser.storage.local.set({ [`projectView:${message.projectId}`]: { mode: view.mode, versions: view.versions } });
+        if (view.inputRevision !== undefined && (!Number.isSafeInteger(view.inputRevision) || view.inputRevision < 0)) throw new Error("无效输入版本");
+        await browser.storage.local.set({ [`projectView:${message.projectId}`]: { mode: view.mode, versions: view.versions, inputRevision: view.inputRevision } });
         return;
       }
       case "alchemy:mode":
@@ -423,8 +450,8 @@ export default defineBackground(() => {
           await requireVisibleProject(project);
           let next: Selection;
           try { next = await projectReference(message.id, token); }
-          catch (error) { next = { id: project.id, projectId: project.id, sourceUrl: project.sourceUrl, capture: project.capture, error: (error as Error).message }; }
-          await browser.storage.local.set({ selection: next });
+          catch (error) { next = { id: project.id, projectId: project.id, sourceUrl: project.sourceUrl, capture: project.capture, inputRevision: project.inputRevision, inputVersions: project.inputVersions, error: (error as Error).message }; }
+          await browser.storage.local.set({ selection: storedInput(next) });
           return next;
         } finally { selecting = false; }
       }
@@ -438,8 +465,8 @@ export default defineBackground(() => {
           if (latest.selection?.id !== selection.id) throw new Error("所选图片已变化，请重试");
           try { await requireVisibleProject(project); }
           catch (error) { await browser.storage.local.remove("selection"); throw error; }
-          const next = { ...selection, projectId: project.id };
-          await browser.storage.local.set({ selection: next });
+          const next = { ...await projectReference(project.id, token), id: selection.id };
+          await browser.storage.local.set({ selection: storedInput(next) });
           return next;
         } finally { selecting = false; }
       }
@@ -492,7 +519,7 @@ export default defineBackground(() => {
           : bridge(`${path}/${message.generationId}/cancel`, token, {});
       }
       case "alchemy:start":
-        return start(message.id, message.mode, message.referenceJobId, message.reenact, message.projectId, message.instruction);
+        return start(message.id, message.mode, message.referenceJobId, message.reenact, message.projectId, message.instruction, message.inputRevision);
     }
   };
   browser.runtime.onMessage.addListener((message, sender, reply) => {
@@ -504,7 +531,7 @@ export default defineBackground(() => {
       uiMessage(message).then(value => reply({ ok: true, value }), error => reply({ error: error.message }));
       return true;
     }
-    if ((contentSender || extensionSender) && ["alchemy:get-motion-preference", "alchemy:set-motion-preference", "alchemy:show-hidden-projects", "alchemy:set-project-hidden", "alchemy:gallery", "alchemy:projects", "alchemy:project", "alchemy:project-thumbnail", "alchemy:generation-thumbnail", "alchemy:quick-draft", "alchemy:open-workspace", "alchemy:upload-reference", "alchemy:cli-check", "alchemy:cli-update", "alchemy:models-refresh", "alchemy:model-verify", "alchemy:project-views", "alchemy:save-project-view", "alchemy:state", "alchemy:connect", "alchemy:mode", "alchemy:query", "alchemy:cancel", "alchemy:reference", "alchemy:project-reference", "alchemy:open-project", "alchemy:ensure-project", "alchemy:delete-projects", "alchemy:start", "alchemy:save-prompt", "alchemy:generate", "alchemy:generation-cancel", "alchemy:generation-reference", "alchemy:generation-image", "alchemy:generation-file-action"].includes(message?.type)) {
+    if ((contentSender || extensionSender) && ["alchemy:get-motion-preference", "alchemy:set-motion-preference", "alchemy:show-hidden-projects", "alchemy:set-project-hidden", "alchemy:gallery", "alchemy:projects", "alchemy:project", "alchemy:project-thumbnail", "alchemy:generation-thumbnail", "alchemy:quick-draft", "alchemy:open-workspace", "alchemy:upload-reference", "alchemy:update-project-input", "alchemy:cli-check", "alchemy:cli-update", "alchemy:models-refresh", "alchemy:model-verify", "alchemy:project-views", "alchemy:save-project-view", "alchemy:state", "alchemy:connect", "alchemy:mode", "alchemy:query", "alchemy:cancel", "alchemy:reference", "alchemy:project-reference", "alchemy:open-project", "alchemy:ensure-project", "alchemy:delete-projects", "alchemy:start", "alchemy:save-prompt", "alchemy:generate", "alchemy:generation-cancel", "alchemy:generation-reference", "alchemy:generation-image", "alchemy:generation-file-action"].includes(message?.type)) {
       uiMessage(message, contentSender ? `tab:${sender.tab!.id}` : "popup", sender.tab?.id).then(
         (value) => reply({ ok: true, value }),
         (error) => reply({ error: error.message }),

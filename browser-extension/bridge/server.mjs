@@ -72,8 +72,8 @@ export function decodeImage(dataUrl) {
   return { bytes, extension: match[1] };
 }
 
-function decodeSubjects(subjects, referenceBytes) {
-  if (!Array.isArray(subjects) || subjects.length < 2 || subjects.length > 6)
+function decodeSubjects(subjects, referenceBytes, draft = false) {
+  if (!Array.isArray(subjects) || subjects.length < (draft ? 0 : 2) || subjects.length > 6)
     throw bad("多图重演需要 2–6 张主体图");
   const ids = new Set();
   const decoded = subjects.map((subject) => {
@@ -404,6 +404,41 @@ export async function createBridge({
         json(200, { ...projects.get(project.id), created });
         return;
       }
+      const inputMatch = /^\/projects\/([a-f0-9]{64})\/input$/.exec(path);
+      if (req.method === "POST" && inputMatch) {
+        const project = projects.summary(inputMatch[1]);
+        if (!project) throw bad("项目不存在", 404);
+        const body = await readBody(req);
+        if (!Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0) throw bad("项目输入版本无效");
+        if (body.expectedRevision !== project.inputRevision) throw bad("项目输入已在其他窗口更新，请重新打开项目", 409);
+        if (!["style", "recreate", "reenact", "multi-reenact"].includes(body.mode)) throw bad("无效逆向模式");
+        if (body.referenceJobId !== undefined && jobs.get(body.referenceJobId)?.projectId !== project.id) throw bad("历史参考图不属于当前项目");
+        if (typeof body.instruction !== "string" || body.instruction.length > 20000) throw bad("任务指令必须是文本且最多 20000 字符");
+        const image = body.image === undefined ? undefined : decodeImage(body.image);
+        const referenceBytes = image?.bytes.length ?? (await images.read(project.imageAsset)).length;
+        if (referenceBytes > 4 * 1024 * 1024) throw bad("参考图最多 4 MB，请压缩后重试");
+        const input = { instruction: body.instruction };
+        if (body.mode === "multi-reenact") {
+          if (body.subjectImage !== undefined) throw bad("多图重演请使用主体列表");
+          input.subjects = await saveSubjects(decodeSubjects(body.subjects ?? [], referenceBytes, true));
+        } else {
+          if (body.subjects !== undefined || (body.mode === "recreate" && body.subjectImage)) throw bad("当前模式不支持此主体输入");
+          if (body.subjectImage) {
+            const subject = decodeImage(body.subjectImage);
+            if (referenceBytes > 4 * 1024 * 1024 || subject.bytes.length > 2 * 1024 * 1024) throw bad("参考图最多 4 MB，主体图最多 2 MB，请压缩后重试");
+            input.subjectAsset = await images.put(subject);
+          } else if (body.subjectImage !== undefined && body.subjectImage !== "") throw bad("主体图片无效");
+        }
+        await projects.saveInput(project.id, { image, mode: body.mode, input, referenceJobId: body.referenceJobId });
+        collectionPending = true;
+        if (!controllers.size) {
+          try { await images.collect(); await thumbnails.collect(); collectionPending = false; }
+          catch (error) { console.error("回收图片失败:", error.message); }
+        }
+        taskFeed.touch();
+        json(200, await projects.reference(project.id));
+        return;
+      }
       const projectMatch = /^\/projects\/([a-f0-9]{64})(\/(?:reference|thumbnail))?$/.exec(path);
       if (req.method === "GET" && projectMatch) {
         validateQuery(projectMatch[2] === "/thumbnail" ? ["reference"] : projectMatch[2] ? [] : ["revision"]);
@@ -656,8 +691,18 @@ export async function createBridge({
       if (submittedInstruction?.length > 20000) throw bad("任务指令最多 20000 字符");
       const instruction = submittedInstruction?.trim();
       const { bytes, extension } = decodeImage(body.image);
-      const projectId = projectIdFor(bytes);
-      if (body.projectId !== undefined && body.projectId !== projectId) throw bad("参考图与项目不一致，请重新选择项目");
+      let project;
+      if (body.projectId !== undefined) {
+        if (typeof body.projectId !== "string" || !/^[a-f0-9]{64}$/.test(body.projectId)) throw bad("项目编号无效");
+        project = projects.summary(body.projectId);
+        if (!project) throw bad("项目不存在", 404);
+        if (body.inputRevision !== undefined && (!Number.isSafeInteger(body.inputRevision) || body.inputRevision < 0)) throw bad("项目输入版本无效");
+        if (body.inputRevision !== undefined && body.inputRevision !== project.inputRevision) throw bad("项目输入已在其他窗口更新，请重新打开项目", 409);
+        const source = body.referenceJobId === undefined ? project : jobs.get(body.referenceJobId);
+        if (!source || (body.referenceJobId !== undefined && source.projectId !== project.id)) throw bad("历史参考图不属于当前项目");
+        const sourceBytes = body.referenceJobId === undefined ? await images.read(source.imageAsset) : decodeImage(await storedImage(source)).bytes;
+        if (!bytes.equals(sourceBytes)) throw bad("参考图与项目不一致，请重新选择项目");
+      } else if (body.referenceJobId !== undefined || body.inputRevision !== undefined) throw bad("请提供项目编号");
       let subject, reenact, decodedSubjects;
       const multi = body.mode === "multi-reenact";
       if (multi) {
@@ -688,19 +733,22 @@ export async function createBridge({
       }
       const modelSettings = models.selection();
       const sourceUrl = sourceUrlFor(body.sourceUrl);
-      const project = await projects.register({ bytes, extension }, { sourceUrl, capture: body.capture });
+      project ||= await projects.register({ bytes, extension }, { sourceUrl, capture: body.capture });
+      const imageAsset = await images.put({ bytes, extension });
+      const currentJobId = project.inputVersions?.[body.mode] ?? projects.get(project.id).jobs.find((job) => job.mode === body.mode)?.id;
+      const historical = body.referenceJobId !== undefined && body.referenceJobId !== currentJobId;
       const subjectAsset = subject ? await images.put(subject) : undefined;
       if (multi) reenact.subjects = await saveSubjects(decodedSubjects);
       const id = randomUUID();
       const controller = new AbortController();
       controller.projectId = project.id;
       controllers.set(id, controller);
-      const imagePath = images.path(project.imageAsset);
+      const imagePath = images.path(imageAsset);
       const subjectImagePath = subjectAsset ? images.path(subjectAsset) : undefined;
       const job = {
         id,
-        projectId,
-        imageAsset: project.imageAsset,
+        projectId: project.id,
+        imageAsset,
         ...(subjectAsset ? { subjectAsset } : {}),
         mode: body.mode,
         model: modelSettings.model,
@@ -715,7 +763,13 @@ export async function createBridge({
       };
       try {
         await save(job);
+        if (imageAsset === project.imageAsset && !historical) await projects.selectInputVersion(project.id, job);
+        else if (project.inputVersions?.[body.mode] === undefined && jobs.has(currentJobId)) await projects.selectInputVersion(project.id, jobs.get(currentJobId), true);
       } catch (error) {
+        Object.assign(job, { status: "failed", stage: "任务保存失败", error: "任务未启动，请重试" });
+        await save(job).catch((failure) => console.error("保存失败任务状态失败:", failure.message));
+        projects.updateJob(job);
+        taskFeed.update(job);
         controllers.delete(id);
         throw error;
       }

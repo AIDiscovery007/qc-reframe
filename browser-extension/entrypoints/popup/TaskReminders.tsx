@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { request } from '../../lib/client';
-import { newReminderState, reconcileToast, reminderSummary, type ReminderPreferences, type TaskNotice } from '../../lib/task-reminders';
+import { newReminderState, REMINDER_TONES, reconcileToast, reminderSummary, type ReminderPreferences, type TaskNotice } from '../../lib/task-reminders';
 import { isReminderVisible } from '../../lib/reminder-visibility';
 import SelectField from './SelectField';
 
@@ -93,7 +93,7 @@ export function ReminderSettings() {
       {value.desktop !== 'granted' && <p className="fine">界面提醒仍然可用。可在浏览器与系统通知设置中检查 Reframe 的权限。</p>}
       <label className="settings-row reminder-switch"><span>完成提示音</span><input type="checkbox" role="switch" checked={value.preferences.sound} disabled={busy || !value.audioSupported} onChange={event => void change({ ...value.preferences, sound: event.target.checked })} /></label>
       {value.preferences.sound && <div className="reminder-sound-controls">
-        <SelectField label="提示音" value={value.preferences.tone} disabled={busy} onChange={event => void change({ ...value.preferences, tone: event.target.value as ReminderPreferences['tone'] })}><option value="soft">轻柔</option><option value="bell">清铃</option></SelectField>
+        <SelectField label="提示音" value={value.preferences.tone} disabled={busy} onChange={event => void change({ ...value.preferences, tone: event.target.value as ReminderPreferences['tone'] })}>{REMINDER_TONES.map(tone => <option key={tone.id} value={tone.id}>{tone.label}</option>)}</SelectField>
         <SelectField label="音量" value={String(value.preferences.volume)} disabled={busy} onChange={event => void change({ ...value.preferences, volume: Number(event.target.value) })}><option value="15">轻 · 15%</option><option value="30">适中 · 30%</option><option value="60">清晰 · 60%</option><option value="100">最大 · 100%</option></SelectField>
         <button className="outline-button" disabled={busy} onClick={() => void test()}>试听</button>
         <p className="fine">查看当前结果时不响；多个任务接连完成只提示一次。</p>

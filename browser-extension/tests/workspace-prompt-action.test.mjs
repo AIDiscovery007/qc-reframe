@@ -19,7 +19,7 @@ function fixture(mode, overrides = {}) {
   const calls = [], drafts = {}, exports = {};
   runInNewContext(compiled, {
     exports, preferences: { mode }, result: undefined, job: undefined, blocked: false, promptDraft: undefined,
-    selection: { image: 'reference' }, subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
+    selection: { image: 'reference' }, referenceError: undefined, displayImage: 'reference', subjectDraftKey: mode => `project:${mode}:new`, subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
     taskInstruction: () => 'instruction', defaultInstructions: { [mode]: 'instruction' }, subjectImage: () => 'subject',
     multiSubjects: [{ id: 'one', subjectImage: 'one' }, { id: 'two', subjectImage: 'two' }], multiPrompt: 'instruction', multiStale: false,
     start: (mode, input) => calls.push({ mode, input }), ...overrides,
@@ -82,7 +82,7 @@ test('generic prompts retain reference-only retry and offer a dedicated subject 
 test('upload failure/loading, empty instructions, edits and busy state never submit', () => {
   for (const overrides of [
     { subjectUnavailable: { 'project:style': true } },
-    { taskInstruction: () => '  ' }, { promptDraft: {} }, { blocked: true }, { selection: undefined },
+    { referenceError: '历史图片丢失' }, { displayImage: undefined }, { taskInstruction: () => '  ' }, { promptDraft: {} }, { blocked: true }, { selection: undefined },
   ]) {
     const ui = fixture('style', overrides);
     ui.reverse();
@@ -98,7 +98,7 @@ test('explicit generic extraction ignores an existing subject without changing t
   ui.extractStyle();
   assert.equal(ui.calls[0].mode, 'style');
   assert.equal(ui.calls[0].input, undefined);
-  assert.equal(ui.drafts['project:style'], 'subject');
+  assert.equal(ui.drafts['project:style:new'], 'subject');
   ui.reverse();
   assert.equal(ui.calls[1].input.subjectImage, 'subject');
   for (const overrides of [{ blocked: true }, { promptDraft: {} }, { selection: {} }, { taskInstruction: () => ' ' }]) {

@@ -1,7 +1,7 @@
 import { openWorkspace } from "./workspace-navigation";
 import { browser } from 'wxt/browser';
 import { bridge } from './bridge';
-import { markRemindersRead, newReminderState, reconcileReminders, reminderSummary, type ReminderState, type TaskNotice } from './task-reminders';
+import { markRemindersRead, newReminderState, reconcileReminders, reminderSummary, reminderTone, type ReminderState, type TaskNotice } from './task-reminders';
 
 const key = 'taskReminders';
 const alarm = 'reframe-task-reminders';
@@ -19,7 +19,14 @@ export function startReminderService() {
   };
   const read = async (): Promise<ReminderState> => {
     const value = (await browser.storage.local.get(key))[key] as ReminderState | undefined;
-    if (value) return value;
+    if (value) {
+      const tone = reminderTone(value.preferences.tone)?.id || newReminderState().preferences.tone;
+      if (tone !== value.preferences.tone) {
+        value.preferences = { ...value.preferences, tone };
+        await browser.storage.local.set({ [key]: value });
+      }
+      return value;
+    }
     const initial = newReminderState();
     await browser.storage.local.set({ [key]: initial });
     return initial;
@@ -131,8 +138,9 @@ export function startReminderService() {
       let state = await read();
       if (message.type === 'alchemy:reminder-settings') {
         const value = message.preferences;
-        if (!value || typeof value.sound !== 'boolean' || !['soft', 'bell'].includes(value.tone) || !Number.isInteger(value.volume) || value.volume < 0 || value.volume > 100) throw new Error('无效提醒设置');
-        state.preferences = { sound: value.sound, tone: value.tone, volume: value.volume };
+        const tone = reminderTone(value?.tone);
+        if (!value || typeof value.sound !== 'boolean' || !tone || !Number.isInteger(value.volume) || value.volume < 0 || value.volume > 100) throw new Error('无效提醒设置');
+        state.preferences = { sound: value.sound, tone: tone.id, volume: value.volume };
         await save(state);
       }
       if (message.type === 'alchemy:reminder-read') {

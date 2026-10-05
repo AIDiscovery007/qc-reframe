@@ -302,7 +302,7 @@ test("registering templates validates images and authentication without invoking
   assert.deepEqual(await (await request("/jobs")).json(), []);
   assert.equal(calls, 0);
   const reference = await (await request(`/projects/${project.id}/reference`)).json();
-  assert.deepEqual(reference, { id: project.id, projectId: project.id, image, sourceUrl: project.sourceUrl, capture: "screenshot" });
+  assert.deepEqual(reference, { id: project.id, projectId: project.id, image, sourceUrl: project.sourceUrl, capture: "screenshot", inputRevision: 0, inputVersions: {} });
   assert.equal((await request(`/projects/${"0".repeat(64)}`)).status, 404);
   assert.equal((await request(`/projects/${"z".repeat(64)}/reference`)).status, 404);
   assert.equal((await request(`/projects/${project.id}/reference`, { headers: { Authorization: "" } })).status, 401);
@@ -324,7 +324,7 @@ test("duplicate registration and restart retain a template with no extraction jo
   const restored = await (await request(`/projects/${first.id}`)).json();
   assert.notEqual(restored.revision, first.revision, "restart invalidates client revisions");
   assert.deepEqual({ ...restored, revision: first.revision }, first);
-  assert.deepEqual(await (await request(`/projects/${first.id}/reference`)).json(), { id: first.id, projectId: first.id, image, sourceUrl: first.sourceUrl, capture: "original" });
+  assert.deepEqual(await (await request(`/projects/${first.id}/reference`)).json(), { id: first.id, projectId: first.id, image, sourceUrl: first.sourceUrl, capture: "original", inputRevision: 0, inputVersions: {} });
   assert.deepEqual(await readFile(join(dir, "images", `${first.id}.png`)), decodeImage(image).bytes);
   assert.equal((await (await request("/health")).json()).active, 0);
 });

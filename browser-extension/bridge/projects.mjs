@@ -4,6 +4,12 @@ import { join } from "node:path";
 
 export const projectIdFor = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const newestFirst = (a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
+const inputFor = (job) => {
+  const instruction = job.instruction ?? job.reenact?.basePrompt;
+  const subjectAsset = job.generations?.findLast((generation) => generation.subjectAsset)?.subjectAsset || job.subjectAsset;
+  const subjects = job.generations?.findLast((generation) => generation.subjects)?.subjects || job.reenact?.subjects;
+  return { ...(instruction !== undefined ? { instruction } : {}), ...(subjectAsset ? { subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
+};
 
 // Finish interrupted deletions before legacy jobs can recreate their projects.
 export async function recoverProjectDeletion(dataDir, legacyDir = dataDir) {
@@ -49,7 +55,8 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
     jobProjects.set(job.id, job.projectId);
     invalidate(job.projectId);
   };
-  let visibilityTail = Promise.resolve();
+  let editTail = Promise.resolve();
+  const edit = (operation) => (editTail = editTail.catch(() => {}).then(operation));
   let saveTail = Promise.resolve();
   const save = (project) => {
     saveTail = saveTail.catch(() => {}).then(async () => {
@@ -74,9 +81,9 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
     if (pending.has(id)) return pending.get(id);
     const operation = (async () => {
       const existing = records.get(id);
+      if (existing) return existing;
       const createdAt = meta.createdAt || new Date().toISOString();
-      const project = existing || { id, hidden: false, createdAt, updatedAt: createdAt, sourceUrl: meta.sourceUrl || "", capture: meta.capture === "screenshot" ? "screenshot" : "original" };
-      if (createdAt < project.createdAt) project.createdAt = createdAt;
+      const project = { id, hidden: false, createdAt, updatedAt: createdAt, sourceUrl: meta.sourceUrl || "", capture: meta.capture === "screenshot" ? "screenshot" : "original" };
       project.extension = extension;
       project.imageAsset = await images.put({ bytes, extension });
       await save(project);
@@ -88,10 +95,22 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
     try { return await operation; } finally { pending.delete(id); }
   }
 
+  const recoveredProjects = new Set();
   for (const job of [...jobs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
-    let project;
+    let project = records.get(job.projectId);
+    if (/^[a-f0-9]{64}$/.test(job.projectId || "") && (!project || recoveredProjects.has(job.projectId))) {
+      project = { ...(project || { id: job.projectId, hidden: false, createdAt: job.createdAt, sourceUrl: job.sourceUrl || "", capture: job.capture === "screenshot" ? "screenshot" : "original" }), updatedAt: job.createdAt };
+      try {
+        const reference = await readReference(job.id);
+        project.imageAsset = await images.put(reference);
+        project.extension = reference.extension;
+      } catch { /* Recover identity even when every historical image is missing. */ }
+      await save(project);
+      records.set(project.id, project);
+      recoveredProjects.add(project.id);
+    }
     try {
-      project = await register(await readReference(job.id), job);
+      project ||= await register(await readReference(job.id), job);
     } catch {
       // Preserve incomplete legacy records even when their source image was removed.
       const id = /^[a-f0-9]{64}$/.test(job.projectId || "") && records.has(job.projectId)
@@ -130,7 +149,7 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
     }
     const item = { id: project.id, hidden: project.hidden, title: history.find((job) => job.result?.title)?.result.title || "未命名模板项目", createdAt: project.createdAt, updatedAt, sourceUrl: project.sourceUrl, capture: project.capture, jobCount: history.length,
       busy: history.some((job) => job.status === "running" || job.generations?.some((item) => item.status === "running")), modes,
-      revision: revisions.get(project.id) || `${epoch}:0`, ...(project.imageAsset ? { imageAsset: project.imageAsset } : {}), ...(cover ? { cover } : {}) };
+      revision: revisions.get(project.id) || `${epoch}:0`, inputRevision: project.inputRevision || 0, inputVersions: project.inputVersions || {}, ...(project.imageAsset ? { imageAsset: project.imageAsset } : {}), ...(cover ? { cover } : {}) };
     summaries.set(project.id, item);
     return item;
   }
@@ -140,13 +159,47 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
   };
   return {
     register,
+    saveInput(id, { image, mode, input, referenceJobId }) { return edit(async () => {
+      const previous = records.get(id);
+      const imageAsset = image ? await images.put(image) : previous.imageAsset;
+      const referenceChanged = imageAsset !== previous.imageAsset;
+      const history = projectJobs(id);
+      const currentJob = (mode) => history.find((job) => job.mode === mode && (previous.inputVersions?.[mode] === undefined || job.id === previous.inputVersions[mode]));
+      const inputs = { ...previous.inputs };
+      for (const mode of ["style", "recreate", "reenact", "multi-reenact"]) {
+        const job = currentJob(mode);
+        if (!Object.hasOwn(inputs, mode) && job) inputs[mode] = inputFor(job);
+      }
+      const arrangementChanged = mode === "multi-reenact" && JSON.stringify(input.subjects || []) !== JSON.stringify(inputs[mode]?.subjects || []);
+      const previousJob = currentJob(mode);
+      const historical = referenceJobId !== undefined && referenceJobId !== (previous.inputVersions?.[mode] ?? previousJob?.id);
+      const instruction = inputs[mode]?.instruction;
+      const inputVersions = { ...previous.inputVersions };
+      if (referenceChanged) for (const mode of ["style", "recreate", "reenact", "multi-reenact"]) inputVersions[mode] = "new";
+      else if (historical || arrangementChanged || (instruction !== undefined && input.instruction !== instruction)) inputVersions[mode] = "new";
+      else inputVersions[mode] ??= previousJob?.id || "new";
+      const project = { ...previous, imageAsset, extension: image?.extension || previous.extension,
+        inputs: { ...inputs, [mode]: input }, inputVersions, inputRevision: (previous.inputRevision || 0) + 1, updatedAt: new Date().toISOString() };
+      await save(project);
+      records.set(id, project);
+      invalidate(id);
+      return project;
+    }); },
+    selectInputVersion(id, job, preserveInput = false) { return edit(async () => {
+      const previous = records.get(id);
+      const input = inputFor(job);
+      const project = { ...previous, ...(!preserveInput ? { inputs: { ...previous.inputs, [job.mode]: input }, inputRevision: (previous.inputRevision || 0) + 1 } : {}), inputVersions: { ...previous.inputVersions, [job.mode]: job.id } };
+      await save(project);
+      records.set(id, project);
+      invalidate(id);
+    }); },
     updateJob,
     get revision() { return revision(); },
     isHidden(id) { return records.get(id)?.hidden === true; },
     get hiddenProjectIds() { return [...records.values()].filter((project) => project.hidden).map((project) => project.id); },
     setHidden(ids, hidden) {
       // Check state inside the queue so concurrent windows cannot claim the same change.
-      visibilityTail = visibilityTail.catch(() => {}).then(async () => {
+      return edit(async () => {
         const updatedIds = [];
         for (const id of ids) {
           const project = records.get(id);
@@ -158,7 +211,6 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
         }
         return updatedIds;
       });
-      return visibilityTail;
     },
     async remove(ids) {
       const history = ids.flatMap(projectJobs);
@@ -208,16 +260,30 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
       try {
         const bytes = project.imageAsset ? await images.read(project.imageAsset)
           : await readFile(join(legacyDir, `project-${id}.${project.extension}`));
-        if (projectIdFor(bytes) !== id) return;
-        return { id, projectId: id, image: `data:image/${project.extension};base64,${bytes.toString("base64")}`, sourceUrl: project.sourceUrl, capture: project.capture };
+        const imageFor = async (asset) => `data:image/${asset.split(".")[1]};base64,${(await images.read(asset)).toString("base64")}`;
+        const inputs = {};
+        for (const [mode, input] of Object.entries(project.inputs || {})) {
+          const { subjectAsset, subjects, ...rest } = input;
+          const restored = { ...rest };
+          const subjectImage = async (asset) => {
+            try { return await imageFor(asset); }
+            catch { restored.subjectError = "主体图已不存在或损坏，请重新上传主体图。"; return ""; }
+          };
+          if (subjectAsset) restored.subjectImage = await subjectImage(subjectAsset);
+          if (subjects) restored.subjects = await Promise.all(subjects.map(async ({ subjectAsset, ...subject }) => ({ ...subject, subjectImage: await subjectImage(subjectAsset) })));
+          inputs[mode] = restored;
+        }
+        return { id: project.inputRevision ? `${id}:${project.inputRevision}` : id, projectId: id, image: `data:image/${project.extension};base64,${bytes.toString("base64")}`, sourceUrl: project.sourceUrl, capture: project.capture,
+          inputRevision: project.inputRevision || 0, inputVersions: project.inputVersions || {}, ...(project.inputs ? { inputs } : {}) };
       } catch (error) { if (error.code !== "ENOENT") throw error; }
     },
-    async touch(id) {
-      const project = records.get(id);
-      if (!project) return;
-      project.updatedAt = new Date().toISOString();
-      invalidate(id);
+    touch(id) { return edit(async () => {
+      const previous = records.get(id);
+      if (!previous) return;
+      const project = { ...previous, updatedAt: new Date().toISOString() };
       await save(project);
-    },
+      records.set(id, project);
+      invalidate(id);
+    }); },
   };
 }

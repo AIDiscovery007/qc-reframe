@@ -9,5 +9,5 @@ export type WorkspaceDraft = {
   versions?: Record<string, string>;
   lang?: "zh" | "en";
 };
-export type WorkspaceContext = { mode: Mode; selection: Pick<Selection, "id" | "projectId" | "sourceUrl" | "capture"> | null };
+export type WorkspaceContext = { mode: Mode; selection: Pick<Selection, "id" | "projectId" | "sourceUrl" | "capture" | "inputRevision"> | null };
 export type WorkspaceHandoff = WorkspaceContext & { draft?: WorkspaceDraft; createdAt: number };
