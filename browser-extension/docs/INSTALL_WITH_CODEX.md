@@ -2,6 +2,8 @@
 
 这是供用户及其 Codex 执行的本地安装流程。版本为 `0.3.3`，发行标签为 `v0.3.3`。请完成能够执行的步骤，再集中列出需要用户操作的剩余步骤。
 
+本文标注「待发布」的初始化恢复与兼容性检查属于当前源码改动，尚未包含在 `v0.3.3` 标签或 Release ZIP 中；详情见 [待发布记录](releases/unreleased.md)。
+
 [← 首页](../../README.md) · [功能导览](FEATURES.md) · [使用手册](../README.md)
 
 ## 让 Codex 帮你安装
@@ -13,7 +15,7 @@
 https://github.com/AIDiscovery007/qc-reframe
 
 请获取仓库的 v0.3.3 标签，先阅读 browser-extension/docs/INSTALL_WITH_CODEX.md，
-先确认插件实际使用的本机 Codex CLI 已更新到最新版本，再完成环境检查、初始化、构建、本机服务启动和配对准备，
+先确认插件实际使用的本机 Codex CLI 路径、安装来源和版本，检查更新并按原安装方式处理，再完成环境检查、初始化、构建、本机服务启动和配对准备，
 优先在我的 Codex 内置浏览器里使用。能自动完成的步骤请直接完成。
 需要我登录或在浏览器界面确认加载扩展时，再给我准确的文件路径和最短操作步骤。
 不要覆盖已有安装、项目记录或 Codex 全局配置。
@@ -38,13 +40,24 @@ cd qc-reframe/browser-extension
 
 ## 2. 检查前置条件
 
-需要 Node.js 22.15+ 和 Codex CLI。先检查 `node --version`、`npm --version`、`codex --version`、`codex login status`。缺少时从官方来源安装：
+需要 Node.js 22.15+ 和 Codex CLI。先检查 `node --version`、`npm --version`，确认插件实际使用的 CLI 绝对路径，再对该路径检查版本和登录状态。已有安装优先核对 `.local/config/runtime.json` 的 `CODEX_BIN` 及当前环境变量，不能只检查 PATH 上另一份 `codex`。缺少时从官方来源安装：
 
 - Node.js：[官方下载](https://nodejs.org/en/download)。
 - Codex CLI：[官方安装与登录说明](https://developers.openai.com/codex/cli)。常用安装方式为 `npm install -g @openai/codex`。已有 CLI 时按原安装方式升级到最新版本，避免重复安装多份。
-- 登录需要用户本人完成时，指导运行 `codex login`；不索取密码或复制账户凭据。
+- 登录需要用户本人完成时，给出实际 CLI 路径的登录命令；不索取密码或复制账户凭据。
 
-**必须单独检查本机 Codex CLI 的更新。** 桌面 App 更新不代表插件调用的 CLI 已更新；旧 CLI 可能缺少 GPT-6.1 Sol、GPT-6 Astra、GPT-6 Sol 等新模型。按 [官方更新说明](https://learn.chatgpt.com/docs/codex/cli)升级后，用 `codex --version` 确认，再重启本机服务、刷新插件模型列表。具体可用性以账号权限和「验证并使用」结果为准。
+**必须单独检查插件实际使用的 Codex CLI。** 桌面 App 更新不代表这份 CLI 已更新。已有 CLI 按原渠道升级：独立安装版使用其稳定入口的自更新能力，npm/Homebrew 使用对应管理器；App 内置或自定义安装按原来源处理，不另装一份来掩盖路径问题。可先在设置中心查看实际路径与安装来源，再按 [官方更新说明](https://learn.chatgpt.com/docs/codex/cli)处理。
+
+例如，macOS/Linux 将下面的示例路径替换为已检测的绝对路径并正确引用后执行；不要把示例原样当作真实路径。Windows PowerShell 使用 `& '实际路径' --version` 等形式。路径含引号时使用工具生成的安全引用命令。
+
+```bash
+'/absolute/path/to/codex' --version
+'/absolute/path/to/codex' login status
+# 需要登录时：
+'/absolute/path/to/codex' login
+```
+
+升级后仍对同一个实际路径复查版本；路径变化时更新 `CODEX_BIN` 并重启本机服务。再刷新插件模型列表、由用户点击「验证并使用」并重试原任务。版本是否最新与功能是否兼容分别判断；检查更新失败不能标为最新，也不能据此认定不兼容。模型文本验证不证明生图工具、账号权限或额度可用。
 
 脚本会在 PATH 及 macOS 常见的 Codex/ChatGPT App 资源目录查找 CLI。无法找到时，通过 `CODEX_BIN` 指定真实可执行文件的绝对路径；不修改用户全局 PATH 或 Codex 配置。Windows 上请让 Codex 定位可直接启动的 `codex.exe`，不要将 npm 的 `.cmd` 包装文件设为 `CODEX_BIN`。首发自动化在 macOS 验证，其他系统需单独确认。
 
@@ -58,9 +71,11 @@ npm run status
 
 `setup` 会检查 CLI 登录、完整的 Alchemy skill、imagegen 文件，运行 `npm ci` 和生产构建，并将 CLI/skill 路径保存在 `.local/config/runtime.json`。仓库已包含 Alchemy 的运行指令及必需参考文档，不需要从作者电脑复制文件，也不必安装到全局 skills 目录。
 
+**待发布的初始化恢复：** CLI 缺失、未登录或缺少 app-server 时，`setup` 会提示后续处理并继续构建，使新用户可以先启动服务、加载扩展和配对，再在设置中心检查。Node.js 与 Alchemy skill 的必需检查仍会阻止无效初始化；`npm run doctor` 仍严格检查 CLI。安装 `v0.3.3` 标签时尚无此恢复行为，需要先按实际 CLI 路径处理错误后重试。
+
 `start` 在后台运行 bridge，关闭启动终端后仍可使用；它会先验证带配对令牌的 `/health`。重复启动同一版本会复用服务。若端口被其他服务、旧版本或另一份安装占用，会停止启动流程并说明原因，不强行结束别人的进程。不要通过修改端口来绕过冲突，浏览器端默认连接 `43187`。
 
-`status` 应显示 `service: "qc-alchemy"`、`version: "0.3.3"`、`ready: true`。这只证明 bridge 与 Alchemy skill 就绪；`doctor` 另检查 CLI 登录。它们不会实际调用模型，因此不代表生图能力已完成实测。
+`status` 应显示 `service: "qc-alchemy"`、`version: "0.3.3"`、`ready: true`。这只证明 bridge 与 Alchemy skill 就绪；`doctor` 另检查 CLI 登录。它们不会实际调用模型，因此不代表模型或生图已就绪。待发布的设置中心会另外展示 CLI 功能接口检查：只读获取本机 CLI 的接口描述，不调用模型；检查结果未知时不拦截任务，明确不支持时只限制相关功能，不关闭整个工作台。
 
 imagegen 默认读取 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`，未设置 `CODEX_HOME` 时读取 `~/.codex/skills/.system/imagegen/SKILL.md`。如果找不到，让 Codex 查找用户实际安装的 imagegen skill 并设置路径；不要创建一个同名空文件充当已安装。缺失 imagegen 不妨碍提示词逆向，但生图不可用。找到 skill 也不代表账户一定支持内置 `image_gen`。
 
@@ -129,6 +144,7 @@ npm run pair
 
 - 配对后在「连接设置 → 插件模型」选择模型并点击「验证并使用」。这会发送一次简短请求，消耗少量模型额度；用户仅要求安装时，保留为手动步骤，不自动验证。不要通过修改 Codex 全局模型来修复插件兼容性。
 - `model is not supported when using Codex with a ChatGPT account`：刷新插件模型列表，选择其他模型并验证。CLI 登录成功或目录中出现模型名称，都不等于实际调用成功。切换账号、登录状态或提供方后重新验证。
+- CLI 接口不兼容（待发布）：在现有「Codex 与更新」检查受影响功能、实际 CLI 路径和更新来源。有新版本时按原渠道升级，复查完成后重新验证模型，并由用户重试失败操作。不要反复提交同一个已知不兼容的任务，也不要把网络、额度或生图权限失败一概归因于版本旧。
 - 在同一 `browser-extension` 目录运行 `npm start`；电脑重启后需要再次运行，不会配置开机自启。
 - `npm stop` 停止脚本启动的后台服务，保留配对码和全部项目；任务运行中会拒绝停止。先在插件完成或取消任务。
 - `npm run bridge` 前台启动，适合排错，用 Ctrl+C 停止。由原终端启动的服务也从原终端停止。
@@ -137,6 +153,7 @@ npm run pair
 - 端口冲突：确认服务所属目录；旧版本先停止再启动。不要杀死不明进程或删除 token 来尝试修复。
 - 第一次启动被打断且留下 `.local/runtime/start.lock`：先确认没有启动命令还在执行，再移除该空目录，保留其他 `.local` 文件。
 - 升级：完成任务 → 停止服务 → 获取目标版本 → `npm run setup` → `npm start` → 重新加载浏览器扩展 → 刷新工作台和原网页。
+- 三层更新分别核对：Codex CLI 按实际路径及原渠道处理；Reframe 服务通过更新完整源码、构建并重启生效；浏览器扩展需重新加载，已打开网页还需刷新。本机服务重启按钮不会下载 CLI 或 Reframe 更新，也不会替代扩展重载。
 - 网页仍显示旧 logo 或提示扩展失效：重新加载扩展后还需刷新网页。
 - 提示词能生成但图片不能生成：检查 imagegen skill、Codex 账户/模型的内置生图支持及额度，不切换成未经用户配置的模型 API。
 

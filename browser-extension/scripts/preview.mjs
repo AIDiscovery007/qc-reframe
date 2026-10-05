@@ -52,6 +52,11 @@ createServer(async (req, res) => {
     const path = new URL(req.url, "http://127.0.0.1").pathname;
     res.setHeader("Cache-Control", "no-store");
     if (galleryAsset(path, res)) return;
+    if (path === "/settings-recovery-regression.js") {
+      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+      res.end(await readFile(new URL("../tests/settings-recovery.browser.js", import.meta.url)));
+      return;
+    }
     if (path === "/hover-preview") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.end('<html><head><meta charset="UTF-8"><title>QC-Reframe · 动态避让预览</title></head><body style="margin:0"><iframe title="悬浮避让示例" src="/hover-fixture" style="display:block;width:100%;height:100vh;border:0"></iframe></body></html>');
@@ -217,9 +222,14 @@ createServer(async (req, res) => {
         const models={accountLabel:'ChatGPT · 预览',selected:state==='models-new'?null:'preview-vision',reasoningEffort:state==='models-new'?undefined:'medium',models:[{model:'preview-vision',label:'Vision Model',isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:['low','medium','high','xhigh'].map(reasoningEffort=>({reasoningEffort})),status:state==='models-new'?'unverified':'verified'},{model:'preview-unavailable',label:'Unavailable Model',defaultReasoningEffort:'low',supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],status:'unverified'}]};
         const service={service:'qc-alchemy',version:'0.3.2',managed:previewOptions.get('restart')!=='manual',canRestart:!['old','manual'].includes(previewOptions.get('restart')),instanceId:'preview-first'};
         let restartingUntil=0;
-        const cli={detectedAt:new Date().toISOString(),installed:true,version:'0.100.0',latestVersion:'0.101.0',executable:'/example/bin/codex',source:'npm',canUpdate:true,updateAvailable:true,command:'npm install -g @openai/codex@latest'};
-        if(new URLSearchParams(location.search).get('cli')==='standalone')Object.assign(cli,{source:'standalone',version:'0.159.2',latestVersion:'0.159.2',canUpdate:false,updateAvailable:false,command:'/example/bin/codex update'});
-        if(new URLSearchParams(location.search).get('cli')==='custom')Object.assign(cli,{source:'custom',latestVersion:null,canUpdate:false,updateAvailable:false,command:null,reason:'此安装来源无法安全自动升级，请通过原安装方式更新。'});
+        const cli={detectedAt:new Date().toISOString(),checkedAt:new Date().toISOString(),installed:true,version:'0.100.0',latestVersion:'0.101.0',executable:'/example/bin/codex',source:'npm',canUpdate:true,updateAvailable:true,command:'npm install -g @openai/codex@latest',instructions:{message:'升级后确认 Reframe 使用的 CLI 路径。',loginCommand:"'/example/bin/codex' login"},compatibility:{features:Object.fromEntries(['models','reverse','generation','sessions'].map(key=>[key,{status:'supported'}]))}};
+        const cliScenario=previewOptions.get('cli');
+        if(cliScenario==='standalone')Object.assign(cli,{source:'standalone',version:'0.159.2',latestVersion:'0.159.2',canUpdate:false,updateAvailable:false,command:'/example/bin/codex update'});
+        if(['custom','app'].includes(cliScenario))Object.assign(cli,{source:cliScenario,comparisonReference:'npm-stable',canUpdate:false,command:null,reason:cliScenario==='app'?'请在 Codex App 中检查更新；稳定版仅作参考。':'请通过原安装方式更新；稳定版仅作参考。'});
+        if(cliScenario==='missing') {Object.assign(cli,{installed:false,version:null,latestVersion:null,source:'missing',executable:null,canUpdate:false,updateAvailable:false,command:null,instructions:{message:'安装并登录 Codex CLI 后重新检测。',command:'npm install -g @openai/codex@latest',url:'https://developers.openai.com/codex/cli/'},compatibility:{features:{models:{status:'unknown'}}}});models.selected=null;}
+        if(cliScenario==='offline')Object.assign(cli,{latestVersion:null,canUpdate:false,updateAvailable:false,checkError:'检查更新失败，请检查网络后重试。'});
+        if(cliScenario==='unsupported')cli.compatibility.features.sessions={status:'unsupported',message:'当前 Codex CLI 不支持 Reframe 所需的会话读取接口，请在设置中心检查 CLI 更新后重新检测。'};
+        if(cliScenario==='failed')Object.assign(cli,{version:cli.latestVersion,canUpdate:false,updateAvailable:false,operation:{status:'failed',stage:'Codex 已升级，复检未完成',error:'模型读取失败，请检查登录状态后重新检测。'}});
         const listeners = new Set();
         const notifyMotion = () => listeners.forEach(fn=>fn({type:'alchemy:motion-changed'},{id:'preview'},()=>{}));
         addEventListener('storage',event=>{if(event.key==='preview-motion-preference')notifyMotion();});
@@ -265,8 +275,9 @@ createServer(async (req, res) => {
             if(previewOptions.get('imagePreview')==='delay')await new Promise(resolve=>setTimeout(resolve,2500));
           }
           if(message.type==='alchemy:quick-draft'){const key=location.pathname.includes('popup')?'quick-popup':'quick-panel';if(message.context){sessionStorage.setItem(key,JSON.stringify({...message.context,draft:message.draft}));return {ok:true};}return {ok:true,value:JSON.parse(sessionStorage.getItem(key)||'null')};}
-          if(message.type==='alchemy:open-workspace'){sessionStorage.setItem('workspace-draft',JSON.stringify({...message.context,draft:message.draft,projects,data}));const params=new URLSearchParams({handoff:'preview',...(message.view?{view:message.view}:{})});if(location.pathname==='/workspace.html'||location.pathname==='/'){params.set('request',crypto.randomUUID());location.hash='workspace='+params;}else location.href='/workspace.html?state='+state+'&'+params;return {ok:true};}
+          if(message.type==='alchemy:open-workspace'){sessionStorage.setItem('workspace-draft',JSON.stringify({...message.context,draft:message.draft,projects,data}));const params=new URLSearchParams({handoff:'preview',...(message.view?{view:message.view}:{}),...(message.section?{section:message.section}:{})});if(location.pathname==='/workspace.html'||location.pathname==='/'){params.set('request',crypto.randomUUID());location.hash='workspace='+params;}else location.href='/workspace.html?state='+state+'&'+params;return {ok:true};}
           if(message.type==='alchemy:workspace-handoff'){const saved=JSON.parse(sessionStorage.getItem('workspace-draft')||'null');sessionStorage.removeItem('workspace-draft');return {ok:true,value:saved};}
+          if(message.type==='alchemy:sessions-list'&&cliScenario==='unsupported')return {error:cli.compatibility.features.sessions.message};
           if(message.type==='alchemy:sessions-list') {
             if(state==='session-error')return {error:'示例：本机会话读取失败，请重试'};
             await new Promise(resolve=>setTimeout(resolve,100));
@@ -307,12 +318,13 @@ createServer(async (req, res) => {
           if(message.type==='alchemy:service-restart'){if(previewOptions.get('restart')==='failed')return {error:'重启准备失败，原服务仍在运行。请查看本机服务日志后重试。'};const ticket={previousInstanceId:service.instanceId,restartId:crypto.randomUUID()};restartingUntil=Date.now()+1800;setTimeout(()=>Object.assign(service,{instanceId:crypto.randomUUID(),restartId:ticket.restartId}),1800);return {ok:true,value:ticket};}
           if(message.type==='alchemy:query'&&message.path==='/health'&&(Date.now()<restartingUntil||previewOptions.get('restart')==='offline'))return {error:'无法连接本机服务（预览）'};
           if(message.type==='alchemy:query'&&message.path==='/cli/status')return {ok:true,value:structuredClone(cli)};
-          if(message.type==='alchemy:cli-check'){cli.detectedAt=new Date().toISOString();if(cli.command)cli.checkedAt=cli.detectedAt;return {ok:true,value:structuredClone(cli)};}
+          if(message.type==='alchemy:cli-check'){cli.detectedAt=new Date().toISOString();if(cli.installed)cli.checkedAt=cli.detectedAt;cli.operation=null;return {ok:true,value:structuredClone(cli)};}
           if(message.type==='alchemy:cli-update'){cli.operation={status:'running',stage:'正在升级（预览）'};setTimeout(()=>{cli.version=cli.latestVersion;cli.updateAvailable=false;cli.operation={status:'completed',stage:'升级完成（预览）'};models.selected=null;},2500);return {ok:true,value:structuredClone(cli)};}
           if(message.type==='alchemy:connect'){data.preferences.token='preview';return {ok:true,value:{ready:true}};}
           if(message.type==='alchemy:project-views')return {ok:true,value:JSON.parse(localStorage.getItem('preview-project-views')||'{}')};
           if(message.type==='alchemy:save-project-view'){const views=JSON.parse(localStorage.getItem('preview-project-views')||'{}');views[message.projectId]=message.view;localStorage.setItem('preview-project-views',JSON.stringify(views));return {ok:true};}
           if(message.type==='alchemy:state')return {ok:true,value:structuredClone({preferences:{paired:!!data.preferences.token,mode:data.preferences.mode,showHiddenProjects},selection:!showHiddenProjects&&projects.find(p=>p.id===data.selection?.projectId)?.hidden?undefined:data.selection})};
+          if((message.type==='alchemy:models-refresh'||(message.type==='alchemy:query'&&message.path==='/models'))&&cliScenario==='missing')return {error:'未找到 Codex CLI，请先安装后重新检测。'};
           if(message.type==='alchemy:models-refresh'||(message.type==='alchemy:query'&&message.path==='/models'))return {ok:true,value:structuredClone(models)};
           if(message.type==='alchemy:model-verify'){
             models.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:'running'};
@@ -347,7 +359,7 @@ createServer(async (req, res) => {
           }
           ${galleryMessages}
           if(message.type==='alchemy:generation-thumbnail')return {ok:true,value:{image:state==='alignment'?alignment[1].image:state==='gallery'?gallery.result:template,source:{kind:'generation',jobId:message.id,generationId:message.generationId}}};
-          if(message.type==='alchemy:query')return {ok:true,value:structuredClone(message.path==='/health'?{...service,ready:true,hiddenProjectIds:projects.filter(p=>p.hidden).map(p=>p.id),visibleActive:visibleProjects().flatMap(p=>p.jobs).reduce((n,j)=>n+Number(j.status==='running')+(j.generations||[]).filter(g=>g.status==='running').length,0),projectsRevision:'preview-'+projectsRevision,skill:'alchemy · 预览',model:models.selected,modelBusy:models.verification?.status==='running',active:models.verification?.status==='running'?1:projects.some(p=>p.jobs.some(j=>j.status==='running'||j.generations?.some(g=>g.status==='running')))?1:0}:message.path==='/jobs'?visibleProjects().flatMap(p=>p.jobs):message.path==='/projects'?visibleProjects().map(summary):message.path.startsWith('/projects/')?structuredClone({...summary(projects.find(p=>p.id===message.path.split('/')[2])),jobs:projects.find(p=>p.id===message.path.split('/')[2]).jobs}):findJob(message.path.split('/')[2]))};
+          if(message.type==='alchemy:query')return {ok:true,value:structuredClone(message.path==='/health'?{...service,ready:true,serviceReady:true,skillReady:true,cli,hiddenProjectIds:projects.filter(p=>p.hidden).map(p=>p.id),visibleActive:visibleProjects().flatMap(p=>p.jobs).reduce((n,j)=>n+Number(j.status==='running')+(j.generations||[]).filter(g=>g.status==='running').length,0),projectsRevision:'preview-'+projectsRevision,skill:'alchemy · 预览',model:models.selected,modelBusy:models.verification?.status==='running',active:models.verification?.status==='running'?1:projects.some(p=>p.jobs.some(j=>j.status==='running'||j.generations?.some(g=>g.status==='running')))?1:0}:message.path==='/jobs'?visibleProjects().flatMap(p=>p.jobs):message.path==='/projects'?visibleProjects().map(summary):message.path.startsWith('/projects/')?structuredClone({...summary(projects.find(p=>p.id===message.path.split('/')[2])),jobs:projects.find(p=>p.id===message.path.split('/')[2]).jobs}):findJob(message.path.split('/')[2]))};
           if(message.type==='alchemy:delete-projects') {
             if(state==='delete-failed')return {error:'本机服务暂时不可用，请重试'};
             if(projects.some(p=>message.ids.includes(p.id)&&summary(p).busy))return {error:'所选项目仍在逆向或生图'};
@@ -462,7 +474,9 @@ createServer(async (req, res) => {
             '<body><div id="preview-notice">界面预览 · 示例数据 · 不执行逆向</div>',
           ),
       );
-    if (path === '/popup.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('panelClip'))
+    if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('settingsRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/settings-recovery-regression.js"></script></body>'));
+    if (path === '/popup.html'  && new URL(req.url, 'http://127.0.0.1').searchParams.has('panelClip'))
       content = Buffer.from(content.toString().replace('</head>', '<style>#root{position:fixed;top:12px;right:12px;width:400px;height:620px;overflow:auto;border-radius:20px;background:#fffefa;box-shadow:0 4px 24px #0002}</style></head>'));
     res.writeHead(200, { "Content-Type": type });
     res.end(content);

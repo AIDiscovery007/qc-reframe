@@ -176,7 +176,7 @@ export async function runCodex({ input, schema, cwd, signal, onProgress = () => 
       await assertModelContext(request, cwd, modelSettings);
       if (generation) {
         const capabilities = await request("modelProvider/capabilities/read", {});
-        if (!capabilities.imageGeneration) throw new Error("当前 Codex 不支持内置生图。请检查 Codex 的登录与模型提供方；插件不会切换到需要 API Key 的接口。");
+        if (!capabilities.imageGeneration) throw Object.assign(new Error("当前账号或模型提供方未开放内置生图，请在连接设置中检查登录与模型提供方。"), { recovery: "models" });
       }
       const started = await request("thread/start", {
         cwd, sandbox: "read-only", approvalPolicy: "never",

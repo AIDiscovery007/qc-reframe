@@ -1,3 +1,4 @@
+import { codexRpcError } from "./errors.mjs";
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
@@ -87,7 +88,7 @@ export function createSessionReader({ cwd, spawnProcess = spawn, requestTimeoutM
           }
           continue;
         }
-        const error = message.error ? failure(message.error.message || "Codex 会话读取失败", message.error.code) : undefined;
+        const error = message.error ? codexRpcError(message.error, message.id === 0 ? "initialize" : current.pending.get(message.id)?.method) : undefined;
         if (message.id === 0 && !current.ready) {
           if (error) { fail(error); return; }
           clearTimeout(current.initTimer); current.ready = true;

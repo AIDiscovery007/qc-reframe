@@ -131,3 +131,19 @@
 - Git授权（2026-10-05）：用户明确要求“提交git”，本次包含已复核的任务编排、索引读取预算及分类修复、提示精简、全局下拉留白和完成自动收起，以及对应测试/说明/日志。沿用本轮build/compile/564项与独立UI复核证据；仅本地提交，不推送、不发布、不升版本。
 
 - Git交付（2026-10-05）：用户要求“提交git”，本轮任务编排、索引预算与分类修复、提示/下拉统一和完成自动收起已提交为 `13d77d53bfa08fd5f7884c94f78458fead7e85b4`（fix: improve session indexing limits and progress UI），共27个相关文件，分支codex/creative-workspace。已核对暂存差异、diff check及提交后工作区干净；沿用已记录的build/compile/564项与独立UI复核。此条记录另作文档提交；未推送、发布、升版本、重启bridge或重载实际扩展。
+
+## 2026-10-05 · 新用户CLI体验开工报告接收
+
+- 已收到UIUX会话01a10c6a-a0cb-7673-87b2-ea9849107451开工报告，并核对任职索引及对应任务日志。报告范围为CLI兼容、升级收尾、健康状态与现有恢复入口，声明仅本地实现验证，无提交推送发布及真实CLI升级/模型调用。
+- 冲突检查：上一轮会话改动已提交13d77d5/299caab，本监工无进行中的代码修改；当前工作区仅新任职登记及该执行者日志。SessionPicker、共享App/类型及会话bridge属于语义交叉，后续交付需检查既有会话选择、正文索引和输入保持回归。未重新派工、未更改其他执行者范围或扩大授权。
+
+### 独立复核与提交准备
+
+- 已核实执行者会话中的用户直接实施授权；主监工独立 build、compile、594 项全量通过，日志 `/tmp/reframe-supervisor-onboarding-{build,compile,tests}.log`。两条定向只读复核分别检查后端兼容/升级和前端恢复状态，避免重复浏览大范围源码。
+- 首轮 P2：慢会话兼容探测持全局变更锁阻塞取消，已派返修并收到 597 项验证报告；主监工以 `/tmp/reframe-review-compat-lock.mjs` 独立确认 probe 挂起期间取消已返回，原复现通过。继续要求检查模型/逆向/生图的同类 gate，保留并发保护。
+- 前端 P2：已打开设置时无项目快捷恢复交接会保留组件，initialSection 变化未同步当前分类。已向当前 UIUX 送达补修及定向回归要求，工具 isError=false；等待返修复核。
+- 生产构建示例页面独立验证会话错误→检查 Codex→关闭设置，搜索“林夏”、焦点与“保留恢复检查草稿”任务输入均保留。未操作真实扩展或模型。
+- 用户最新明确要求“提交git”：本轮完成复核后本地提交，不推送、不发布、不升版本。状态待返修复核；现有改动与任职保留。
+- 最终复核通过：逆向、生图及模型操作的兼容探测在全局变更锁外等待，断连停止请求自身后续写入；重获锁后继续检查 CLI、服务和数据状态。主监工独立兼容集成 15/15 通过，核对执行者最终 build/compile/603 项全量日志（`/tmp/reframe-onboarding-repair2-{build,tests}.log`），diff check 通过。
+- 设置分类改为 App 单一受控状态，主监工以当前构建页面独立运行 `workspace.html?state=library&settingsRegression=1`：无项目交接、分类切换、手动切页后相同恢复目标、关闭重开均 PASS，控制台无 warn/error。390px 检查 document.scrollWidth=390，dialog left=12/right=378；截图 `/tmp/reframe-supervisor-onboarding-qa/settings-recovery.png`。历史 CLI 版本矩阵和真实模型未验证，实际扩展未重载。
+- 已向 UIUX 会话 01a10c6a-a0cb-7673-87b2-ea9849107451 送达复核通过与提交准备通知，工具 isError=false。本轮状态已复核整合至工作区，待执行本地提交；不清理任职。

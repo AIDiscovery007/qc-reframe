@@ -261,6 +261,7 @@ export default defineBackground(() => {
     switch (message.type) {
       case "alchemy:open-workspace": {
         if (message.view !== undefined && !["tasks", "settings"].includes(message.view)) throw new Error("无效工作台页面");
+        if (message.section !== undefined && (message.view !== "settings" || !["cli", "models", "connection"].includes(message.section))) throw new Error("无效设置页面");
         const id = crypto.randomUUID();
         // Explicit UI context wins over another view's global selection and mode.
         const draft = message.draft;
@@ -269,7 +270,7 @@ export default defineBackground(() => {
         const savedView = !message.context && viewKey ? (await browser.storage.local.get(viewKey) as Record<string, { mode?: Mode }>)[viewKey] : undefined;
         const context = handoffContext(message.context ?? { mode: viewKey ? savedView?.mode || "style" : preferences?.mode || "style", selection: selection || null });
         await storeDraft(`workspace:${id}`, { ...context, draft, createdAt: Date.now() }, message.draft ? `quick:${source}` : undefined);
-        try { await openWorkspace(new URLSearchParams({ handoff: id, ...(message.view ? { view: message.view } : {}) }), sourceTab); }
+        try { await openWorkspace(new URLSearchParams({ handoff: id, ...(message.view ? { view: message.view } : {}), ...(message.section ? { section: message.section } : {}) }), sourceTab); }
         catch (error) { await consumeHandoff(`workspace:${id}`); throw error; }
         return;
       }

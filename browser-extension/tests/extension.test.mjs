@@ -1451,3 +1451,18 @@ test('request port cannot let a content script query local sessions or invoke ar
   assert.equal(port.length, 0);
   assert.equal(flow.pending.length, 0);
 });
+
+
+test("recovery opens the requested settings section with the unsaved workspace draft", async () => {
+  const { handlers, tabs, sessionStorage } = await background(() => assert.fail("recovery navigation must not call Codex"));
+  const send = message => new Promise(resolve => handlers.message(message, { id: "test", url: "chrome-extension://test/popup.html" }, resolve));
+  for (const section of ["cli", "models", "connection"]) {
+    const draft = { instructions: { key: "keep my pending edit" } };
+    assert.equal((await send({ type: "alchemy:open-workspace", view: "settings", section, draft })).ok, true);
+    const url = new URL(tabs.at(-1).url);
+    assert.equal(url.searchParams.get("section"), section);
+    assert.deepEqual(sessionStorage["workspace:" + url.searchParams.get("handoff")].draft.instructions, draft.instructions);
+  }
+  for (const input of [{ view: "settings", section: "invalid" }, { section: "cli" }, { view: "tasks", section: "models" }])
+    assert.match((await send({ type: "alchemy:open-workspace", ...input })).error, /无效/);
+});

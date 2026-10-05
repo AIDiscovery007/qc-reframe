@@ -5,7 +5,7 @@ import { delimiter, join } from "node:path";
 
 export async function readModelContext(request, cwd) {
   const { account, requiresOpenaiAuth } = await request("account/read", { refreshToken: false });
-  if (!account && requiresOpenaiAuth) throw new Error("请先在本机 Codex CLI 登录，然后刷新模型列表。");
+  if (!account && requiresOpenaiAuth) throw Object.assign(new Error("请先在本机 Codex CLI 登录，然后刷新模型列表。"), { recovery: "models" });
   const { config } = await request("config/read", { cwd, includeLayers: false });
   const provider = config.model_provider || "openai";
   const home = process.env.CODEX_HOME || join(homedir(), ".codex");
@@ -26,16 +26,16 @@ export async function readModelContext(request, cwd) {
 }
 
 export async function assertModelContext(request, cwd, selection) {
-  if (!selection?.model) throw new Error("请在连接设置中选择模型，并点击「验证并使用」。");
+  if (!selection?.model) throw Object.assign(new Error("请在连接设置中选择模型，并点击「验证并使用」。"), { recovery: "models" });
   const current = await readModelContext(request, cwd);
   if (current.accountKey !== selection.accountKey)
-    throw Object.assign(new Error("Codex 账号、登录或提供方已变化（或 CLI 已更换），请在连接设置中刷新模型列表并重新验证。"), { modelContextChanged: true });
+    throw Object.assign(new Error("Codex 账号、登录或提供方已变化（或 CLI 已更换），请在连接设置中刷新模型列表并重新验证。"), { modelContextChanged: true, recovery: "models" });
 }
 
 export function modelError(error, model) {
   const message = error.message || String(error);
   if (/\breasoning[._\s-]+effort\b/i.test(message) && /\b(?:unsupported|not support(?:ed)?|invalid)\b/i.test(message)) return error;
   if (/not supported.*ChatGPT account|model.*(?:not found|not available|not supported|does not exist)|do not have access.*model|unsupported.*model/i.test(message))
-    return Object.assign(new Error(`模型 ${model || "所选模型"} 当前无法通过本机 Codex 账号调用，请在连接设置中选择其他模型并验证。`), { modelUnavailable: true });
+    return Object.assign(new Error(`模型 ${model || "所选模型"} 当前无法通过本机 Codex 账号调用，请在连接设置中选择其他模型并验证。`), { modelUnavailable: true, recovery: "models", code: error.code, status: error.status });
   return error;
 }

@@ -1,3 +1,4 @@
+import RecoveryAction from "../popup/RecoveryAction";
 import { useEffect, useRef, useState } from "react";
 import { request } from "../../lib/client";
 import { showMotionDialog } from "../../lib/motion-dialog";
@@ -165,7 +166,7 @@ export default function SessionPicker({ value, onConfirm, onClose }: {
           {!!index?.failed && <details className="session-index-issues"><summary>{index.failed} 个会话暂未收录 <span>查看原因</span></summary><div>
             {index.issues?.length ? <ul>{index.issues.map(issue => <li key={issue.code}><span>{issue.count} 个</span>{issueDescriptions[issue.code] || issueDescriptions.read_failed}</li>)}</ul> : <p>部分会话无法完整读取；更新本机服务后重试，可获得具体原因。</p>}
           </div></details>}
-          {indexFailure && <p className="session-index-error" role="alert">{indexFailure}</p>}
+          {indexFailure && <p className="session-index-error" role="alert">{indexFailure} <RecoveryAction error={indexFailure} /></p>}
         </TaskOrchestration>
       </details>}
       <p className="hint session-picker-hint"><span>勾选会话，将使用整个会话的上下文。</span><label><input type="checkbox" checked={archived} disabled={saving} onChange={event => setArchived(event.target.checked)} />已归档</label></p>
@@ -174,10 +175,10 @@ export default function SessionPicker({ value, onConfirm, onClose }: {
       <div className="session-list">{visible.map(item => <label key={item.id} className="session-row"><input type="checkbox" data-session-id={item.id} checked={false} disabled={saving || draft.length >= 5} onChange={() => choose(item, true)} /><span><strong>{item.title}</strong><small>{item.match === "content" ? "正文匹配 · 完整会话" : "完整会话"}</small>{item.snippet && <small className="session-snippet">{item.snippet}</small>}</span><time>{new Date(item.updatedAt * 1000).toLocaleDateString("zh-CN")}</time></label>)}</div>
       {loading && <p className="session-empty" role="status">正在读取本机会话…</p>}
       {!loading && !error && !visible.length && <p className="session-empty" role="status">{page.data.length ? "当前列表中的会话已全部选中" : scope === "content" && building ? "已收录会话中暂未找到结果，索引仍在更新。" : scope === "content" && index?.state === "empty" ? "建立索引后，正文匹配会出现在这里。" : "没有找到会话"}</p>}
-      {error && !(scope === "content" && !index) && <p className="error" role="alert">{error} <button className="text-button" disabled={loading || saving} onClick={() => void load()}>重新读取</button></p>}
+      {error && !(scope === "content" && !index) && <p className="error" role="alert">{error} <RecoveryAction error={error} /> <button className="text-button" disabled={loading || saving} onClick={() => void load()}>重新读取</button></p>}
       {!loading && page.nextCursor && <button className="text-button" disabled={saving} onClick={() => void load(page.nextCursor!)}>加载更多</button>}
       </section>
-      {saveError && <p className="error" role="alert">{saveError}</p>}
+      {saveError && <p className="error" role="alert">{saveError} <RecoveryAction error={saveError} /></p>}
     </div>
     <div className="session-picker-footer"><span>本机 Codex · 已选 {draft.length} 个 / 最多 5 个</span><button className="quiet-button" disabled={saving} onClick={onClose}>取消</button><button className="primary" disabled={saving} onClick={() => void confirm()}>{saving ? "正在保存…" : "确认选择"}<Icon name="arrow" /></button></div>
   </dialog>;

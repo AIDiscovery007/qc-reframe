@@ -1,8 +1,8 @@
 # QC-Reframe for Chrome
 
-功能概览见 [功能导览](docs/FEATURES.md)。首次安装请先看 [项目首页](../README.md) 和 [交给 Codex 执行的初始化流程](docs/INSTALL_WITH_CODEX.md)。当前发布版本：**0.3.2**。迭代记录见 [更新日志](docs/releases/README.md)。
+功能概览见 [功能导览](docs/FEATURES.md)。首次安装请先看 [项目首页](../README.md) 和 [交给 Codex 执行的初始化流程](docs/INSTALL_WITH_CODEX.md)。当前发布版本：**0.3.3**。迭代记录见 [更新日志](docs/releases/README.md)，当前源码中的未发布改动见 [待发布](docs/releases/unreleased.md)。
 
-本版变化见 [v0.3.2 更新说明](docs/releases/v0.3.2.md)。从 v0.3.1 升级只需更新扩展、重新加载原扩展并刷新工作台与网页，无需重启 bridge、迁移用户数据或重新配对。新增项目路径与版本选择偏好保存在扩展本地，历史项目、提示词、图片和配置保留；无新增权限，不修改 Codex 全局配置。Chrome ZIP 仅含浏览器端，首次安装仍需完整仓库；从更早版本升级先遵循 [v0.3.1 的服务端升级说明](docs/releases/v0.3.1.md#升级方式与数据)。
+本版变化见 [v0.3.3 更新说明](docs/releases/v0.3.3.md)。从 v0.3.2 升级需要同步更新完整仓库与本机服务，重新加载原扩展并刷新工作台与网页；仅替换 Chrome ZIP 不够。历史项目、提示词、图片、配置和配对保留，不修改 Codex 全局配置。Chrome ZIP 仅含浏览器端，首次安装仍需完整仓库；具体步骤见 [升级说明](docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)。
 
 开发与后续维护请先阅读 [贡献指南](../Contribution.md) 和 [AGENTS.md](AGENTS.md)。
 
@@ -44,7 +44,9 @@
 
 独立安装版校验安装包元数据、稳定入口和自更新命令能力后，通过原 CLI 的 `codex update` 更新；不切换到 npm 或覆盖其他安装。固定到某个版本文件的 CODEX_BIN 需先改为安装器创建的稳定入口。重新检测会显示完成结果与安装检测时间，更新检查失败单独提示。
 
-App 内置和无法确认来源的自定义安装只显示版本及原安装方式的更新指引，不尝试覆盖。CLI 缺失或未登录时仍可通过 `npm start` 启动本机管理服务；首次 `setup` 与 `doctor` 保留严格环境检查。升级命令只由本机服务固定生成，不接受网页传入命令或路径，不使用 sudo。关闭工作台不会取消任务或升级。
+App 内置和无法确认来源的自定义安装只显示版本及原安装方式的更新指引，不尝试覆盖。CLI 缺失或未登录时仍可通过 `npm start` 启动已有构建的本机管理服务。当前源码的待发布改动还允许 `setup` 在 CLI 缺失、未登录或缺少 app-server 时继续初始化，随后按提示安装、登录或在设置中心处理；Node.js 和 Alchemy skill 仍须通过检查，`doctor` 继续严格检查 CLI。升级命令只由本机服务固定生成，不接受网页传入命令或路径，不使用 sudo。关闭工作台不会取消任务或升级。
+
+当前源码的待发布改动在现有「Codex 与更新」中分开显示版本更新与功能接口兼容状态。本机只读检查 CLI 提供的接口描述，不调用模型；无法确认兼容性时保留提示，不阻断任务，明确不支持时仅限制依赖该接口的功能。旧版本不必然不兼容，最新版本也不证明账号、模型或内置生图可用。升级后清除旧模型验证，完成复查后由用户重新「验证并使用」并重试原任务；保留项目、配对和已有草稿，不自动重跑任务。
 
 模型选择与 CLI 上下文关联；外部更新 CLI 后，同路径二进制或 npm 包版本变化会使旧验证失效，需要重新验证。仅从 v0.1.25 更新至本版不会新增模型验证要求。
 
@@ -106,7 +108,7 @@ npm run pair
 
 ## 独立选择模型
 
-可在工作台「设置中心 → Codex CLI」检查并升级插件实际调用的本机 **Codex CLI**；仅更新桌面 App 不代表 CLI 已更新。旧 CLI 可能缺少 GPT-6.1 Sol、GPT-6 Astra、GPT-6 Sol 等模型。更新后重启本机服务并刷新列表，具体可用性以账号权限和验证结果为准。[官方更新说明](https://learn.chatgpt.com/docs/codex/cli) · [模型选择截图](docs/releases/v0.1.17.md)
+可在工作台设置中心检查并升级插件实际调用的本机 **Codex CLI**；仅更新桌面 App 不代表 CLI 已更新。按检测到的实际路径与原安装渠道处理，外部升级后重新检测，路径变化时更新 `CODEX_BIN` 并重启本机服务，再刷新模型列表。具体可用性以账号权限和验证结果为准。[官方更新说明](https://learn.chatgpt.com/docs/codex/cli) · [模型选择截图](docs/releases/v0.1.17.md)
 
 连接设置中的「插件模型」从本机 Codex 获取图像输入模型列表，不写死模型名，也不修改 `~/.codex/config.toml`。首次使用或从旧版升级后，需选择模型并点击「验证并使用」。刷新列表不会自动调用推理；验证会通过同一个 Codex CLI 和登录状态发送一次简短请求，消耗少量模型额度，不发送项目图片。成功后保存到已忽略的 `.local/config/model-settings.json`，逆向和生图均显式使用已保存的模型及推理强度。
 
@@ -242,7 +244,7 @@ npm run setup
 
 随后运行 `npm start`，路径会从 `.local/config/runtime.json` 恢复；环境变量可覆盖保存值。
 
-需保留技能的 `references/` 等伴随文件。启动前可用 `codex --version`、`codex login status` 检查 CLI；CLI 不在 PATH 时设置 `CODEX_BIN`。
+需保留技能的 `references/` 等伴随文件。启动前对插件实际使用的 CLI 绝对路径执行 `--version` 和 `login status`，按终端规则安全引用路径；不要用 PATH 上另一份 CLI 的结果代替。CLI 不在 PATH 或需固定使用某份安装时设置 `CODEX_BIN`，已有配置也应核对保存的路径。
 
 imagegen 默认位于 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`（未设置 `CODEX_HOME` 时使用 `~/.codex`）。
 

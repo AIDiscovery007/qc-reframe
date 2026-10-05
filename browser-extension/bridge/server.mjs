@@ -11,6 +11,7 @@ import { runGeneration, imagegenSkillPath } from "./generation.mjs";
 import { createProjectStore, projectIdFor, recoverProjectDeletion } from "./projects.mjs";
 import { createModelStore } from "./models.mjs";
 import { createCliManager } from "./cli.mjs";
+import { createCompatibilityChecker, assertFeatureSupported } from "./compatibility.mjs";
 import { createImageStore } from "./images.mjs";
 import { createThumbnailStore } from "./thumbnails.mjs";
 import { createGalleryStore } from "./gallery.mjs";
@@ -20,6 +21,7 @@ import { migrateStorage } from "./storage.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+const defaultCompatibility = createCompatibilityChecker();
 const MAX_IMAGE = 8 * 1024 * 1024;
 const MAX_BODY = 24 * 1024 * 1024;
 const bad = (message, status = 400) =>
@@ -108,15 +110,28 @@ export async function createBridge({
   imageAction = openGeneratedImage,
   models,
   cli,
+  compatibility = defaultCompatibility,
   sessions,
   sessionReadTimeoutMs = 120_000,
 } = {}) {
   const instanceId = randomUUID();
   const paths = await migrateStorage(dataDir);
   sessions ||= createSessionStore({ cwd: root, dataDir: paths.records });
-  let sessionReaders = 0;
+  let sessionReaders = 0, compatibilityReaders = 0;
   models ||= await createModelStore({ dataDir: paths.config, cwd: root });
-  cli ||= createCliManager({ onUpdated: () => { models.reset(); sessions.resetReader?.(); } });
+  cli ||= createCliManager({ onUpdated: async () => {
+    try {
+      await models.reset();
+      const report = await compatibility.getCompatibility({ force: true });
+      if (report.error) throw new Error(report.error);
+    }
+    finally { sessions.resetReader?.(); }
+  } });
+  const requireFeature = async feature => {
+    const report = await compatibility.getCompatibility();
+    if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+    assertFeatureSupported(report, feature);
+  };
   await recoverProjectDeletion(paths.records, dataDir);
   const images = await createImageStore(dataDir, paths.records);
   await images.migrate();
@@ -280,22 +295,55 @@ export async function createBridge({
         if (value !== null && value !== "true" && value !== "false") throw bad("无效隐藏项目参数");
         return value === "true";
       };
+      // Probe before taking the mutation lock; all task/revision checks still run under it.
+      const feature = req.method !== "POST" ? undefined : path === "/jobs" ? "reverse"
+        : /^\/jobs\/[\da-f-]{36}\/generations$/.test(path) ? "generation"
+        : ["/models/refresh", "/models/verify"].includes(path) ? "models" : undefined;
+      if (feature) {
+        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+        const controller = new AbortController();
+        const abort = () => controller.abort(bad("请求已取消", 499));
+        res.once("close", abort);
+        compatibilityReaders++;
+        try {
+          if (res.destroyed || req.aborted) abort();
+          controller.signal.throwIfAborted();
+          await Promise.race([requireFeature(feature), new Promise((_, reject) => {
+            controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true });
+          })]);
+        } finally {
+          res.removeListener("close", abort);
+          releaseMutation = await acquireMutation();
+          compatibilityReaders--;
+        }
+        controller.signal.throwIfAborted();
+        if (res.destroyed || req.aborted) throw bad("请求已取消", 499);
+      }
       // Keep deletion and task setup from writing the same project concurrently.
       if (req.method === "POST") {
-        releaseMutation = await acquireMutation();
+        releaseMutation ||= await acquireMutation();
         if (shuttingDown) throw bad("服务正在停止，请重新启动后再试。", 503);
         if (deletionFailed) throw bad("项目清理未完成，请重启本机服务后重试", 503);
       }
-      const readSessions = async action => {
+      const readSessions = async (action, check = true) => {
         const controller = sessionReadController = new AbortController();
         res.once("close", abortSessionRead);
         sessionReadTimer = setTimeout(() => controller.abort(bad("读取会话超时，请重试", 504)), sessionReadTimeoutMs);
         sessionReaders++;
         releaseMutation?.(); releaseMutation = undefined;
-        let result;
-        try { assertSessionRequestActive(); result = await action(controller.signal); }
+        let result, abortCompatibility;
+        try {
+          assertSessionRequestActive();
+          if (check) await Promise.race([requireFeature("sessions"), new Promise((_, reject) => {
+            abortCompatibility = () => reject(controller.signal.reason);
+            controller.signal.addEventListener("abort", abortCompatibility, { once: true });
+          })]);
+          assertSessionRequestActive();
+          result = await action(controller.signal);
+        }
         catch (error) { controller.signal.throwIfAborted(); throw error; }
         finally {
+          if (abortCompatibility) controller.signal.removeEventListener("abort", abortCompatibility);
           releaseMutation = await acquireMutation();
           sessionReaders--;
         }
@@ -313,6 +361,10 @@ export async function createBridge({
             .match(/^name:\s*(.+)$/m)?.[1]
             ?.trim();
         } catch {}
+        void cli.status?.().catch(() => {});
+        if (!cliBusy()) void compatibility.getCompatibility().catch(() => {});
+        const cliState = cli.peek?.();
+        const cliSummary = cliState ? Object.fromEntries(["installed", "version", "source", "updateAvailable", "latestVersion", "checkError", "reason", "comparisonReference"].map(key => [key, cliState[key]])) : null;
         json(200, {
           service: "qc-alchemy",
           version,
@@ -321,6 +373,8 @@ export async function createBridge({
           instanceId, restartId, canRestart: allowShutdown && !!restart,
           skill: skill || null,
           ready: Boolean(skill),
+          serviceReady: true, skillReady: Boolean(skill), cli: cliSummary,
+          compatibility: compatibility.snapshot(),
           active: controllers.size + Number(models.busy) + Number(cliBusy()),
           visibleActive: [...controllers.values()].filter((controller) => showHidden || !projects.isHidden(controller.projectId)).length + Number(models.busy) + Number(cliBusy()),
           hiddenProjectIds: projects.hiddenProjectIds,
@@ -334,49 +388,56 @@ export async function createBridge({
         if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
         const body = await readBody(req);
         try { json(200, await readSessions(signal => sessions.list(body, signal))); }
-        catch (error) { throw bad(error.status ? error.message : "无法读取本机 Codex 会话，请检查 CLI 后重试", error.status || 503); }
+        catch (error) { throw error.status ? error : bad("无法读取本机 Codex 会话，请检查 CLI 后重试", 503); }
         return;
       }
       if (req.method === "POST" && path === "/sessions/index") {
         if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
         const body = await readBody(req);
         if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => key !== "action") || !["refresh", "clear", "status"].includes(body.action)) throw bad("无效的索引操作");
-        try { json(200, await readSessions(() => sessions.index(body.action))); }
-        catch (error) { throw bad(error.status ? error.message : "无法访问本地会话索引，请重试", error.status || 503); }
+        try { json(200, await readSessions(() => sessions.index(body.action), body.action === "refresh")); }
+        catch (error) { throw error.status ? error : bad("无法访问本地会话索引，请重试", 503); }
         return;
       }
       if (req.method === "GET" && path === "/models") {
         if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-        try { json(200, await models.list()); } catch (error) { throw bad(error.message, 503); }
+        await requireFeature("models");
+        try { json(200, await models.list()); } catch (error) { throw Object.assign(error, { status: error.status || 503 }); }
         return;
       }
       if (req.method === "GET" && path === "/cli/status") {
-        json(200, await cli.status());
+        const status = await cli.status();
+        json(200, { ...status, compatibility: cliBusy() ? compatibility.snapshot() : await compatibility.getCompatibility() });
         return;
       }
       if (req.method === "POST" && ["/cli/check", "/cli/update"].includes(path)) {
         const body = await readBody(req);
         if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) throw bad("Codex 管理操作不接受命令或路径参数。");
-        if (path.endsWith("/update") && (controllers.size || models.busy || sessionReaders || sessions.busy)) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
+        if (path.endsWith("/update") && (controllers.size || models.busy || sessionReaders || compatibilityReaders || sessions.busy)) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
         if (path.endsWith("/update")) {
           cliStarting = true;
           try { json(202, await cli.update()); }
           finally { cliStarting = false; }
-        } else json(200, await cli.check());
+        } else {
+          const status = await cli.check();
+          const report = cliBusy() ? compatibility.snapshot() : await compatibility.getCompatibility({ force: true });
+          if (!cliBusy() && !sessionReaders && !compatibilityReaders && !sessions.busy) sessions.resetReader?.();
+          json(200, { ...status, compatibility: report });
+        }
         return;
       }
       if (req.method === "POST" && ["/models/refresh", "/models/verify"].includes(path)) {
         if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-        if (controllers.size || models.busy || sessionReaders || sessions.busy) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
+        if (controllers.size || models.busy || sessionReaders || compatibilityReaders || sessions.busy) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
         const body = await readBody(req);
         if (path.endsWith("/verify") && (typeof body.model !== "string" || body.model.length > 200)) throw bad("请选择有效模型");
         try { json(path.endsWith("/verify") ? 202 : 200, path.endsWith("/verify") ? await models.start(body.model, body.reasoningEffort) : await models.refresh()); }
-        catch (error) { throw bad(error.message, error.status || 503); }
+        catch (error) { throw Object.assign(error, { status: error.status || 503 }); }
         return;
       }
       if (req.method === "POST" && path === "/restart") {
         if (!allowShutdown || !restart) throw bad("此服务不支持插件内重启。请在原终端停止，再在插件目录运行 npm start。", 409);
-        if (controllers.size || models.busy || cliBusy() || sessionReaders || sessions.busy) throw bad("任务、模型验证或 Codex 操作执行中，请等待完成后再重启。", 409);
+        if (controllers.size || models.busy || cliBusy() || sessionReaders || compatibilityReaders || sessions.busy) throw bad("任务、模型验证或 Codex 操作执行中，请等待完成后再重启。", 409);
         const nextRestartId = randomUUID();
         let commit;
         try { commit = await restart({ root, dataDir, port: server.address().port, instanceId, restartId: nextRestartId, skillPath, generationSkillPath }); }
@@ -398,7 +459,7 @@ export async function createBridge({
         return;
       }
       if (req.method === "POST" && path === "/shutdown" && allowShutdown) {
-        if (controllers.size || models.busy || cliBusy() || sessionReaders || sessions.busy) throw bad("任务或 Codex 升级执行中，请等待完成后再停止服务。", 409);
+        if (controllers.size || models.busy || cliBusy() || sessionReaders || compatibilityReaders || sessions.busy) throw bad("任务或 Codex 升级执行中，请等待完成后再停止服务。", 409);
         shuttingDown = true;
         json(200, { stopped: true });
         server.close();
@@ -493,7 +554,7 @@ export async function createBridge({
           if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
           const ids = sessionIds(body.sessionIds ?? []);
           try { input.sessions = ids.length ? await readSessions(signal => sessions.metadata(ids, signal)) : []; }
-          catch (error) { throw bad(error.status ? error.message : "无法读取所选会话，请刷新后重试", error.status || 503); }
+          catch (error) { throw error.status ? error : bad("无法读取所选会话，请刷新后重试", 503); }
         } else if (body.sessionIds !== undefined) throw bad("当前模式不接受会话输入");
         if (body.mode === "multi-reenact") {
           if (body.subjectImage !== undefined) throw bad("多图重演请使用主体列表");
@@ -699,7 +760,7 @@ export async function createBridge({
               if (next.status === "running") Object.assign(next, { status: "completed", stage: "图片已生成", extension: output.extension, imageAsset, revisedPrompt: output.revisedPrompt });
             }
           } catch (error) {
-            if (next.status === "running") Object.assign(next, { status: "failed", stage: "生图失败", error: error.message });
+            if (next.status === "running") Object.assign(next, { status: "failed", stage: "生图失败", error: error.message, recovery: error.recovery, code: error.code });
             await models.invalidate(modelSettings, error).catch((failure) => console.error("保存模型状态失败:", failure.message));
           } finally {
             await save(job).catch((error) => console.error("保存生图任务失败:", error.message));
@@ -776,7 +837,7 @@ export async function createBridge({
         if (!instruction) throw bad("请填写会话创作目标");
         const ids = sessionIds(body.sessionIds, true);
         try { selectedSessions = await readSessions(signal => sessions.metadata(ids, signal)); }
-        catch (error) { throw bad(error.status ? error.message : "无法读取所选会话，请刷新后重试", error.status || 503); }
+        catch (error) { throw error.status ? error : bad("无法读取所选会话，请刷新后重试", 503); }
         if (models.busy) throw bad("正在验证模型，请稍候", 409);
       } else if (body.sessionIds !== undefined) throw bad("当前模式不接受会话输入");
       const { bytes, extension } = decodeImage(body.image);
@@ -908,7 +969,7 @@ export async function createBridge({
           if (job.status === "running")
             Object.assign(job, {
               status: "failed",
-              error: error.message,
+              error: error.message, recovery: error.recovery, code: error.code,
               stage: "逆向失败",
             });
           await models.invalidate(modelSettings, error).catch((failure) => console.error("保存模型状态失败:", failure.message));
@@ -924,6 +985,8 @@ export async function createBridge({
       if (!res.headersSent && !res.destroyed)
         json(error.status || 500, {
           error: error.status ? error.message : "本机服务异常，请检查终端日志",
+          ...(error.recovery ? { recovery: error.recovery } : {}),
+          ...(error.code ? { code: error.code } : {}),
         });
     } finally {
       clearTimeout(sessionReadTimer);

@@ -1,3 +1,5 @@
+import RecoveryAction, { RecoveryContext } from "./RecoveryAction";
+import { cliLabel, compatibilityMessage, type CliStatus } from "../../lib/codex-status";
 import ServiceRestart from "./ServiceRestart";
 import { ReminderSettings } from "./TaskReminders";
 import { showMotionDialog } from "../../lib/motion-dialog";
@@ -11,26 +13,13 @@ import { useMotion } from "../../lib/use-motion";
 import { setMotionPreference, type MotionPreference } from "../../lib/motion-preference";
 import { logo } from "../../lib/brand";
 
-// Mirrors the authenticated bridge status; command is for display only.
-type CliStatus = {
-  installed: boolean;
-  version: string | null;
-  latestVersion: string | null;
-  executable: string | null;
-  source: "npm" | "homebrew" | "standalone" | "app" | "custom" | "missing";
-  canUpdate: boolean;
-  updateAvailable: boolean;
-  checkedAt: string | null;
-  detectedAt?: string | null;
-  checkError?: string | null;
-  reason?: string | null;
-  command?: string | null;
-  operation?: { status: "running" | "completed" | "failed"; stage: string; error?: string; startedAt: string; finishedAt?: string } | null;
-};
 const sections = { reminders: "任务提醒", appearance: "界面与动效", models: "插件模型", cli: "Codex 与更新", connection: "本机连接", storage: "本地数据" };
+export type SettingsSection = keyof typeof sections;
 const sources = { npm: "npm", homebrew: "Homebrew", standalone: "独立安装版", app: "Codex App 内置", custom: "自定义安装", missing: "未检测到" };
 
-export default function SettingsCenter({ connected, serviceBusy, onClose, onConnected }: {
+export default function SettingsCenter({ section: selectedSection, onSectionChange: setSection, connected, serviceBusy, onClose, onConnected }: {
+  section?: SettingsSection;
+  onSectionChange(section: SettingsSection): void;
   connected: boolean;
   serviceBusy: boolean;
   onClose(): void;
@@ -48,7 +37,7 @@ export default function SettingsCenter({ connected, serviceBusy, onClose, onConn
     finally { setSavingMotion(false); }
   };
   const revision = useRef(0);
-  const [section, setSection] = useState<keyof typeof sections>(connected ? "cli" : "connection");
+  const section = selectedSection || (connected ? "cli" : "connection");
   const [cli, setCli] = useState<CliStatus>();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -107,9 +96,11 @@ export default function SettingsCenter({ connected, serviceBusy, onClose, onConn
     finally { setPending(null); }
   };
   const blocked = !!pending || updating;
-  const status = !connected ? "本机服务未连接" : !cli ? "正在检测" : updating ? "正在升级" : cli.operation?.status === "failed" ? "升级未完成" : !cli.installed ? "需要安装 CLI" : cli.updateAvailable ? "有新版本" : cli.operation?.status === "completed" ? "升级完成" : cli.source === "app" ? "由桌面 App 管理" : cli.latestVersion ? "已是最新版本" : "已安装";
+  const status = !connected ? "本机服务未连接" : !cli ? loadError ? "检测未完成" : "正在检测" : cliLabel(cli);
+  const compatibility = cli?.installed ? compatibilityMessage(cli.compatibility) : "";
+  const unsupported = Object.values(cli?.compatibility?.features || {}).some(feature => feature.status === "unsupported");
 
-  return <dialog ref={dialog} className="settings-center" aria-labelledby="settings-center-title" onCancel={(e) => { e.preventDefault(); onClose(); }}>
+  return <RecoveryContext.Provider value={setSection}><dialog ref={dialog} className="settings-center" aria-labelledby="settings-center-title" onCancel={(e) => { e.preventDefault(); onClose(); }}>
     <div className="settings-center-heading"><img src={logo} alt="" /><h2 id="settings-center-title">设置中心</h2><button className="settings-close" aria-label="关闭设置" onClick={onClose}>×</button></div>
     <div className="settings-center-body">
       <nav className="settings-center-nav" aria-label="设置分类">
@@ -130,29 +121,35 @@ export default function SettingsCenter({ connected, serviceBusy, onClose, onConn
         </section>}
         {section === "cli" && <section aria-labelledby="cli-title">
           <h3 id="cli-title">Codex CLI</h3>
-          <span className={`settings-chip ${connected && cli?.installed ? "good" : "attention"}`}>{!connected ? "无法检测" : cli ? sources[cli.source] : "检测中"}</span>
+          <span className={`settings-chip ${connected && cli?.installed && cli.version ? "good" : "attention"}`}>{!connected ? "无法检测" : cli ? sources[cli.source] : "检测中"}</span>
           <div className="settings-update-card">
-            <div className="settings-update-top"><strong>{status}</strong>{cli?.updateAvailable && <span className="settings-chip attention">稳定版</span>}</div>
+            <div className="settings-update-top"><strong>{status}</strong>{cli?.updateAvailable && <span className="settings-chip attention">{cli.comparisonReference ? "稳定版参考" : "稳定版"}</span>}</div>
             {cli?.installed && <div className="settings-version-pair">{cli.updateAvailable && cli.latestVersion ? <><span>{cli.version}</span><span>→</span><strong>{cli.latestVersion}</strong></> : <strong>{cli.version || "版本未知"}</strong>}</div>}
-            <p className="settings-operation-status" role="status">{!connected ? "启动本机服务并连接后，才能检测和管理 Codex。" : !cli ? "正在检测本机安装…" : updating ? `${cli.operation?.stage || "正在升级…"} 关闭设置后仍会继续。` : serviceBusy ? "请等待当前逆向、生图或模型验证完成后升级。" : cli.reason || (cli.source === "app" ? "此 CLI 随桌面 App 更新。请在对应 App 中检查更新。" : !cli.installed ? "安装并登录 Codex CLI 后重新检测。" : cli.operation?.status === "completed" ? "版本检查通过，可前往插件模型刷新列表并验证。" : "")}</p>
-            {cli?.operation?.status === "failed" && <div className="settings-info settings-error" role="alert">{cli.operation.error || cli.operation.stage}</div>}
-            {!connected ? <button className="primary" onClick={() => setSection("connection")}>前往连接</button> : cli?.updateAvailable && cli.canUpdate ? <button className="primary" disabled={blocked || serviceBusy} onClick={() => void act("update")}>{updating || pending === "update" ? "正在升级…" : `一键升级至 ${cli.latestVersion}`}</button> : <button className="primary" disabled={blocked || !cli} onClick={() => void act("check")}>{pending === "check" ? "正在检测…" : updating ? "正在升级…" : "重新检测"}</button>}
+            <p className="settings-operation-status" role="status">{!connected ? "启动本机服务并连接后，才能检测和管理 Codex。" : !cli ? loadError ? "检测未完成，请重新检测或检查本机服务。" : "正在检测本机安装…" : updating ? `${cli.operation?.stage || "正在升级…"} 关闭设置后仍会继续。` : serviceBusy ? "请等待当前逆向、生图或模型验证完成后升级。" : cli.reason || (cli.source === "app" ? "此 CLI 随桌面 App 更新。请在对应 App 中检查更新。" : !cli.installed ? "安装并登录 Codex CLI 后重新检测。" : cli.operation?.status === "completed" ? "CLI 已更新。验证模型后，关闭设置即可继续原操作。" : cli.updateAvailable ? "可升级至当前渠道稳定版；兼容的功能仍可使用。" : "")}</p>
+            {cli?.operation?.status === "failed" && <div className="settings-info settings-error" role="alert">{cli.operation.error || cli.operation.stage} <RecoveryAction error={cli.operation.error} currentSection="cli" /></div>}
+            {!connected ? <button className="primary" onClick={() => setSection("connection")}>前往连接</button> : cli && !cli.installed && cli.instructions?.url ? <button className="primary" onClick={() => window.open(cli.instructions!.url, "_blank", "noopener,noreferrer")}>安装 Codex CLI</button> : cli?.updateAvailable && cli.canUpdate ? <button className="primary" disabled={blocked || serviceBusy} onClick={() => void act("update")}>{updating || pending === "update" ? "正在升级…" : `一键升级至 ${cli.latestVersion}`}</button> : cli?.operation?.status === "completed" && !unsupported ? <button className="primary" disabled={blocked || serviceBusy} onClick={() => setSection("models")}>验证并使用模型</button> : <button className="primary" disabled={blocked} onClick={() => void act("check")}>{pending === "check" ? "正在检测…" : updating ? "正在升级…" : "重新检测"}</button>}
+            {cli && !cli.installed && cli.instructions?.url && <button className="text-button" disabled={blocked} onClick={() => void act("check")}>{pending === "check" ? "正在检测…" : "安装后重新检测"}</button>}
           </div>
+          {compatibility && <p className={unsupported ? "settings-info settings-error" : "fine"} role="status">{compatibility}</p>}
           {cli && <>
-            <div className="settings-row"><span>自动检查更新</span><span className="settings-label">{cli.command ? "每天一次" : "由原安装方式管理"}</span></div>
-            <details className="settings-detail"><summary>安装与检查详情</summary>
+            <div className="settings-row"><span>自动检查更新</span><span className="settings-label">{cli.source === "missing" ? "安装后检查" : "使用期间每天一次"}</span></div>
+            <details className="settings-detail" open={!cli.installed || !!cli.comparisonReference || cli.operation?.status === "failed"}><summary>安装与检查详情</summary>
               <p className="fine">最近检测安装：{cli.detectedAt ? new Date(cli.detectedAt).toLocaleString() : "尚未检测"}</p>
-              <p className="fine">{cli.command ? (cli.checkedAt ? `最近检查更新：${new Date(cli.checkedAt).toLocaleString()}` : "尚未检查更新") : "此安装方式暂不支持在插件内检查和升级。"}</p>
+              <p className="fine">{cli.checkedAt ? `最近检查更新：${new Date(cli.checkedAt).toLocaleString()}` : "尚未完成更新检查"}</p>
               <code>{cli.executable || "未检测到可执行文件"}</code>
-              {cli.command && <code>{cli.command}</code>}
-              {cli.updateAvailable && cli.canUpdate && <button className="text-button" disabled={blocked} onClick={() => void act("check")}>{pending === "check" ? "正在检测…" : "重新检测"}</button>}
+              {cli.instructions?.message && <p className="fine">{cli.instructions.message}</p>}
+              {(cli.instructions?.command || cli.command) && <code>{cli.instructions?.command || cli.command}</code>}
+              {cli.instructions?.loginCommand && <><p className="fine">需要登录时，在终端运行：</p><code>{cli.instructions.loginCommand}</code></>}
+              {cli.instructions?.url && <a className="text-button" href={cli.instructions.url} target="_blank" rel="noreferrer">{cli.installed ? "查看更新说明" : "查看安装说明"}</a>}
+              {cli.executable && <p className="fine">更新或登录后点击「重新检测」，确认 Reframe 使用的是上方这份 CLI。</p>}
+              {(cli.updateAvailable && cli.canUpdate || cli.operation?.status === "completed") && <button className="text-button" disabled={blocked} onClick={() => void act("check")}>{pending === "check" ? "正在检测…" : "重新检测"}</button>}
             </details>
             {cli.checkError && <div className="settings-info settings-error" role="alert">检查更新失败：{cli.checkError}</div>}
           </>}
           <p className="settings-check-notice fine" role="status">{notice}</p>
           {(error || loadError) && <div className="settings-info settings-error" role="alert">{error || loadError}</div>}
         </section>}
-        {section === "models" && <section aria-label="模型设置">{connected ? <ModelSettings wide onCheckCli={() => setSection("cli")} key={cli?.operation?.finishedAt || "initial"} serviceBusy={serviceBusy || updating || !!pending} /> : <><h3>选择创作模型</h3><div className="settings-info">连接本机服务后，可选择并验证模型。</div><button className="primary" onClick={() => setSection("connection")}>前往连接</button></>}</section>}
+        {section === "models" && <section aria-label="模型设置">{connected ? <ModelSettings wide loginCommand={cli?.instructions?.loginCommand} onCheckCli={() => setSection("cli")} key={cli?.operation?.finishedAt || "initial"} serviceBusy={serviceBusy || updating || !!pending} /> : <><h3>选择创作模型</h3><div className="settings-info">连接本机服务后，可选择并验证模型。</div><button className="primary" onClick={() => setSection("connection")}>前往连接</button></>}</section>}
         {section === "connection" && <section aria-labelledby="connection-title">
           <h3 id="connection-title">连接你的电脑</h3>
           <span className={`settings-chip ${connected ? "good" : "attention"}`}>{connected ? "本机服务已连接" : "服务未连接"}</span>
@@ -160,7 +157,7 @@ export default function SettingsCenter({ connected, serviceBusy, onClose, onConn
           <div className="settings-row"><span className="settings-label">Codex 安装</span><span>{!connected ? "连接后检测" : cli?.installed ? `已检测到 ${cli.version || "CLI"}` : "尚未找到可用 CLI"}</span></div>
           <form onSubmit={(e) => { e.preventDefault(); void connect(); }}>
             <label className="settings-pair-label">{connected ? "重新配对" : "配对码"}<input type="password" autoComplete="off" spellCheck={false} value={token} placeholder="粘贴本机服务提供的配对码" onChange={(e) => setToken(e.target.value)} /></label>
-            <button className="primary" disabled={!!pending || !token.trim()}>{pending === "connect" ? "正在连接…" : "连接 Codex"}</button>
+            <button className="primary" disabled={!!pending || !token.trim()}>{pending === "connect" ? "正在连接…" : "连接本机服务"}</button>
           </form>
           {pairError && <div className="settings-info settings-error" role="alert">{pairError}</div>}
           <details className="settings-detail" open={!connected}><summary>如何启动本机服务？</summary><p className="fine">在插件目录打开终端，启动服务，再获取配对码。</p><code>npm start<br />npm run pair</code></details>
@@ -172,5 +169,5 @@ export default function SettingsCenter({ connected, serviceBusy, onClose, onConn
         </section>}
       </div>
     </div>
-  </dialog>;
+  </dialog></RecoveryContext.Provider>;
 }

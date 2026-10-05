@@ -1,3 +1,5 @@
+import RecoveryAction, { RecoveryContext } from "./RecoveryAction";
+import type { CliStatus, RecoverySection } from "../../lib/codex-status";
 import ProjectVisibilityToast from "./ProjectVisibilityToast";
 import { ReminderToast, useTaskReminders } from "./TaskReminders";
 import { type TaskNotice } from "../../lib/task-reminders";
@@ -14,7 +16,7 @@ import CanvasWorkspace from "../workspace/CanvasWorkspace";
 import PromptEditor from "../workspace/PromptEditor";
 import RecentProject from "../workspace/RecentProject";
 import ResultGallery from "../workspace/ResultGallery";
-import SettingsCenter from "./SettingsCenter";
+import SettingsCenter, { type SettingsSection } from "./SettingsCenter";
 import TaskCenter from "./TaskCenter";
 import HiddenProjectsToggle from "./HiddenProjectsToggle";
 import { useEffect, useReducer, useRef, useState } from "react";
@@ -112,6 +114,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const selectionRevision = useRef(0);
   const deletingProjects = useRef(false);
   const [settings, setSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>();
+  const [cliStatus, setCliStatus] = useState<CliStatus | null>();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const library = useProjectLibrary(preferences.paired, historyOpen, workspace, dataRevision, showHidden);
@@ -309,7 +313,11 @@ export default function App({ embedded = false, workspace = false }: { embedded?
             }
           } else setSelection({ ...source, error: "参考图尚未保存，请重新上传" });
         } else { previous = undefined; setSelection(undefined); setProject(undefined); }
-        if (params.get("view") === "settings") setSettings(true);
+        if (params.get("view") === "settings") {
+          const section = params.get("section");
+          setSettingsSection(section === "models" || section === "connection" ? section : "cli");
+          setSettings(true);
+        }
         if (params.get("view") === "tasks") setTasksOpen(true);
       } catch (e) { if (!cancelled && revision === selectionRevision.current) setError((e as Error).message); }
     };
@@ -394,15 +402,16 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       const revision = projectRevision.current;
       let delay = 10_000;
       try {
-        const health = await query<{ ready: boolean; skill: string; active: number; visibleActive?: number; hiddenProjectIds?: string[]; projectsRevision?: string; modelBusy?: boolean; cliBusy?: boolean; model?: string }>("/health");
+        const health = await query<{ ready: boolean; serviceReady?: boolean; skill: string; active: number; visibleActive?: number; hiddenProjectIds?: string[]; projectsRevision?: string; modelBusy?: boolean; cliBusy?: boolean; model?: string; cli?: CliStatus | null }>("/health");
         if (cancelled) return delay;
-        setConnected(health.ready);
+        setConnected(health.serviceReady ?? true);
         setServiceBusy(health.active > 0);
         if (revision === projectRevision.current) {
           setActiveCount(health.visibleActive ?? health.active);
           setHiddenProjectIds(health.hiddenProjectIds || []);
         }
         setCliBusy(!!health.cliBusy);
+        setCliStatus(health.cli);
         setModelBusy(!!health.modelBusy);
         setSelectedModel(health.model || null);
         setConnectionText(health.ready ? `已连接 · ${health.skill}` : "未找到图片逆向技能");
@@ -486,7 +495,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     return () => { cancelled = true; };
   }, [workspace, draftReady, multiSubjectDrafts, subjectDrafts, instructions, promptDrafts, lang, versions, job?.id, activeProject?.id, selection?.id, selection?.projectId, preferences.mode]);
 
-  const openWorkspace = async (view?: "tasks" | "settings") => {
+  const openWorkspace = async (view?: "tasks" | "settings", section?: RecoverySection) => {
     if (handoffPending.current) return;
     if (busy || savingMode || subjectUnavailable[subjectKey(preferences.mode)] || reading || (connected && loadingProject)) {
       setError("正在处理当前输入，请完成后再打开工作台"); return;
@@ -497,12 +506,16 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       const prefix = `${selection?.projectId || selection?.id}:`;
       const forProject = <T,>(items: Record<string, T>) => Object.fromEntries(Object.entries(items).filter(([key]) => key.startsWith(prefix)));
       const draft = draftSnapshot();
-      await request({ type: "alchemy:open-workspace", view, context: workspaceContext(), draft: {
+      await request({ type: "alchemy:open-workspace", view, section, context: workspaceContext(), draft: {
         multiSubjectDrafts: forProject(multiSubjectDrafts), subjectDrafts: forProject(subjectDrafts), instructions: forProject(instructions), versions: forProject(draft.versions || {}), lang,
         promptDrafts: Object.fromEntries(Object.entries(promptDrafts).filter(([id]) => activeProject?.jobs.some(job => job.id === id))),
       } });
     } catch (e) { setError((e as Error).message); }
     finally { handoffPending.current = false; setBusy(false); }
+  };
+  const openRecovery = (section: RecoverySection) => {
+    if (!workspace) { void openWorkspace("settings", section); return; }
+    setSettingsSection(section); setSettings(true);
   };
   const uploadReference = async (file?: File, create = true) => {
     if (!file || busy) return;
@@ -855,6 +868,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
                   }} /> : null;
 
   return (
+    <RecoveryContext.Provider value={openRecovery}>
     <div ref={reminderRoot} className={`${workspace ? "app workspace-app" : "app"}${preferences.mode === "multi-reenact" ? " multi-mode" : ""}`} data-motion={reduced ? "reduce" : "full"} data-motion-input="keyboard" data-sidebar-collapsed={sidebarCollapsed}
       onPointerDownCapture={event => { event.currentTarget.dataset.motionInput = "pointer"; }}
       onKeyDownCapture={event => { event.currentTarget.dataset.motionInput = "keyboard"; }}
@@ -873,7 +887,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         <button className="nav-action" aria-label="任务中心" disabled={!connected} onClick={() => setTasksOpen(true)}><Icon name="clock" /><span>任务中心</span>{reminders.unread.length > 0 && <span className="reminder-dot" data-failed={reminders.unread.some(item => item.status === "failed")} role="img" aria-label={`${reminders.unread.length} 项结果未查看`} />}{activeCount > 0 && <span className="count">{activeCount}</span>}</button>
         <div className="sidebar-label">最近项目</div>
         <div className="project-nav">{recentProjects.map(item => <RecentProject key={item.id} project={item} currentMode={preferences.mode} active={!historyOpen && !galleryOpen && activeProject?.id === item.id} disabled={busy} onOpen={() => void openProject(item)} />)}</div>
-        <div className="sidebar-bottom"><button className="nav-action" aria-label="设置中心" onClick={() => setSettings(true)}><Icon name="settings" /><span>设置中心</span></button><div className="connection-state"><i className={`online-dot ${connected ? "" : "offline"}`} />{connected ? "Codex 已连接" : "本机未连接"}</div></div>
+        <div className="sidebar-bottom"><button className="nav-action" aria-label="设置中心" onClick={() => setSettings(true)}><Icon name="settings" /><span>设置中心</span></button><div className="connection-state"><i className={`online-dot ${connected ? "" : "offline"}`} />{connected ? "本机服务已连接" : "本机未连接"}{connected && cliStatus?.updateAvailable && <button className="text-button" onClick={() => openRecovery("cli")}>{cliStatus.comparisonReference ? "版本参考" : "可更新"}</button>}</div></div>
       </aside>}
       <div className={workspace ? "workspace-main" : "compact-main"}>
       {workspace && !galleryOpen && <header className="workspace-head"><div><h1>{historyOpen ? "全部项目" : activeProject?.title || "新项目"}</h1></div><div className="head-actions">
@@ -895,7 +909,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       {!workspace && <div className="connection">
         <span className={`dot ${connected ? "online" : ""}`} />
         <span title={connectionText}>
-          {connected ? "Codex 已连接" : "Codex 未连接"}
+          {connected ? "本机服务已连接" : "本机未连接"}
         </span>
         {activeCount > 0 && <button className="text-button" onClick={() => openNotice()}>{activeCount} 个任务</button>}
         <button className="text-button workspace-entry" disabled={busy || savingMode || !!subjectUnavailable[subjectKey(preferences.mode)]} onClick={() => void openWorkspace()} title="在工作台继续"><Icon name="expand" />工作台</button>
@@ -934,22 +948,22 @@ export default function App({ embedded = false, workspace = false }: { embedded?
             disabled={busy || !tokenDraft.trim()}
             onClick={connect}
           >
-            {busy ? "正在连接…" : "连接 Codex"}
+            {busy ? "正在连接…" : "连接本机服务"}
           </button>
           {connected && <button className="text-button" onClick={() => void openWorkspace("settings")}>在工作台管理模型与设置<Icon name="arrow" /></button>}
         </section>
       )}
       {error && (
         <div className="error" role="alert">
-          {error}
+          {error} <RecoveryAction error={error} />
         </div>
       )}
-      {!connected && preferences.paired && !settings && (
-        <div className="error">{connectionText}</div>
+      {preferences.paired && !settings && (!connected || connectionText === "未找到图片逆向技能") && (
+        <div className="error" role="alert">{connectionText} <RecoveryAction error={connectionText} /></div>
       )}
-      {connected && !selectedModel && !settings && <div className="model-notice">
-        <span>先为 QC-Reframe 选择可用模型</span>
-        <button className="text-button" onClick={() => workspace ? setSettings(true) : void openWorkspace("settings")}>选择模型</button>
+      {connected && (!selectedModel || cliStatus && !cliStatus.installed) && !settings && <div className="model-notice">
+        <span>{cliStatus && !cliStatus.installed ? "未找到 Codex CLI，请先完成安装" : "先为 QC-Reframe 选择并验证模型"}</span>
+        <button className="text-button" onClick={() => openRecovery(cliStatus && !cliStatus.installed ? "cli" : "models")}>{cliStatus && !cliStatus.installed ? "检查 Codex" : "选择模型"}</button>
       </div>}
 
       {(visibilityNotice || (!tasksOpen && visibilityError)) && <ProjectVisibilityToast notice={visibilityNotice} error={tasksOpen ? "" : visibilityError} busy={busy} containerRef={visibilityFeedback}
@@ -957,7 +971,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         onUndo={() => { if (visibilityNotice) void setProjectsHidden(visibilityNotice.ids, !visibilityNotice.hidden, true).catch(error => setVisibilityError(error.message)); }} />}
       {workspace && sessionPicker === drawerKey && preferences.mode === "session" && <SessionPicker value={selectedSessions()} onClose={() => setSessionPicker(undefined)} onConfirm={ids => saveInput("session", undefined, taskInstruction("session"), "", [], ids)} />}
       {workspace && newProjectOpen && <NewProject busy={busy} error={error} onClose={() => setNewProjectOpen(false)} onUpload={() => referenceInput.current?.click()} />}
-      {workspace && settings && <SettingsCenter connected={connected} serviceBusy={serviceBusy} onClose={() => setSettings(false)} onConnected={() => setPreferences(value => ({ ...value, paired: true }))} />}
+      {workspace && settings && <SettingsCenter section={settingsSection} onSectionChange={setSettingsSection} connected={connected} serviceBusy={serviceBusy} onClose={() => setSettings(false)} onConnected={() => setPreferences(value => ({ ...value, paired: true }))} />}
       {tasksOpen && <TaskCenter visibilityError={visibilityError} unread={reminders.unread} onNoticeOpen={openNotice} showHidden={showHidden} hiddenProjectIds={hiddenProjectIds} busy={busy} onToggleHidden={() => void toggleHiddenProjects()} onClose={() => setTasksOpen(false)} onUpdate={updateJob} onOpen={async (_projectId, _mode, jobId, generationId) => {
         await noticeNavigation.current?.(new URLSearchParams({ task: jobId, ...(generationId ? { generation: generationId } : {}) }));
       }} />}
@@ -1024,5 +1038,6 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       </div>}
       </div>
     </div>
+    </RecoveryContext.Provider>
   );
 }

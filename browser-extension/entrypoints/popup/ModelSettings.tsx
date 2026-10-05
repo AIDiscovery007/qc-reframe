@@ -1,10 +1,11 @@
+import RecoveryAction from "./RecoveryAction";
 import { pollWhileVisible } from "../../lib/visible-poll";
 import { useEffect, useState } from "react";
 import { query, request } from "../../lib/client";
 import type { ModelCatalog } from "../../lib/types";
 import SelectField from "./SelectField";
 
-export default function ModelSettings({ serviceBusy, wide = false, onCheckCli }: { serviceBusy: boolean; wide?: boolean; onCheckCli?(): void }) {
+export default function ModelSettings({ serviceBusy, wide = false, onCheckCli, loginCommand }: { loginCommand?: string; serviceBusy: boolean; wide?: boolean; onCheckCli?(): void }) {
   const [catalog, setCatalog] = useState<ModelCatalog>();
   const [draft, setDraft] = useState({ model: "", reasoningEffort: "" });
   const [loading, setLoading] = useState(true);
@@ -60,7 +61,7 @@ export default function ModelSettings({ serviceBusy, wide = false, onCheckCli }:
   return <div className="model-settings" aria-busy={loading || verifying}>
     {wide ? <>
       <h3>选择创作模型</h3>
-      <div className="settings-model-feature"><span className="settings-symbol" aria-hidden="true">✳</span><div><strong>{current}</strong><small>{catalog?.selected ? `当前使用 · ${selected?.status === "verified" ? "已验证" : "待验证"}` : "待选择"}{catalog?.accountLabel ? ` / ${catalog.accountLabel}` : ""}</small></div></div>
+      <div className="settings-model-feature"><span className="settings-symbol" aria-hidden="true">✳</span><div><strong>{current}</strong><small>{catalog?.selected ? `当前使用 · ${selected?.status === "verified" ? "请求已验证" : "待验证"}` : "待选择"}{catalog?.accountLabel ? ` / ${catalog.accountLabel}` : ""}</small></div></div>
     </> : <><div className="model-heading">
       <h2>插件模型</h2>
       <button className="text-button" disabled={loading || verifying || serviceBusy} onClick={() => void act("alchemy:models-refresh")}>{loading ? "正在刷新…" : "刷新列表"}</button>
@@ -82,8 +83,9 @@ export default function ModelSettings({ serviceBusy, wide = false, onCheckCli }:
     <button className="primary" disabled={loading || verifying || serviceBusy || !draft.model} onClick={() => void act("alchemy:model-verify")}>
       {verifying ? "正在验证…" : "验证并使用"}
     </button>
-    <p className="fine model-status" role="status">{serviceBusy && !verifying ? "请等待正在执行的任务完成，再切换模型或推理强度。" : wide && !verifying ? "验证会消耗少量模型额度。" : verifying ? "正在发送简短请求，验证模型与推理强度。" : catalog?.selected ? `当前使用：${current}` : "验证会消耗少量模型额度。"}</p>
-    {(error || failure) && <div className="error" role="alert">{error || failure}</div>}
+    <p className="fine model-status" role="status">{serviceBusy && !verifying ? "请等待正在执行的任务完成，再切换模型或推理强度。" : wide && !verifying ? "验证文字请求会消耗少量额度；图片与生图能力在使用时检查。" : verifying ? "正在发送简短请求，验证模型与推理强度。" : catalog?.selected ? `当前使用：${current}` : "验证文字请求会消耗少量额度；图片与生图能力在使用时检查。"}</p>
+    {(error || failure) && <div className="error" role="alert">{error || failure} <RecoveryAction error={error || failure} currentSection="models" /></div>}
+    {/登录/.test(error || failure || "") && loginCommand && <div className="settings-detail"><p className="fine">在终端完成登录后，刷新模型列表：</p><code>{loginCommand}</code></div>}
     {wide && onCheckCli && <button className="secondary" onClick={onCheckCli}>检查 Codex 版本 →</button>}
   </div>;
 }

@@ -1,3 +1,4 @@
+import RecoveryAction from "./RecoveryAction";
 import { showMotionDialog } from "../../lib/motion-dialog";
 import ImageFileActions from "./ImageFileActions";
 import ImagePreview from "./ImagePreview";
@@ -140,7 +141,7 @@ export default function GenerationPanel({ targetGeneration, onTargetSelected, jo
     {!running && !busy && <Icon name="image" />}{running ? "生成中，完成后提醒" : busy ? "正在提交…" : generations.length ? "再生成一张" : "生成图片"}<Icon name="arrow" />
   </button>;
   const warning = (generic || incomplete) ? "请先上传主体图，生成专属提示词。" : !inputsReady ? multi ? "请添加至少 2 张可用的主体图。" : "请先上传可用的主体图。" : "";
-  const generationControls = <>{ratioControls}{generateButton}{workspace && warning && <p className="hint">{warning}</p>}{workspace && error && <p className="error" role="alert">{error}</p>}</>;
+  const generationControls = <>{ratioControls}{generateButton}{workspace && warning && <p className="hint">{warning}</p>}{workspace && error && <p className="error" role="alert">{error} <RecoveryAction error={error} /></p>}</>;
   const action = hideActions ? null : actionsTarget ? createPortal(generationControls, actionsTarget) : workspace ? generationControls : <>{ratioControls}<AsyncAction status={running?.stage || (busy ? "正在提交…" : undefined)} onCancel={running ? () => act(true) : undefined} cancelling={busy}>{generateButton}</AsyncAction></>;
   const dimensions = image && asset?.width && asset?.height ? <p className="generation-dimensions">{asset.width} × {asset.height} px · {imageRatio(asset.width, asset.height)}</p> : null;
   const caption = <div className="result-caption"><strong>{generation ? `版本 ${versionNumber} · ${generation.status === "completed" ? "图片" : "记录"} ${generations.indexOf(generation) + 1}` : "图片待生成"}</strong>{dimensions}</div>;
@@ -158,14 +159,15 @@ export default function GenerationPanel({ targetGeneration, onTargetSelected, jo
     </>}</div>
     {action}
     {!workspace && warning && <p className="result-notice">{warning}</p>}
-    {!workspace && error && <div className="error result-notice" role="alert">{error}</div>}
-    <div className="preview-canvas">{workspace && error && (image || running) && <p className="error result-request-error" role="alert">{error}</p>}{!workspace && !generation && inputPreview}{submitting ? workspace && drawerOpen ? <LoadingPlaceholder className="generation-submitting">正在提交生成请求…</LoadingPlaceholder> : null : image ? compare ? <div className="compare-images">
+    {!workspace && error && <div className="error result-notice" role="alert">{error} <RecoveryAction error={error} /></div>}
+    <div className="preview-canvas">{workspace && error && (image || running) && <p className="error result-request-error" role="alert">{error} <RecoveryAction error={error} /></p>}{!workspace && !generation && inputPreview}{submitting ? workspace && drawerOpen ? <LoadingPlaceholder className="generation-submitting">正在提交生成请求…</LoadingPlaceholder> : null : image ? compare ? <div className="compare-images">
       {comparisonInputs}
       <figure><ImagePreview data-reminder-task={drawerOpen ? generation?.id : undefined} src={image} alt="生成结果" /><figcaption>生成结果</figcaption></figure>
     </div> : <ImagePreview data-reminder-task={drawerOpen ? generation?.id : undefined} className="generation-result-preview" imageClassName="generation-result-image" src={image} alt={`${job.result!.title} · 生成结果`} /> : (generation?.status === "failed" || generation?.status === "cancelled" || imageError || error) ? <div className="empty-canvas">
       <Icon name="image" />
       <h3>{generation?.status === "failed" ? "图片生成失败" : generation?.status === "cancelled" ? "图片生成已取消" : "图片暂不可用"}</h3>
       <p data-reminder-task={drawerOpen && generation?.status === "failed" && !imageError && !error ? generation.id : undefined} role={generation?.status === "failed" || imageError ? "alert" : "status"}>{imageError || error || (generation?.status === "failed" ? generation.error || "请重新生成图片。" : "可以重新生成，或查看其他生成记录。")}</p>
+      <RecoveryAction error={imageError || error || generation?.error} />
       {workspace && <button className="outline-button" disabled={disabled || busy || !!running || !validRatio || generic || incomplete || !inputsReady} onClick={() => act()}>重新生成</button>}
     </div> : !GenerationEffect && generation?.status === "completed" ? <p role="status">正在读取生成图片…</p> : null}{GenerationEffect && drawerOpen && generation && !compare && !submitting && <GenerationEffect key={assetKey} running={generation.status === "running"} image={image}
       failed={generation.status === "failed" || generation.status === "cancelled" || !!imageError} />}</div>

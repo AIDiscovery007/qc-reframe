@@ -1,3 +1,4 @@
+import RecoveryAction from "./RecoveryAction";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { normalizeImage } from "../../lib/image";
 import { request } from "../../lib/client";
@@ -91,7 +92,7 @@ export default function QuickWorkspace({ revealPrompt, targetGeneration, context
     </div>
     <input ref={referenceFile} hidden type="file" accept="image/png,image/jpeg,image/webp" aria-label="上传参考图" onChange={e => { onReference(e.target.files?.[0]); e.target.value = ""; }} />
     <input ref={subjectFile} hidden type="file" accept="image/png,image/jpeg,image/webp" aria-label="上传主体图" onChange={e => { void uploadSubject(e.target.files?.[0]); e.target.value = ""; }} />
-    {(error || selection?.error || job?.error) && <p data-reminder-task={!error && job?.error && job.status === "failed" ? job.id : undefined} className="error" role="alert">{error || job?.error || selection?.error}</p>}
+    {(error || selection?.error || job?.error) && <p data-reminder-task={!error && job?.error && job.status === "failed" ? job.id : undefined} className="error" role="alert">{error || job?.error || selection?.error} <RecoveryAction error={error || job?.error || selection?.error} /></p>}
     {multi ? <div className="quick-handoff"><span>{mode === "session" ? "会话创作在工作台继续" : "多图编排在工作台继续"}</span><button className="primary" disabled={uploading} onClick={onWorkspace}>打开工作台<Icon name="arrow" /></button></div> : selection ? <div className="quick-compose">
       <textarea aria-label="任务指令" rows={2} value={instruction} disabled={locked} onChange={e => onInstruction(e.target.value)} />
       <div className="quick-submit"><span role="status">{status || (stale ? "输入已修改" : job?.status === "cancelled" ? "已取消" : "")}</span>{job?.status === "running" ? <button className="text-button" disabled={cancelling} onClick={onCancel}>{cancelling ? "正在取消…" : "取消"}</button> : <button className="primary" disabled={reverseDisabled || uploading} onClick={onReverse}>{job?.result ? "重新生成" : "生成提示词"}<Icon name="arrow" /></button>}</div>
@@ -136,7 +137,7 @@ function QuickResult({ targetGeneration, job, lang, subject, disabled, hint, onS
   };
   return <section className="quick-result" aria-label="当前生图结果"><div className="quick-result-head"><strong>生成结果</strong><button className="text-button" onClick={onWorkspace}>工作台查看<Icon name="arrow" /></button></div>
     {asset?.key === key && generation?.status === "completed" ? <ImagePreview data-reminder-task={generation.id} src={asset.image} alt="当前生成结果" /> : generation ? <p data-reminder-task={generation.status === "failed" ? generation.id : undefined} role="status">{generation?.status === "running" ? generation?.stage || "正在生成图片…" : generation?.status === "failed" ? "图片生成失败" : generation?.status === "cancelled" ? "图片生成已取消" : "正在读取结果…"}</p> : null}
-    {(error || generation?.error) && <p className="error" role="alert">{error || generation?.error}</p>}
+    {(error || generation?.error) && <p className="error" role="alert">{error || generation?.error} <RecoveryAction error={error || generation?.error} /></p>}
     {!running && job.mode !== "multi-reenact" && (generic || incomplete || !inputsReady || hint) && <p className="quick-generation-hint" role="status">{!inputsReady ? <>先添加主体图 <button className="text-button" onClick={onSubject}>上传主体</button></> : generic || incomplete ? <>需要专属提示词 <button className="text-button" onClick={onReverse}>重新逆向</button></> : hint}</p>}
     {generation?.status === "running" ? <button className="text-button" disabled={cancelling} onClick={() => void act(true)}>{cancelling ? "正在取消…" : "取消生图"}</button> : job.mode !== "multi-reenact" && <button className="primary" disabled={disabled || cancelling || generic || incomplete || !inputsReady} onClick={() => void act(false)}>{cancelling ? "正在提交…" : "生成图片"}<Icon name="arrow" /></button>}
   </section>;

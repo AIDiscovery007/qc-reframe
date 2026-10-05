@@ -127,12 +127,57 @@ test("doctor stays strict while startup permits managing missing and logged-out 
   await assert.rejects(run("doctor"), error => /找不到 Codex CLI/.test(error.stderr));
   await writeFile(env.CODEX_BIN, '#!/usr/bin/env node\nconsole.log("codex-cli test");if(process.argv[2]==="login")process.exit(1);\n');
   await assert.rejects(run("doctor"), error => /尚未登录/.test(error.stderr));
-  assert.match((await run("start")).stderr, /仅启动本机管理服务/);
+  assert.match((await run("start")).stderr, /CLI 待处理/);
   assert.equal(JSON.parse((await run("status")).stdout).ready, true);
   await run("stop");
   await rm(env.CODEX_BIN);
   assert.match((await run("start")).stderr, /找不到 Codex CLI/);
   assert.equal(JSON.parse((await run("status")).stdout).ready, true);
+});
+
+for (const issue of ["missing", "logged-out", "old"]) test(`fresh setup builds with ${issue} CLI and preserves its configured path and user data`, { skip: process.platform === "win32" }, async t => {
+  const { dir, env, run, installRoot } = await installation(t, true);
+  await rm(join(installRoot, ".output"), { recursive: true });
+  env.CODEX_BIN = join(dir, "user's codex $(unused)");
+  if (issue !== "missing") await writeFile(env.CODEX_BIN, `#!/usr/bin/env node\nconsole.log("codex-cli 0.1.0");if(process.argv[2]===${JSON.stringify(issue === "logged-out" ? "login" : "app-server")})process.exit(1);\n`, { mode: 0o700 });
+  const error = issue === "missing" ? /找不到 Codex CLI/ : issue === "logged-out" ? /尚未登录/ : /不支持 app-server/;
+  await assert.rejects(run("doctor"), result => error.test(result.stderr));
+  env.npm_execpath = join(dir, "fake-npm.mjs");
+  await writeFile(env.npm_execpath, `import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+appendFileSync('npm-calls.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n');
+if (process.argv[2] === 'run') {
+  mkdirSync('.output/chrome-mv3', { recursive: true });
+  writeFileSync('.output/chrome-mv3/manifest.json', JSON.stringify({ version: JSON.parse(readFileSync('package.json')).version }));
+}
+`);
+  await mkdir(join(dir, "config"), { recursive: true });
+  await writeFile(join(dir, "config/token"), "preserved-pairing");
+  await writeFile(join(dir, "preserved-note.txt"), "user data");
+  const result = await run("setup");
+  assert.match(result.stderr, error);
+  assert.match(result.stderr, /启动并配对后.*设置中心/);
+  const quoted = `'${env.CODEX_BIN.replaceAll("'", "'\"'\"'")}'`;
+  assert.ok(result.stderr.includes(issue === "logged-out" ? `${quoted} login` : issue === "old" ? `${quoted} --version` : quoted));
+  assert.deepEqual((await readFile(join(installRoot, "npm-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line)), [["ci"], ["run", "build"]]);
+  assert.equal(JSON.parse(await readFile(join(dir, "config/runtime.json"), "utf8")).CODEX_BIN, env.CODEX_BIN);
+  assert.match((await run("start")).stdout, /后台启动/);
+  assert.equal((await run("pair")).stdout.trim(), "preserved-pairing");
+  assert.equal(await readFile(join(dir, "preserved-note.txt"), "utf8"), "user data");
+});
+
+for (const issue of ["node", "skill"]) test(`maintenance setup still rejects invalid ${issue} before invoking npm`, { skip: process.platform === "win32" }, async t => {
+  const { dir, env, run } = await installation(t);
+  env.npm_execpath = join(dir, "npm-must-not-run.mjs");
+  await writeFile(env.npm_execpath, 'throw new Error("npm must not run");');
+  if (issue === "skill") {
+    env.ALCHEMY_SKILL_PATH = join(dir, "invalid-skill.md");
+    await writeFile(env.ALCHEMY_SKILL_PATH, "name: wrong-skill");
+  } else {
+    const preload = join(dir, "old-node.cjs");
+    await writeFile(preload, 'Object.defineProperty(process.versions, "node", { value: "22.14.0" });');
+    env.NODE_OPTIONS = `--require=${JSON.stringify(preload)}`;
+  }
+  await assert.rejects(run("setup"), result => (issue === "skill" ? /Alchemy skill 缺失或名称不匹配/ : /需要 Node.js 22.15/).test(result.stderr) && !result.stderr.includes("npm must not run"));
 });
 
 test("managed shutdown requires authentication and refuses while a model task is active", async t => {

@@ -19,6 +19,7 @@ async function executable(path) {
   return path;
 }
 const tick = () => new Promise(resolve => setTimeout(resolve, 5));
+const compatibility = { snapshot: () => ({ features: {} }), async getCompatibility() { return this.snapshot(); } };
 async function settled(manager) {
   for (let i = 0; i < 100 && manager.busy; i++) await tick();
   assert.equal(manager.busy, false);
@@ -129,15 +130,81 @@ test("standalone checks use the official stable release and reject draft or inva
     await assert.rejects(latestRelease("standalone", fetcher(body)), /版本号/);
 });
 
-test("manual detection records completion even for sources without an update provider", async () => {
+test("unmanaged installations compare stable CLI versions without allowing automatic updates", async () => {
   let time = Date.now();
-  const manager = createCliManager({ now: () => time, inspect: async () => ({ installed: true, version: "0.1.0", source: "custom", executable: "/custom/codex" }), latest: () => assert.fail("custom installation must not query releases") });
+  const manager = createCliManager({ now: () => time, inspect: async () => ({ installed: true, version: "0.1.0", source: "custom", executable: "/custom/codex" }), latest: async () => "0.2.0" });
   const before = await manager.check();
   time += 1000;
   const after = await manager.check();
   assert.notEqual(before.detectedAt, after.detectedAt);
-  assert.equal(after.checkedAt, undefined);
+  assert.ok(after.checkedAt);
+  assert.equal(after.updateAvailable, true);
+  assert.equal(after.comparisonReference, "npm-stable");
+  assert.equal(after.instructions.loginCommand, "'/custom/codex' login");
+  assert.equal(after.command, null);
   assert.equal(after.canUpdate, false);
+  await assert.rejects(manager.update());
+});
+
+test("upgrade waits for follow-up checks and distinguishes their failure from installation failure", async () => {
+  let rejectRefresh;
+  const { manager } = mockManager({ onUpdated: () => new Promise((_, reject) => { rejectRefresh = reject; }) });
+  await manager.update();
+  await tick();
+  assert.equal(manager.busy, true);
+  assert.equal((await manager.status()).operation.status, "running");
+  rejectRefresh(new Error("model catalog unavailable"));
+  const result = await settled(manager);
+  assert.equal(result.version, "0.2.0");
+  assert.equal(result.operation.status, "failed");
+  assert.equal(result.operation.stage, "Codex 已升级，复检未完成");
+  assert.match(result.operation.error, /model catalog unavailable/);
+});
+
+test("partial installations always settle with synchronous or rejecting follow-up callbacks", async () => {
+  for (const onUpdated of [() => {}, () => { throw new Error("reset failed"); }, async () => { throw new Error("refresh failed"); }]) {
+    const partial = mockManager({ run: async () => { partial.setVersion("0.1.5"); throw new Error("install failed"); }, onUpdated });
+    await partial.manager.update();
+    const result = await settled(partial.manager);
+    assert.equal(result.operation.status, "failed");
+    assert.match(result.operation.error, /install failed/);
+    assert.ok(result.operation.finishedAt);
+  }
+});
+
+test("only explicit rechecks clear finished upgrade results and preserve a new check error", async () => {
+  let time = Date.now(), offline = false;
+  const { manager } = mockManager({ now: () => time, run: async () => { throw new Error("install failed"); },
+    latest: async () => { if (offline) throw new Error("offline"); return "0.2.0"; } });
+  await manager.update();
+  assert.equal((await settled(manager)).operation.status, "failed");
+  time += 86_400_001;
+  await manager.status();
+  await tick();
+  assert.equal((await manager.status()).operation.status, "failed", "background checks retain upgrade history");
+  assert.equal((await manager.check()).operation, undefined, "explicit successful check clears the stale failure");
+  await manager.update();
+  await settled(manager);
+  offline = true;
+  const result = await manager.check();
+  assert.equal(result.operation, undefined);
+  assert.match(result.checkError, /检查更新失败/);
+});
+
+test("a concurrent manual check cannot clear an upgrade started by its shared precheck", async () => {
+  let releaseCheck, releaseUpdate;
+  const { manager, setVersion } = mockManager({ latest: () => new Promise(resolve => { releaseCheck = resolve; }),
+    run: async () => { await new Promise(resolve => { releaseUpdate = resolve; }); setVersion("0.2.0"); } });
+  const update = manager.update();
+  await tick();
+  const check = manager.check();
+  releaseCheck("0.2.0");
+  await Promise.all([update, check]);
+  assert.equal((await manager.status()).operation.status, "running");
+  assert.equal(manager.busy, true);
+  assert.equal((await manager.check()).operation.status, "running", "checking during an update leaves it intact");
+  releaseUpdate();
+  assert.equal((await settled(manager)).operation.status, "completed");
 });
 
 test("Homebrew detection proves the Caskroom prefix and only runs the matching brew", { skip: process.platform === "win32" }, async t => {
@@ -200,7 +267,7 @@ test("CLI routes authenticate, reject command injection, serialize against tasks
   const { manager: cli, setVersion } = mockManager({ run: async () => { await new Promise(resolve => { releaseUpdate = resolve; }); setVersion("0.2.0"); } });
   let modelBusy = true;
   const models = { get busy() { return modelBusy; }, selectedModel: null, close() {} };
-  const app = await createBridge({ dataDir: dir, models, cli, allowShutdown: true });
+  const app = await createBridge({ dataDir: dir, models, cli, compatibility, allowShutdown: true });
   app.server.listen(0, "127.0.0.1");
   await once(app.server, "listening");
   t.after(async () => { releaseUpdate?.(); app.server.closeAllConnections(); await new Promise(resolve => app.server.close(resolve)); });
@@ -218,6 +285,70 @@ test("CLI routes authenticate, reject command injection, serialize against tasks
   assert.equal((await fetch(url + "/models", { headers })).status, 409);
   releaseUpdate();
   assert.equal((await settled(cli)).operation.status, "completed");
+});
+
+test("health stays responsive during CLI discovery and exposes the cached independent CLI state", async t => {
+  const dir = await directory(t);
+  let releaseDiscovery, checks = 0;
+  const cli = createCliManager({ inspect: () => new Promise(resolve => { releaseDiscovery = resolve; }), latest: async () => { checks++; return "0.2.0"; } });
+  const app = await createBridge({ dataDir: dir, cli, compatibility, models: { close() {} } });
+  app.server.listen(0, "127.0.0.1");
+  await once(app.server, "listening");
+  t.after(async () => { app.server.closeAllConnections(); await new Promise(resolve => app.server.close(resolve)); });
+  const url = `http://127.0.0.1:${app.server.address().port}/health`;
+  const headers = { Authorization: `Bearer ${app.token}` };
+  const pending = await (await fetch(url, { headers })).json();
+  assert.equal(pending.serviceReady, true);
+  assert.equal(pending.skillReady, pending.ready);
+  assert.equal(pending.cli, null);
+  releaseDiscovery({ installed: true, version: "0.1.0", source: "custom", executable: "/custom/codex" });
+  await tick();
+  const ready = await (await fetch(url, { headers })).json();
+  assert.equal(ready.cli.version, "0.1.0");
+  assert.equal(ready.cli.updateAvailable, true);
+  assert.equal(checks, 1);
+  await fetch(url, { headers });
+  assert.equal(checks, 1);
+});
+
+test("bridge upgrade wiring awaits model reset and resets sessions after refresh failure", { skip: process.platform === "win32" }, async t => {
+  const dir = await directory(t);
+  const prefix = join(dir, "fake-prefix"), bin = join(prefix, "bin");
+  const packageRoot = join(prefix, "lib/node_modules/@openai/codex");
+  const binary = await executable(join(packageRoot, "bin/codex.js"));
+  const script = version => `#!${process.execPath}\nconsole.log('codex-cli ${version}');\n`;
+  await writeFile(binary, script("0.1.0"));
+  await mkdir(bin, { recursive: true });
+  await symlink(binary, join(bin, "codex"));
+  await symlink(process.execPath, join(bin, "node"));
+  await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "@openai/codex" }));
+  await writeFile(join(bin, "npm"), `#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nif (process.argv[2] === 'prefix') console.log(${JSON.stringify(prefix)}); else writeFileSync(${JSON.stringify(binary)}, ${JSON.stringify(script("0.2.0"))});\n`, { mode: 0o700 });
+  const previous = process.env.CODEX_BIN, fetchOriginal = globalThis.fetch;
+  process.env.CODEX_BIN = join(bin, "codex");
+  t.after(() => { if (previous === undefined) delete process.env.CODEX_BIN; else process.env.CODEX_BIN = previous; });
+  t.mock.method(globalThis, "fetch", (url, options) => String(url).startsWith("https://registry.npmjs.org/")
+    ? Promise.resolve({ ok: true, json: async () => ({ version: "0.2.0" }) }) : fetchOriginal(url, options));
+  let rejectRefresh, resets = 0;
+  const app = await createBridge({ dataDir: join(dir, "data"), compatibility, models: { reset: () => new Promise((_, reject) => { rejectRefresh = reject; }), close() {} },
+    sessions: { resetReader() { resets++; }, close() {} } });
+  app.server.listen(0, "127.0.0.1");
+  await once(app.server, "listening");
+  t.after(async () => { app.server.closeAllConnections(); await new Promise(resolve => app.server.close(resolve)); });
+  const url = `http://127.0.0.1:${app.server.address().port}`, headers = { Authorization: `Bearer ${app.token}`, "Content-Type": "application/json" };
+  assert.equal((await fetch(url + "/cli/update", { method: "POST", headers, body: "{}" })).status, 202);
+  for (let i = 0; i < 100 && !rejectRefresh; i++) await tick();
+  assert.ok(rejectRefresh);
+  assert.equal((await (await fetch(url + "/cli/status", { headers })).json()).operation.status, "running");
+  rejectRefresh(new Error("catalog unavailable"));
+  let result;
+  for (let i = 0; i < 200; i++) {
+    result = await (await fetch(url + "/cli/status", { headers })).json();
+    if (result.operation.status !== "running") break;
+    await tick();
+  }
+  assert.equal(result.operation.status, "failed");
+  assert.equal(result.operation.stage, "Codex 已升级，复检未完成");
+  assert.equal(resets, 1);
 });
 
 test("replacing a CLI at the same path invalidates existing account/model context", async t => {

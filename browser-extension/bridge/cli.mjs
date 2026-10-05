@@ -117,15 +117,23 @@ export async function latestRelease(source, fetcher = fetch) {
 
 export function createCliManager({ inspect = inspectCodex, run = runCliCommand, latest = latestRelease, onUpdated = async () => {}, now = Date.now } = {}) {
   let installation, inspectedAt = 0, inspection, checking, checkedAt, latestVersion = null, checkError, operation, controller, lastAttempt = 0, closed = false;
-  const view = () => ({ installed: installation?.installed || false, version: installation?.version || null,
+  const view = () => {
+    const command = !installation?.manager ? null : installation.source === "standalone" ? `${quote(installation.executable)} update` : installation.source === "homebrew"
+      ? `${quote(installation.manager)} update && ${quote(installation.manager)} upgrade --cask codex`
+      : `${quote(installation.manager)} install --global --prefix ${quote(installation.prefix)} @openai/codex@latest --registry=https://registry.npmjs.org`;
+    return { installed: installation?.installed || false, version: installation?.version || null,
     executable: installation?.executable || null, source: installation?.source || "missing", reason: installation?.reason,
     detectedAt: inspectedAt ? new Date(inspectedAt).toISOString() : null,
-    command: !installation?.manager ? null : installation.source === "standalone" ? `${quote(installation.executable)} update` : installation.source === "homebrew"
-      ? `${quote(installation.manager)} update && ${quote(installation.manager)} upgrade --cask codex`
-      : `${quote(installation.manager)} install --global --prefix ${quote(installation.prefix)} @openai/codex@latest --registry=https://registry.npmjs.org`,
+    command,
+    comparisonReference: ["app", "custom"].includes(installation?.source) ? "npm-stable" : undefined,
+    instructions: { url: "https://developers.openai.com/codex/cli/", ...(command ? { command } : {}),
+      ...(installation?.executable ? { loginCommand: `${quote(installation.executable)} login` } : {}),
+      message: installation?.source === "app" ? "请通过桌面 App 检查更新。稳定版 CLI 仅供版本比较，不代表此 App 可升级。"
+        : installation?.reason || "使用当前安装来源升级后，重新检查并验证模型。" },
     latestVersion, checkedAt, checkError, updateAvailable: newerVersion(latestVersion, installation?.version),
     canUpdate: !!installation?.manager && !!installation.version && newerVersion(latestVersion, installation.version) && !controller,
-    operation });
+    operation };
+  };
   const discover = async (force = false) => {
     if (!force && installation && now() - inspectedAt < 10_000) return;
     inspection ||= inspect().then(next => {
@@ -136,21 +144,25 @@ export function createCliManager({ inspect = inspectCodex, run = runCliCommand, 
   };
   const check = async (rediscover = true) => {
     if (controller || closed) return view();
+    const previousOperation = operation;
     checking ||= (async () => {
       if (rediscover) await discover(true);
-      if (!installation.manager) return view();
+      if (!installation.installed || !installation.version) return view();
       lastAttempt = now();
       try { latestVersion = await latest(installation.source); checkedAt = new Date().toISOString(); checkError = undefined; }
       catch { checkError = "检查更新失败，请检查网络后重试。"; latestVersion = null; }
       return view();
     })().finally(() => { checking = undefined; });
-    return checking;
+    await checking;
+    if (rediscover && !controller && operation === previousOperation && operation?.status !== "running") operation = undefined;
+    return view();
   };
   return {
     get busy() { return !!controller; },
+    peek: () => installation ? view() : null,
     async status() {
       if (!controller) await discover();
-      if (!closed && !controller && installation?.manager && (!lastAttempt || now() - lastAttempt >= 86_400_000)) void check(false);
+      if (!closed && !controller && installation?.installed && installation.version && (!lastAttempt || now() - lastAttempt >= 86_400_000)) void check(false).catch(() => {});
       return view();
     },
     check,
@@ -165,7 +177,7 @@ export function createCliManager({ inspect = inspectCodex, run = runCliCommand, 
       const signal = controller.signal, target = { ...installation }, requestedVersion = latestVersion;
       operation = { status: "running", stage: "正在升级 Codex…", startedAt: new Date().toISOString() };
       void (async () => {
-        let refreshStarted = false;
+        let refreshStarted = false, upgraded = false;
         try {
           const options = { env: target.managerEnv, signal, timeout: 10 * 60_000 };
           if (target.source === "standalone") await run(target.executable, ["update"], options);
@@ -177,14 +189,19 @@ export function createCliManager({ inspect = inspectCodex, run = runCliCommand, 
           await discover(true);
           if (installation.executable !== target.executable || installation.source !== target.source || !installation.version || newerVersion(requestedVersion, installation.version) || installation.version === target.version)
             throw new Error("升级后的 Codex 路径或版本不符合预期，请检查原安装；未切换到其他 CLI。");
+          upgraded = true;
           refreshStarted = true;
           await onUpdated();
           operation = { ...operation, status: "completed", stage: "升级完成，请重新验证模型。", finishedAt: new Date().toISOString() };
         } catch (error) {
           // Package managers can fail after replacing files; discard model trust in that case too.
           await discover(true).catch(() => {});
-          if (!refreshStarted && (installation?.version !== target.version || installation?.executable !== target.executable)) await onUpdated().catch(() => {});
-          operation = { ...operation, status: "failed", stage: "升级未完成", error: error.message, finishedAt: new Date().toISOString() };
+          let recoveryError;
+          if (!refreshStarted && (installation?.version !== target.version || installation?.executable !== target.executable)) {
+            try { await onUpdated(); } catch (failure) { recoveryError = failure; }
+          }
+          operation = { ...operation, status: "failed", stage: upgraded ? "Codex 已升级，复检未完成" : "升级未完成",
+            error: `${error.message}${recoveryError ? `；复检失败：${recoveryError.message}` : ""}`, finishedAt: new Date().toISOString() };
         } finally { controller = undefined; }
       })();
       return view();

@@ -259,11 +259,11 @@ test('live workspace handoff merges drafts, routes settings/tasks, and ignores s
     },
     setSelection: value => state.selections.push(value), setProject() {}, setProjectMode: (_id, mode) => { state.mode = mode; },
     setInputRevisions: setter('inputRevisions'), setInstructions: setter('instructions'), setVersions: setter('versions'), setSubjectDrafts: setter('subjects'), setMultiSubjectDrafts: setter('multi'), setPromptDrafts: setter('prompts'), setLang() {},
-    setSettings: setter('settings'), setTasksOpen: setter('tasks'), setNewProjectOpen() {}, setHistoryOpen() {}, setGalleryOpen() {},
+    setSettings: setter('settings'), setSettingsSection: setter('section'), setTasksOpen: setter('tasks'), setNewProjectOpen() {}, setHistoryOpen() {}, setGalleryOpen() {},
     setError: value => { if (value) assert.fail(value); },
   }, ['navigateHandoff', 'navigateReminder']);
-  await ui.navigateHandoff(new URLSearchParams({ handoff: 'one', view: 'settings' }));
-  assert.equal(state.settings, true); assert.equal(state.tasks, false); assert.equal(state.mode, 'reenact');
+  await ui.navigateHandoff(new URLSearchParams({ handoff: 'one', view: 'settings', section: 'models' }));
+  assert.equal(state.settings, true); assert.equal(state.section, 'models'); assert.equal(state.tasks, false); assert.equal(state.mode, 'reenact');
   assert.equal(state.selections.at(-1).image, 'reference-image');
   assert.equal(state.selections.at(-1).error, undefined);
   assert.equal(state.inputRevisions.project, 0);

@@ -1,3 +1,4 @@
+import RecoveryAction from "../popup/RecoveryAction";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Mode, MultiSubject } from "../../lib/types";
 import { normalizeImage } from "../../lib/image";
@@ -165,7 +166,7 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
         <TaskInstruction value={instruction} disabled={disabled || uploading || promptEditing} onChange={onInstruction} />
         <div className="canvas-composer-bar">
         {hasPrompt && <button ref={trigger} className="quiet-button canvas-prompt-link" aria-label={sheetOpen ? "收起提示词" : "展开提示词"} aria-expanded={sheetOpen} aria-controls="workspace-prompt-sheet" onClick={() => { setSettings(false); setOpen(true); }}><Icon name={sheetOpen ? "chevronDown" : "edit"} /><span>{sheetOpen ? "收起" : "提示词"}</span><i className={stale ? "canvas-stale-dot" : "canvas-ready-dot"} /></button>}
-          <span data-reminder-task={!uploadError && error ? errorTaskId : undefined} className={uploadError || error ? "canvas-error" : ""} role={uploadError || error ? "alert" : "status"} title={uploadError || error || status}>{uploadError || error || (uploading ? "正在读取图片…" : status || (stale ? "提示词待更新" : ""))}{onRetryReference && <button className="text-button" onClick={onRetryReference}>重试</button>}</span>
+          <span data-reminder-task={!uploadError && error ? errorTaskId : undefined} className={uploadError || error ? "canvas-error" : ""} role={uploadError || error ? "alert" : "status"} title={uploadError || error || status}>{uploadError || error || (uploading ? "正在读取图片…" : status || (stale ? "提示词待更新" : ""))}<RecoveryAction error={uploadError || error} />{onRetryReference && <button className="text-button" onClick={onRetryReference}>重试</button>}</span>
           {mode === "style" && subjectImage && <button className="quiet-button canvas-generic" disabled={locked || promptEditing || !instruction.trim()} title="不使用主体图，仅提取通用风格" onClick={onExtract}>仅提取风格</button>}
           <button className="quiet-button canvas-editor-expand" aria-expanded={editorExpansion.expanded} onClick={event => editorExpansion.toggle(event.detail === 0)}>{editorExpansion.expanded ? "收起编辑" : "放大指令"}</button>
           <button ref={generate} className="primary canvas-generate" disabled={running ? cancelling : reverseDisabled || uploading} aria-busy={running} onClick={running ? onCancel : onReverse}><Icon name={running ? "close" : hasPrompt ? "retry" : "edit"} />{running ? cancelling ? "正在取消…" : "取消" : hasPrompt ? stale ? "更新提示词" : "重新生成" : "生成提示词"}{!running && <Icon name="arrow" />}</button>

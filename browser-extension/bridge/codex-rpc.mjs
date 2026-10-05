@@ -1,3 +1,4 @@
+import { codexRpcError } from "./errors.mjs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { readFile } from "node:fs/promises";
@@ -38,7 +39,7 @@ export async function withCodex({ cwd, signal, onNotification = () => {}, timeou
   const abort = () => stop(new Error("任务已取消"));
   signal?.addEventListener("abort", abort, { once: true });
   const timeout = setTimeout(() => stop(new Error("Codex 请求超时，请重试")), timeoutMs);
-  proc.on("error", (error) => stop(new Error(`无法启动 Codex：${error.message}。请安装并登录 Codex CLI。`)));
+  proc.on("error", (error) => stop(Object.assign(new Error("无法启动 Codex CLI，请在设置中心检查安装路径与执行权限。"), { code: error.code, recovery: "cli" })));
   proc.stdin.on("error", stop);
   // Do not forward stderr: third-party providers may include credentials in logs.
   proc.stderr.resume();
@@ -52,7 +53,7 @@ export async function withCodex({ cwd, signal, onNotification = () => {}, timeou
     if (waiting && !message.method) {
       clearTimeout(waiting.timer);
       pending.delete(message.id);
-      if (message.error) waiting.reject(Object.assign(new Error(message.error.message), { code: message.error.code }));
+      if (message.error) waiting.reject(codexRpcError(message.error, waiting.method));
       else {
         if (waiting.method === "thread/start" && message.result?.thread?.id)
           registered.set(message.result.thread.id, new Set((waiting.params.dynamicTools || []).map(tool => tool.name)));
