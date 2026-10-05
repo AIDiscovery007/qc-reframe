@@ -60,17 +60,31 @@ test("local Codex session listing is extension-only and cannot use generic query
   const workspace = { id: "test", url: "chrome-extension://test/workspace.html" };
   const content = { id: "test", frameId: 0, url: "https://pinterest.com/", tab: { id: 4 } };
   const send = (message, sender = workspace) => new Promise(resolve => handlers.message(message, sender, resolve));
-  const message = { type: "alchemy:sessions-list", searchTerm: "小说", archived: true, cursor: "next-page", token: "forged", path: "/private", transcript: "forged body" };
+  const message = { type: "alchemy:sessions-list", searchTerm: "小说", archived: true, cursor: "next-page", scope: "content", token: "forged", path: "/private", transcript: "forged body" };
   for (const sender of [content, { ...content, frameId: 1 }, { ...workspace, id: "other" }, { ...workspace, url: "chrome-extension://test.evil/workspace.html" }, { id: "test" }])
     assert.equal(handlers.message(message, sender, () => assert.fail("untrusted session listing reply")), undefined);
   assert.equal(calls.length, 0);
   for (const sender of [workspace, { ...workspace, url: "chrome-extension://test/popup.html" }])
     assert.equal((await send(message, sender)).ok, true);
   assert.ok(calls.every(call => call.url.endsWith("/sessions/list") && call.options.headers.Authorization === "Bearer test"));
-  assert.deepEqual(JSON.parse(calls[0].options.body), { searchTerm: "小说", archived: true, cursor: "next-page" });
+  assert.deepEqual(JSON.parse(calls[0].options.body), { searchTerm: "小说", archived: true, cursor: "next-page", scope: "content" });
   for (const sender of [workspace, content]) for (const path of ["/sessions", "/sessions/list", "/sessions/known-session", "/jobs/../sessions/list"])
     assert.match((await send({ type: "alchemy:query", path }, sender)).error, /无效/);
   assert.equal(calls.length, 2, "generic query cannot bypass the dedicated session source check");
+});
+
+test("local index operations are extension-only and strip client paths and content", async () => {
+  const calls = [];
+  const { handlers } = await background(async (url, options) => { calls.push({ url, options }); return { ok: true, json: async () => ({ state: "building" }) }; });
+  const workspace = { id: "test", url: "chrome-extension://test/workspace.html" };
+  const content = { id: "test", frameId: 0, url: "https://pinterest.com/", tab: { id: 4 } };
+  const message = { type: "alchemy:sessions-index", action: "refresh", path: "/private", text: "forged" };
+  assert.equal(handlers.message(message, content, () => assert.fail("untrusted index reply")), undefined);
+  const result = await new Promise(resolve => handlers.message(message, workspace, resolve));
+  assert.equal(result.ok, true); assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.endsWith("/sessions/index")); assert.deepEqual(JSON.parse(calls[0].options.body), { action: "refresh" });
+  const rejected = await new Promise(resolve => handlers.message({ type: "alchemy:query", path: "/sessions/index" }, content, resolve));
+  assert.match(rejected.error, /无效/); assert.equal(calls.length, 1);
 });
 
 test("session input and reverse messages forward chosen IDs with persisted reference and revision only", async () => {

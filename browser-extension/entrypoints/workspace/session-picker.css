@@ -3,7 +3,16 @@
 .session-entry span { overflow:hidden;text-overflow:ellipsis; }
 .app .session-picker { width:min(620px,calc(100% - 32px));height:fit-content;max-height:85dvh; }
 .session-picker-body { display:flex;flex-direction:column;min-height:0;padding:4px 24px 20px;overflow:hidden; }
-.session-picker-body > input { flex:none;width:100%;height:38px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface); }
+.session-search { display:flex;flex:none;gap:8px; }
+.session-search input, .session-search select { min-width:0;height:38px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:inherit;font:inherit;font-size:12px; }
+.session-search input { flex:1;width:100%; }
+.session-search select { flex:none;max-width:132px; }
+.session-index { flex:none;margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:11px;color:var(--muted); }
+.session-index p { line-height:1.5; }
+.session-index-actions { display:flex;align-items:center;gap:12px;margin-top:6px; }
+.session-index-actions span { margin-left:auto; }
+.session-index .text-button { font-size:11px; }
+.session-index .error { margin-top:6px; }
 .app .session-picker-body .hint { flex:none;margin:10px 0 12px; }
 .session-selected { flex:none;margin-bottom:16px;padding:12px;background:var(--surface-muted);border:1px solid var(--line);border-radius:10px; }
 .session-selected h3, .session-picker-body .session-candidates-title { font-size:12px;font-weight:600; }
@@ -23,6 +32,7 @@
 .session-row.session-selected-row { flex-wrap:nowrap;gap:8px;min-height:30px;padding:4px 6px;border:0; }
 .session-selected-row strong { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:400; }
 .session-row small { display:block;margin-top:6px;font-size:11px;color:var(--muted); }
+.session-row .session-snippet { display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;line-height:1.5; }
 .session-row time { font-size:10px;color:var(--muted);white-space:nowrap; }
 .session-picker-footer { display:flex;flex:none;align-items:center;gap:10px;padding:16px 24px;border-top:1px solid var(--line); }
 .session-picker-footer > span { flex:1;font-size:11px;color:var(--muted); }

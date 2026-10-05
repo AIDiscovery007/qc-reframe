@@ -24,7 +24,7 @@ function picker(props = {}) {
   const jsx = (type, props) => ({ type, props });
   runInNewContext(code, { exports, AbortController, Map, setTimeout: fn => { timers.add(fn); return fn; }, clearTimeout: fn => timers.delete(fn),
     require: name => name === 'react' ? react : name === 'react/jsx-runtime' ? { jsx, jsxs: jsx }
-      : name.endsWith('/client') ? { request: (message, signal) => new Promise(resolve => requests.push({ message, signal, resolve })) }
+      : name.endsWith('/client') ? { request: (message, signal) => new Promise((resolve, reject) => requests.push({ message, signal, resolve, reject })) }
       : name.endsWith('/motion-dialog') ? { showMotionDialog: () => () => {} } : name.endsWith('/brand') ? { logo: '' } : { default: () => null },
   });
   const render = () => { index = 0; tree = exports.default({ value: [], onConfirm: async () => {}, onClose() {}, ...props }); effects.splice(0).forEach(fn => fn()); return tree; };
@@ -32,13 +32,15 @@ function picker(props = {}) {
   render();
   return { requests, render, flushTimers() { const queued = [...timers]; timers.clear(); queued.forEach(fn => fn()); },
     search(value) { nodes(tree).find(node => node.props?.['aria-label'] === '搜索会话').props.onChange({ target: { value } }); render(); },
+    scope(value) { nodes(tree).find(node => node.props?.['aria-label'] === '搜索范围').props.onChange({ target: { value } }); render(); },
     selected: () => nodes(nodes(tree).find(node => node.props?.className === 'session-selected')).filter(node => node.props?.['data-session-id']).map(node => node.props['data-session-id']),
     candidates: () => nodes(nodes(tree).find(node => node.props?.className === 'session-candidates')).filter(node => node.props?.['data-session-id']),
     toggle(id) { const input = nodes(tree).find(node => node.props?.['data-session-id'] === id); assert.ok(input); assert.ok(!input.props.disabled); input.props.onChange(); render(); },
     archive(checked) { nodes(tree).find(node => node.type === 'input' && node.props.type === 'checkbox' && !node.props['data-session-id']).props.onChange({ target: { checked } }); render(); },
-    click(text) { nodes(tree).find(node => node.type === 'button' && nodes(node).includes(text)).props.onClick(); render(); },
+    click(text) { const button = nodes(tree).find(node => node.type === 'button' && nodes(node).includes(text)); assert.ok(button && !button.props.disabled); button.props.onClick(); render(); },
     cancel() { tree.props.onCancel({ preventDefault() {} }); render(); },
-    disabled: () => nodes(tree).filter(node => ['input', 'button'].includes(node.type)).every(node => node.props.disabled),
+    disabled: () => nodes(tree).filter(node => ['input', 'button', 'select'].includes(node.type)).every(node => node.props.disabled),
+    selectedText: () => nodes(nodes(tree).find(node => node.props?.className === 'session-selected')).filter(node => typeof node === 'string').join(' '),
     text: () => nodes(tree).filter(node => typeof node === 'string').join(' '),
     unmount() { hooks.forEach(hook => hook?.cleanup?.()); },
   };
@@ -105,5 +107,125 @@ test('cancel discards draft changes without mutating the provided selection', as
   const view = picker({ value, onConfirm: async () => { saved = true; }, onClose: () => closed++ });
   view.flushTimers(); await respond(view, [row('b')]); view.toggle('b'); view.toggle('a'); view.click('取消');
   assert.deepEqual(value.map(item => item.id), ['a']); assert.equal(saved, false); assert.equal(closed, 1);
+  view.unmount();
+});
+
+const indexStatus = (state, indexed = 0) => ({ state, indexed, total: 8, failed: state === 'partial' ? 2 : 0, updatedAt: state === 'empty' ? null : 1 });
+async function answer(view, result) { view.requests.at(-1).resolve(result); await flush(); view.render(); }
+test('content search requires an explicit first build and retains title search and selected identities', async () => {
+  const view = picker({ value: [{ ...row('a'), snippet: 'old snippet', match: 'content' }] });
+  view.flushTimers(); assert.equal(view.requests.at(-1).message.scope, 'title');
+  view.scope('content'); view.flushTimers();
+  assert.equal(view.requests[0].signal.aborted, true);
+  assert.equal(view.requests.at(-1).message.scope, 'content');
+  await answer(view, { data: [], nextCursor: null, index: indexStatus('empty') });
+  view.flushTimers(); assert.equal(view.requests.length, 2);
+  assert.match(view.text(), /建立本地索引/);
+  assert.doesNotMatch(view.selectedText(), /old snippet/);
+  view.click('建立索引'); assert.equal(view.requests.at(-1).message.action, 'refresh');
+  await answer(view, indexStatus('building', 1));
+  assert.match(view.text(), /正在建立索引 1 \/ 8/);
+  view.unmount();
+});
+test('content snippets render as plain text and never enter selected rows', async () => {
+  const view = picker(); view.scope('content'); view.search('林夏'); view.flushTimers();
+  const snippet = '<img src=x onerror=alert(1)> 林夏在雨夜读信';
+  await answer(view, { data: [{ ...row('b'), match: 'content', snippet }], nextCursor: null, index: indexStatus('ready', 8) });
+  assert.match(view.text(), /正文匹配/); assert.ok(view.text().includes(snippet));
+  view.toggle('b'); assert.doesNotMatch(view.selectedText(), /正文匹配|onerror/);
+  view.scope('title'); view.flushTimers(); assert.equal(view.requests.at(-1).message.scope, 'title');
+  assert.deepEqual(view.selected(), ['b']);
+  view.unmount();
+});
+test('index progress polls without reloading pages until completion and reloads the current query once', async () => {
+  const view = picker(); view.scope('content'); view.search('灯塔'); view.flushTimers();
+  await answer(view, { data: [row('b')], nextCursor: 'next', index: indexStatus('building', 1) });
+  view.flushTimers(); assert.equal(view.requests.at(-1).message.action, 'status');
+  await answer(view, indexStatus('building', 3)); view.flushTimers();
+  assert.equal(view.requests.filter(item => item.message.type === 'alchemy:sessions-list').length, 1);
+  assert.deepEqual(view.candidates().map(item => item.props['data-session-id']), ['b']);
+  await answer(view, indexStatus('ready', 8)); view.flushTimers();
+  assert.equal(view.requests.at(-1).message.type, 'alchemy:sessions-list');
+  assert.equal(view.requests.at(-1).message.searchTerm, '灯塔');
+  assert.equal(view.requests.at(-1).message.cursor, undefined);
+  await answer(view, { data: [row('c')], nextCursor: null, index: indexStatus('ready', 8) });
+  view.flushTimers(); assert.equal(view.requests.filter(item => item.message.type === 'alchemy:sessions-list').length, 2);
+  view.unmount();
+});
+test('closing aborts only the pending index status request, without cancelling or clearing the backend index', async () => {
+  const view = picker(); view.scope('content'); view.flushTimers();
+  await answer(view, { data: [], nextCursor: null, index: indexStatus('building', 2) });
+  view.flushTimers(); const pending = view.requests.at(-1);
+  assert.equal(pending.message.action, 'status'); assert.equal(pending.signal.aborted, false);
+  view.unmount(); assert.equal(pending.signal.aborted, true);
+  assert.equal(view.requests.some(item => ['clear', 'cancel'].includes(item.message.action)), false);
+});
+test('closing during a build request aborts its reader and ignores a late response', async () => {
+  const view = picker(); view.scope('content'); view.flushTimers();
+  await answer(view, { data: [], nextCursor: null, index: indexStatus('empty') });
+  view.click('建立索引'); const pending = view.requests.at(-1);
+  view.unmount(); assert.equal(pending.signal.aborted, true);
+  pending.resolve(indexStatus('building')); await flush(); view.flushTimers();
+  assert.equal(view.requests.length, 2);
+});
+test('building indexes can be stopped and cleared without losing selection or accepting a late status response', async () => {
+  const view = picker({ value: [row('a')] }); view.scope('content'); view.flushTimers();
+  await answer(view, { data: [], nextCursor: null, index: indexStatus('building', 2) });
+  view.flushTimers(); const status = view.requests.at(-1);
+  view.click('停止并清除'); const clear = view.requests.at(-1);
+  assert.equal(clear.message.action, 'clear'); assert.equal(status.signal.aborted, true);
+  clear.resolve(indexStatus('empty')); await flush(); view.render();
+  status.resolve(indexStatus('building', 4)); await flush(); view.render();
+  assert.match(view.text(), /建立本地索引/); assert.doesNotMatch(view.text(), /正在建立索引/);
+  assert.deepEqual(view.selected(), ['a']);
+  view.unmount();
+});
+test('search responses started while clearing cannot restore the previous index after clear completes', async () => {
+  const view = picker(); view.scope('content'); view.flushTimers();
+  await answer(view, { data: [], nextCursor: null, index: indexStatus('ready', 8) });
+  view.click('清除索引'); const clear = view.requests.at(-1);
+  view.search('灯塔'); view.flushTimers(); const search = view.requests.at(-1);
+  clear.resolve(indexStatus('empty')); await flush(); view.render();
+  assert.equal(search.signal.aborted, true);
+  search.resolve({ data: [row('outdated')], nextCursor: null, index: indexStatus('ready', 8) });
+  await flush(); view.render();
+  assert.match(view.text(), /建立本地索引/); assert.doesNotMatch(view.text(), /会话 outdated/);
+  view.flushTimers(); assert.equal(view.requests.at(-1).message.searchTerm, '灯塔');
+  await answer(view, { data: [], nextCursor: null, index: indexStatus('empty') });
+  assert.match(view.text(), /建立本地索引/);
+  view.unmount();
+});
+test('partial coverage is visible, clear keeps selections and waits for another explicit build', async () => {
+  const view = picker({ value: [row('a')] }); view.scope('content'); view.flushTimers();
+  await answer(view, { data: [row('b')], nextCursor: null, index: indexStatus('partial', 6) });
+  assert.match(view.text(), /6 \/ 8.*2 个未能读取.*未覆盖全部会话/);
+  view.click('清除索引'); assert.equal(view.requests.at(-1).message.action, 'clear');
+  await answer(view, indexStatus('empty')); view.flushTimers();
+  await answer(view, { data: [], nextCursor: null, index: indexStatus('empty') });
+  assert.deepEqual(view.selected(), ['a']);
+  assert.match(view.text(), /建立索引/);
+  view.flushTimers(); assert.equal(view.requests.some(item => item.message.action === 'refresh'), false);
+  view.unmount();
+});
+test('new search and index controls are disabled while confirming content selections', async () => {
+  let resolveSave;
+  const view = picker({ onConfirm: () => new Promise(resolve => { resolveSave = resolve; }) });
+  view.scope('content'); view.flushTimers();
+  await answer(view, { data: [row('a')], nextCursor: null, index: indexStatus('ready', 8) });
+  view.toggle('a'); view.click('确认选择'); assert.equal(view.disabled(), true);
+  resolveSave(); await flush(); view.unmount();
+});
+
+test('initial index failure exposes clear and rebuild without losing selected sessions', async () => {
+  const view = picker({ value: [row('a')] }); view.scope('content'); view.flushTimers();
+  view.requests.at(-1).reject(new Error('索引初始化失败')); await flush(); view.render();
+  assert.match(view.text(), /无法读取本地正文索引，可清除后重新建立/);
+  assert.doesNotMatch(view.text(), /正在检查本地正文索引/);
+  view.click('清除索引'); assert.equal(view.requests.at(-1).message.action, 'clear');
+  await answer(view, indexStatus('empty')); view.flushTimers();
+  await answer(view, { data: [], nextCursor: null, index: indexStatus('empty') });
+  view.click('建立索引'); assert.equal(view.requests.at(-1).message.action, 'refresh');
+  await answer(view, indexStatus('building'));
+  assert.deepEqual(view.selected(), ['a']);
   view.unmount();
 });

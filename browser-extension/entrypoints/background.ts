@@ -306,7 +306,9 @@ export default defineBackground(() => {
         } finally { selecting = false; }
       }
       case "alchemy:sessions-list":
-        return bridge("/sessions/list", token, { searchTerm: message.searchTerm, cursor: message.cursor, archived: message.archived }, signal);
+        return bridge("/sessions/list", token, { searchTerm: message.searchTerm, cursor: message.cursor, archived: message.archived, scope: message.scope }, signal);
+      case "alchemy:sessions-index":
+        return bridge("/sessions/index", token, { action: message.action }, signal);
       case "alchemy:update-project-input": {
         if (selecting) throw new Error("正在处理图片，请稍候");
         if (typeof message.projectId !== "string" || !/^[a-f0-9]{64}$/.test(message.projectId)
@@ -542,7 +544,7 @@ export default defineBackground(() => {
     port.onMessage.addListener(message => {
       if (started) return;
       started = true;
-      if (!["alchemy:update-project-input", "alchemy:start", ...(extensionSender ? ["alchemy:sessions-list"] : [])].includes(message?.type)) {
+      if (!["alchemy:update-project-input", "alchemy:start", ...(extensionSender ? ["alchemy:sessions-list", "alchemy:sessions-index"] : [])].includes(message?.type)) {
         port.postMessage({ error: "无效请求" }); return;
       }
       const reply = (value: unknown) => { if (!controller.signal.aborted) port.postMessage(value); };
@@ -558,7 +560,7 @@ export default defineBackground(() => {
     if (sender.id !== browser.runtime.id) return;
     const contentSender = sender.tab?.id != null && sender.frameId === 0 && /^https?:/.test(sender.url || sender.tab.url || "");
     const extensionSender = sender.url?.startsWith(browser.runtime.getURL("/"));
-    if (extensionSender && ["alchemy:workspace-handoff", "alchemy:sessions-list"].includes(message?.type)) {
+    if (extensionSender && ["alchemy:workspace-handoff", "alchemy:sessions-list", "alchemy:sessions-index"].includes(message?.type)) {
       uiMessage(message).then(value => reply({ ok: true, value }), error => reply({ error: error.message }));
       return true;
     }

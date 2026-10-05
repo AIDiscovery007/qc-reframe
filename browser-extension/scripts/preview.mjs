@@ -182,6 +182,13 @@ createServer(async (req, res) => {
           {id:'33333333-3333-4333-8333-333333333333',title:'星际邮差 · 漫画设定',updatedAt:1790997600},
         ];
         if(previewOptions.get('sessions')==='many')sessionRows.push(...Array.from({length:9},(_,i)=>({id:'preview-session-'+i,title:i===0?'示例 · 城市漫游纪录片与旅行故事的封面及完整视觉设计讨论':'示例创作会话 '+(i+4),updatedAt:1790997600-i*86400})));
+        const sessionContents=['雨夜的便利店里，林夏拆开多年未寄出的信。小说插图需要暖色窗灯和蓝色雨幕。','旅行成片包含清晨码头、沿海骑行和夕阳灯塔，封面突出安静的海边周末。','星际邮差驾驶旧飞船送信，伙伴是一只机械猫。漫画第一幕发生在荒漠空间站。'];
+        let indexFailure=previewOptions.get('sessionIndex')==='error';
+        const indexState=indexFailure?'empty':previewOptions.get('sessionIndex')||'empty';
+        let sessionIndex={state:indexState,indexed:indexState==='empty'?0:indexState==='ready'?sessionRows.length:Math.min(2,sessionRows.length),total:sessionRows.length,failed:indexState==='partial'?1:0,updatedAt:indexState==='empty'?null:Date.now()};
+        let indexStarted=0;
+        const refreshSessionIndex=()=>{sessionIndex={...sessionIndex,state:'building',failed:0};indexStarted=Date.now();};
+        const readSessionIndex=()=>{if(indexStarted){sessionIndex.indexed=Math.min(sessionRows.length,Math.floor((Date.now()-indexStarted)/700));if(sessionIndex.indexed===sessionRows.length){sessionIndex={...sessionIndex,state:'ready',updatedAt:Date.now()};indexStarted=0;}}return {...sessionIndex};};
         const selectedSessionRows=ids=>(ids||[]).map(id=>sessionRows.find(row=>row.id===id)).filter(Boolean);
         const collected=new Map();
         let failedPage=false;
@@ -263,9 +270,24 @@ createServer(async (req, res) => {
           if(message.type==='alchemy:sessions-list') {
             if(state==='session-error')return {error:'示例：本机会话读取失败，请重试'};
             await new Promise(resolve=>setTimeout(resolve,100));
-            const rows=(message.archived?sessionRows.slice(2):sessionRows).filter(row=>!message.searchTerm||row.title.includes(message.searchTerm));
+            if(indexFailure)return {error:'示例：本地正文索引初始化失败，请清除后重新建立'};
+            if(message.scope==='content'&&sessionIndex.state==='stale')refreshSessionIndex();
+            const index=readSessionIndex(),query=(message.searchTerm||'').toLocaleLowerCase();
+            const rows=(message.archived?sessionRows.slice(2):sessionRows).flatMap(row=>{
+              if(message.scope==='content'&&sessionRows.indexOf(row)>=index.indexed)return [];
+              if(!query)return [row];
+              if(row.title.toLocaleLowerCase().includes(query))return [{...row,match:'title'}];
+              const position=sessionRows.indexOf(row),content=sessionContents[position]||'示例创作记录：整理素材，设计封面与插图。';
+              return message.scope==='content'&&position<index.indexed&&content.toLocaleLowerCase().includes(query)?[{...row,match:'content',snippet:content}]:[];
+            });
             const offset=Number(message.cursor)||0;
-            return {ok:true,value:{data:rows.slice(offset,offset+2),nextCursor:offset+2<rows.length?String(offset+2):null}};
+            return {ok:true,value:{data:rows.slice(offset,offset+2),nextCursor:offset+2<rows.length?String(offset+2):null,index}};
+          }
+          if(message.type==='alchemy:sessions-index') {
+            if(indexFailure&&message.action!=='clear')return {error:'示例：本地正文索引初始化失败，请清除后重新建立'};
+            if(message.action==='refresh')refreshSessionIndex();
+            if(message.action==='clear'){indexFailure=false;indexStarted=0;sessionIndex={state:'empty',indexed:0,total:sessionRows.length,failed:0,updatedAt:null};}
+            return {ok:true,value:readSessionIndex()};
           }
           if(message.type==='alchemy:update-project-input') {
             if(previewOptions.get('swap')==='failed')return {error:'保存失败（预览），原输入已保留'};

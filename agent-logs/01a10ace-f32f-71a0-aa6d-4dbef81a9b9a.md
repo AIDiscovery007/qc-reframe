@@ -88,3 +88,14 @@
 - 最终复核通过：grid列改minmax(0,1fr)，重建后390×844五行均300px、与选区列表相符，长标题正确省略；914×1034五项置顶及候选去重通过，截图browser-extension/prototypes/session-context/screenshots/supervisor-selected-sessions-914.png。执行者build/compile/478项全量通过，监工独立5项组件测试与diff check通过。原执行任务已记已复核整合至工作区；无整合提交、推送发布、bridge重启、模型调用或实际扩展重载。复核通知已送达当前UIUX会话01a10aa7-1bd6-75d2-853b-2553005db757，工具isError=false，无需回执。
 
 - Git交付（2026-10-05）：用户明确要求“提交”，监工已将顶部已选会话功能、测试及使用说明提交为 `9336cb1af095e28fe0a4535755cc5555f573634e`（fix: keep selected sessions visible above candidates），分支codex/creative-workspace。沿用上一轮build/compile/478项与UI复核证据，本轮暂存差异及diff check通过；仅本地提交，未推送、未发布、未升版本。协作日志另作记录提交。
+
+## 2026-10-05 · 标题搜索提速与全文索引复核
+
+- 已核对当前任职；从UIUX原会话核实用户直接原文“可以，就按你的推荐和落地顺序开始做吧”，对应其推荐的标题链路测量/连接复用缓存、本地关键词索引及片段。仅本地实施与复核，无提交推送发布授权。
+- 本轮涉及27个文件（含未跟踪模块/测试），约6个跨层模块；主agent检查UI/API/产品边界，两条独立只读审查分别覆盖RPC/正文读取与索引/Worker/同步生命周期，减少主上下文。禁止真实正文扫描、模型调用与运行服务重启。状态执行中，未验收。
+
+- 监工首轮复核（2026-10-05）：独立build/compile/539项全量与diff check通过；只读RPC/正文分页/缓存门禁独立63项、索引/Worker/同步29项通过。发现P2：session-search.mjs index(action)在clear/refresh前await db，失败opening/client永久保留，损坏SQLite导致status/clear/refresh均503且旧文件未清除。合成临时文件已复现；已要求当前UIUX提供不依赖成功打开DB的安全清除重建与可达UI，覆盖Worker失败及清除竞态，工具isError=false。整体待返修复核，无提交发布或真实正文扫描。
+
+- 监工最终复核（2026-10-05）：已复核整合至本地工作区。P2原损坏文件复现已独立验证clear→ready，无需重启服务；索引/Worker返修定向24项、主监工picker15项通过，覆盖Worker失败、opening/同步期间clear、并发clear及固定文件保护。此前独立build/compile/539项全量和RPC63项证据仍适用；已核对执行者返修后build/compile/547项全量日志，未将其写成监工重复全量运行。
+- 最终UI复核：生产fixture首次索引失败→清除→建立→“林夏”正文命中通过，已选项保留；前轮390×844和914×1034边界通过。截图browser-extension/prototypes/session-context/screenshots/supervisor-search-recovery-914.png。无真实正文扫描、模型调用、运行bridge重启或实际扩展重载；启用新功能仍需重启bridge并重载扩展。
+- 本轮Git授权：用户在当前监工会话明确要求“提交”，范围为本轮搜索功能、P2修复、测试、文档及对应复核日志；仅本地提交，不推送、不发布、不升版本。最终复核与提交协调通知已送达UIUX 01a10aa7-1bd6-75d2-853b-2553005db757，工具返回对应threadId、isError=false，无需回执。

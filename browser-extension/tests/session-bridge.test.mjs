@@ -191,3 +191,34 @@ for (const destination of ["input", "job"]) test(`metadata returning after deadl
   assert.equal(reference.inputRevision, 0); assert.equal(reference.inputs, undefined);
   assert.deepEqual(await (await request("/jobs")).json(), []);
 });
+
+test("local index API authenticates, validates actions and exposes only bounded search snippets", async t => {
+  const { request, calls } = await setup(t);
+  assert.equal((await request("/sessions/index", { ...post({ action: "refresh" }), headers: { Authorization: "" } })).status, 401);
+  for (const body of [{ action: "unknown" }, { action: "refresh", directory: "/tmp" }, null])
+    assert.equal((await request("/sessions/index", post(body))).status, 400);
+  assert.equal((await (await request("/sessions/index", post({ action: "status" }))).json()).state, "empty");
+  assert.equal((await request("/sessions/index", post({ action: "refresh" }))).status, 200);
+  let state;
+  for (let i = 0; i < 100; i++) {
+    state = await (await request("/sessions/index", post({ action: "status" }))).json();
+    if (state.state !== "building") break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(state.state, "ready");
+  const found = await (await request("/sessions/list", post({ scope: "content", archived: true, searchTerm: "STORY" }))).json();
+  assert.equal(found.data.length, 1); assert.equal(found.data[0].match, "content");
+  assert.match(found.data[0].snippet, /PRIVATE_STORY_BODY/); assert.equal(found.data[0].messages, undefined);
+  assert.equal(calls.length, 0, "indexing must not invoke inference");
+  assert.equal((await (await request("/sessions/index", post({ action: "clear" }))).json()).state, "empty");
+});
+test("background indexing blocks CLI upgrades after the initiating HTTP request completes", async t => {
+  const started = Promise.withResolvers();
+  const { request } = await setup(t, { page: signal => new Promise((resolve, reject) => {
+    started.resolve(); signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+  }) });
+  await request("/sessions/index", post({ action: "refresh" })); await started.promise;
+  assert.equal((await request("/cli/update", post({}))).status, 409);
+  assert.equal((await request("/models/refresh", post({}))).status, 409);
+  assert.equal((await (await request("/sessions/index", post({ action: "clear" }))).json()).state, "empty");
+});

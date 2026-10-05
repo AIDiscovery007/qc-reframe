@@ -116,7 +116,7 @@ export async function createBridge({
   sessions ||= createSessionStore({ cwd: root, dataDir: paths.records });
   let sessionReaders = 0;
   models ||= await createModelStore({ dataDir: paths.config, cwd: root });
-  cli ||= createCliManager({ onUpdated: () => models.reset() });
+  cli ||= createCliManager({ onUpdated: () => { models.reset(); sessions.resetReader?.(); } });
   await recoverProjectDeletion(paths.records, dataDir);
   const images = await createImageStore(dataDir, paths.records);
   await images.migrate();
@@ -337,6 +337,14 @@ export async function createBridge({
         catch (error) { throw bad(error.status ? error.message : "无法读取本机 Codex 会话，请检查 CLI 后重试", error.status || 503); }
         return;
       }
+      if (req.method === "POST" && path === "/sessions/index") {
+        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+        const body = await readBody(req);
+        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => key !== "action") || !["refresh", "clear", "status"].includes(body.action)) throw bad("无效的索引操作");
+        try { json(200, await readSessions(() => sessions.index(body.action))); }
+        catch (error) { throw bad(error.status ? error.message : "无法访问本地会话索引，请重试", error.status || 503); }
+        return;
+      }
       if (req.method === "GET" && path === "/models") {
         if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
         try { json(200, await models.list()); } catch (error) { throw bad(error.message, 503); }
@@ -349,7 +357,7 @@ export async function createBridge({
       if (req.method === "POST" && ["/cli/check", "/cli/update"].includes(path)) {
         const body = await readBody(req);
         if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) throw bad("Codex 管理操作不接受命令或路径参数。");
-        if (path.endsWith("/update") && (controllers.size || models.busy || sessionReaders)) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
+        if (path.endsWith("/update") && (controllers.size || models.busy || sessionReaders || sessions.busy)) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
         if (path.endsWith("/update")) {
           cliStarting = true;
           try { json(202, await cli.update()); }
@@ -359,7 +367,7 @@ export async function createBridge({
       }
       if (req.method === "POST" && ["/models/refresh", "/models/verify"].includes(path)) {
         if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-        if (controllers.size || models.busy || sessionReaders) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
+        if (controllers.size || models.busy || sessionReaders || sessions.busy) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
         const body = await readBody(req);
         if (path.endsWith("/verify") && (typeof body.model !== "string" || body.model.length > 200)) throw bad("请选择有效模型");
         try { json(path.endsWith("/verify") ? 202 : 200, path.endsWith("/verify") ? await models.start(body.model, body.reasoningEffort) : await models.refresh()); }
@@ -368,7 +376,7 @@ export async function createBridge({
       }
       if (req.method === "POST" && path === "/restart") {
         if (!allowShutdown || !restart) throw bad("此服务不支持插件内重启。请在原终端停止，再在插件目录运行 npm start。", 409);
-        if (controllers.size || models.busy || cliBusy() || sessionReaders) throw bad("任务、模型验证或 Codex 操作执行中，请等待完成后再重启。", 409);
+        if (controllers.size || models.busy || cliBusy() || sessionReaders || sessions.busy) throw bad("任务、模型验证或 Codex 操作执行中，请等待完成后再重启。", 409);
         const nextRestartId = randomUUID();
         let commit;
         try { commit = await restart({ root, dataDir, port: server.address().port, instanceId, restartId: nextRestartId, skillPath, generationSkillPath }); }
@@ -390,7 +398,7 @@ export async function createBridge({
         return;
       }
       if (req.method === "POST" && path === "/shutdown" && allowShutdown) {
-        if (controllers.size || models.busy || cliBusy() || sessionReaders) throw bad("任务或 Codex 升级执行中，请等待完成后再停止服务。", 409);
+        if (controllers.size || models.busy || cliBusy() || sessionReaders || sessions.busy) throw bad("任务或 Codex 升级执行中，请等待完成后再停止服务。", 409);
         shuttingDown = true;
         json(200, { stopped: true });
         server.close();
@@ -924,6 +932,7 @@ export async function createBridge({
     }
   });
   server.on("close", () => {
+    void sessions.close?.();
     taskFeed.close();
     cli.close();
     models.close();

@@ -32,7 +32,7 @@ function connectedRequest(message: Record<string, unknown>, signal?: AbortSignal
 export async function request<T>(message: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   try {
-    const response = ["alchemy:sessions-list", "alchemy:update-project-input", "alchemy:start"].includes(String(message.type))
+    const response = ["alchemy:sessions-list", "alchemy:sessions-index", "alchemy:update-project-input", "alchemy:start"].includes(String(message.type))
       ? await connectedRequest(message, signal) : await Promise.race([
       browser.runtime.sendMessage(message),
       new Promise<never>((_, reject) => {

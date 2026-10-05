@@ -1,5 +1,7 @@
 export type SessionSummary = { id: string; title: string; updatedAt: number };
-export type SessionPage = { data: SessionSummary[]; nextCursor: string | null };
+export type SessionIndexStatus = { state: "empty" | "stale" | "building" | "partial" | "ready"; indexed: number; total: number; failed: number; updatedAt: number | null; error?: string };
+export type SessionSearchResult = SessionSummary & { match?: "title" | "content"; snippet?: string };
+export type SessionPage = { data: SessionSearchResult[]; nextCursor: string | null; index?: SessionIndexStatus };
 export type SessionContext = { sources: SessionSummary[]; snapshotId?: string; hash?: string; capturedAt?: string; messageCount?: number; attachmentCount?: number };
 
 export type Mode = "style" | "recreate" | "reenact" | "multi-reenact" | "session";
