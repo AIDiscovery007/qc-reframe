@@ -129,3 +129,5 @@
 - 本轮最终复核通知已送达UIUX 01a10aa7-1bd6-75d2-853b-2553005db757，工具返回对应threadId、isError=false；无需重复回执。
 
 - Git授权（2026-10-05）：用户明确要求“提交git”，本次包含已复核的任务编排、索引读取预算及分类修复、提示精简、全局下拉留白和完成自动收起，以及对应测试/说明/日志。沿用本轮build/compile/564项与独立UI复核证据；仅本地提交，不推送、不发布、不升版本。
+
+- Git交付（2026-10-05）：用户要求“提交git”，本轮任务编排、索引预算与分类修复、提示/下拉统一和完成自动收起已提交为 `13d77d53bfa08fd5f7884c94f78458fead7e85b4`（fix: improve session indexing limits and progress UI），共27个相关文件，分支codex/creative-workspace。已核对暂存差异、diff check及提交后工作区干净；沿用已记录的build/compile/564项与独立UI复核。此条记录另作文档提交；未推送、发布、升版本、重启bridge或重载实际扩展。
