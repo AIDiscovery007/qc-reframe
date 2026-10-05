@@ -147,3 +147,4 @@
 - 最终复核通过：逆向、生图及模型操作的兼容探测在全局变更锁外等待，断连停止请求自身后续写入；重获锁后继续检查 CLI、服务和数据状态。主监工独立兼容集成 15/15 通过，核对执行者最终 build/compile/603 项全量日志（`/tmp/reframe-onboarding-repair2-{build,tests}.log`），diff check 通过。
 - 设置分类改为 App 单一受控状态，主监工以当前构建页面独立运行 `workspace.html?state=library&settingsRegression=1`：无项目交接、分类切换、手动切页后相同恢复目标、关闭重开均 PASS，控制台无 warn/error。390px 检查 document.scrollWidth=390，dialog left=12/right=378；截图 `/tmp/reframe-supervisor-onboarding-qa/settings-recovery.png`。历史 CLI 版本矩阵和真实模型未验证，实际扩展未重载。
 - 已向 UIUX 会话 01a10c6a-a0cb-7673-87b2-ea9849107451 送达复核通过与提交准备通知，工具 isError=false。本轮状态已复核整合至工作区，待执行本地提交；不清理任职。
+- Git 交付：`172113fba545b49295bd218f06552edc45b83d51`（fix: improve CLI compatibility and recovery flows），34 个相关文件，分支 codex/creative-workspace；暂存差异与 diff check 通过，提交后工作区干净。本条及执行者整合记录另作文档提交。未推送、发布、升版本、重启现用 bridge、重载实际扩展或调用真实模型；本监工临时预览与页面已关闭。
