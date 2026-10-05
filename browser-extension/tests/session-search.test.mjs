@@ -14,17 +14,18 @@ async function fixture(t, options = {}) {
   const reader = { busy: false, close() {}, reset() {}, request: async (method, params, signal) => {
     calls.push({ method, params }); signal?.throwIfAborted();
     if (hold) await hold(method, signal);
-    if (failure?.(method, params)) throw new Error("private failure detail");
+    const problem = failure?.(method, params);
+    if (problem) throw problem instanceof Error ? problem : new Error("private failure detail");
     if (method === "thread/list") return { data: [...sources.values()].filter(item => item.archived === params.archived), nextCursor: null };
     const source = sources.get(params.threadId);
     if (!source) throw new Error("missing");
-    if (method === "thread/read") return { thread: { ...source, historyMode: "paginated" } };
-    return { data: [{ id: "t1", itemsView: "full", items: [
+    if (method === "thread/read") return { thread: { id: source.id, name: source.name, updatedAt: source.updatedAt, historyMode: "paginated" } };
+    return { data: [{ id: params.cursor || "t1", itemsView: "full", items: [
       { id: "u", type: "userMessage", content: [{ type: "text", text: source.text }] },
       { id: "a", type: "agentMessage", phase: "final_answer", text: source.finalText ?? "定稿：夜色中的灯塔" },
       { type: "agentMessage", phase: "commentary", text: "COMMENTARY_SECRET" },
-      { type: "commandExecution", aggregatedOutput: "TOOL_SECRET" },
-    ] }], nextCursor: null };
+      { type: "commandExecution", aggregatedOutput: source.toolOutput || "TOOL_SECRET" },
+    ] }], nextCursor: source.secondPage && !params.cursor ? "t2" : null };
   } };
   const store = createSessionSearch({ directory, reader, now: () => clock, ...options });
   t.after(async () => { await store.close(); await rm(directory, { recursive: true, force: true }); });
@@ -140,4 +141,56 @@ test("empty textual history can index its title without weakening creative captu
   await store.index("refresh"); assert.equal((await finish()).state, "ready");
   assert.equal((await store.list({ scope: "content", searchTerm: "创作" })).data[0].match, "title");
   assert.equal((await store.list({ scope: "content", searchTerm: "TOOL_SECRET" })).data.length, 0);
+});
+
+
+test("index budgets count retained text, not cumulative tool response bytes", async t => {
+  const { store, sources, finish } = await fixture(t);
+  sources.get(id).toolOutput = "x".repeat(13 * 1024 * 1024);
+  sources.get(id).secondPage = true;
+  await store.index("refresh");
+  const result = await finish();
+  assert.equal(result.state, "ready"); assert.equal(result.processed, 1);
+  assert.equal(result.indexed, 1); assert.equal(result.failed, 0);
+  assert.equal((await store.list({ scope: "content", searchTerm: "少女" })).data.length, 1);
+});
+
+test("classified session failures expose bounded counts, not private error details", async t => {
+  const { store, sources, finish, fail } = await fixture(t);
+  sources.set(second, { id: second, name: "归档", updatedAt: 2, archived: true, text: "远方灯塔" });
+  for (const [errorCode, issueCode] of [["CONTENT_LIMIT", "content_limit"], ["RESPONSE_TOO_LARGE", "response_limit"], ["PAGE_LIMIT", "page_limit"], ["INDEX_CAPACITY", "index_capacity"], ["SESSION_CHANGED", "changed"], ["TIMEOUT", "timeout"], ["UNKNOWN_PRIVATE", "read_failed"]]) {
+    fail((method, params) => method === "thread/turns/list" && params.threadId === id && Object.assign(new Error("PRIVATE_DETAIL"), { code: errorCode }));
+    await store.index("refresh"); const result = await finish();
+    assert.equal(result.state, "partial"); assert.equal(result.processed, 2);
+    assert.equal(result.total, 2); assert.equal(result.indexed, 1); assert.equal(result.failed, 1);
+    assert.deepEqual(result.issues, [{ code: issueCode, count: 1 }]);
+    assert.equal(result.error, undefined); assert.ok(!JSON.stringify(result).includes("PRIVATE_DETAIL"));
+    result.issues[0].count = 999;
+    assert.equal((await store.index("status")).issues[0].count, 1);
+  }
+});
+
+test("incremental progress counts cached sessions without re-reading unchanged bodies", async t => {
+  const { store, finish, calls, advance } = await fixture(t);
+  await store.index("refresh"); await finish(); advance(10000);
+  calls.length = 0;
+  await store.index("refresh"); const result = await finish();
+  assert.equal(result.processed, 1); assert.equal(result.total, 1); assert.equal(result.indexed, 1);
+  assert.ok(calls.every(call => call.method === "thread/list"));
+});
+
+
+test("in-flight progress reports completed attempts separately from searchable sessions", async t => {
+  const { store, sources, finish, hold, fail } = await fixture(t);
+  sources.set(second, { id: second, name: "第二个", updatedAt: 0, archived: false, text: "等待读取" });
+  const started = Promise.withResolvers(), blocked = Promise.withResolvers();
+  let bodyReads = 0;
+  hold(async method => { if (method === "thread/turns/list" && ++bodyReads === 2) { started.resolve(); await blocked.promise; } });
+  fail((method, params) => method === "thread/turns/list" && params.threadId === id && Object.assign(new Error("changing"), { code: "SESSION_CHANGED" }));
+  await store.index("refresh"); await started.promise;
+  const progress = await store.index("status");
+  assert.equal(progress.state, "building"); assert.equal(progress.processed, 1);
+  assert.equal(progress.total, 2); assert.equal(progress.indexed, 0); assert.equal(progress.failed, 1);
+  blocked.resolve(); const final = await finish();
+  assert.equal(final.processed, final.total); assert.equal(final.indexed + final.failed, final.total);
 });

@@ -1,4 +1,4 @@
-const fail = (message, status = 400) => Object.assign(new Error(message), { status });
+const fail = (message, status = 400, code) => Object.assign(new Error(message), { status, code });
 export const sessionSummary = thread => ({ id: thread.id, title: (thread.name || thread.preview || "未命名会话").slice(0, 300), updatedAt: thread.updatedAt });
 export async function readSessionMetadata(request, id) {
   const { thread } = await request("thread/read", { threadId: id, includeTurns: false });
@@ -9,7 +9,7 @@ export async function readSessionMetadata(request, id) {
   return thread;
 }
 // Shared text policy for creative snapshots and the private search index.
-export async function readSessionContent(request, source, { signal, budget = { characters: 0, pages: 0 }, maxCharacters = 120_000, maxPages = 200, allowEmpty = false } = {}) {
+export async function readSessionContent(request, source, { signal, budget = { characters: 0, pages: 0 }, maxCharacters = 120_000, maxPages = 200, allowEmpty = false, adaptivePageSize = false } = {}) {
   const messages = [];
   let attachmentCount = 0;
   const append = (turns, paginated) => {
@@ -24,24 +24,35 @@ export async function readSessionContent(request, source, { signal, budget = { c
         } else if (item.type === "agentMessage" && (item.phase == null || item.phase === "final_answer")) text = item.text;
         if (typeof text !== "string" || !text.trim()) continue;
         budget.characters += text.length;
-        if (budget.characters > maxCharacters) throw fail(`所选会话正文超过 ${maxCharacters} 字符，尚未读取完整；请减少选择的会话后重试`, 413);
+        if (budget.characters > maxCharacters) throw fail(`所选会话正文超过 ${maxCharacters} 字符，尚未读取完整；请减少选择的会话后重试`, 413, "CONTENT_LIMIT");
         messages.push({ threadId: source.id, turnId: turn.id, itemId: item.id, role: item.type === "userMessage" ? "user" : "assistant", text });
       }
     }
   };
   signal?.throwIfAborted();
   const metadata = await readSessionMetadata(request, source.id);
-  if (metadata.updatedAt !== source.updatedAt) throw fail("所选会话已更新，请重新选择后重试", 409);
+  if (metadata.updatedAt !== source.updatedAt) throw fail("所选会话已更新，请重新选择后重试", 409, "SESSION_CHANGED");
   if (metadata.historyMode === "paginated") {
-    let cursor;
+    let cursor, pageSize = 50;
     const seen = new Set(), turnIds = new Set();
     do {
-      if (++budget.pages > maxPages) throw fail(`所选会话超过 ${maxPages} 页，未截断正文；请减少选择的会话后重试`, 413);
+      if (++budget.pages > maxPages) throw fail(`所选会话超过 ${maxPages} 页，未截断正文；请减少选择的会话后重试`, 413, "PAGE_LIMIT");
       signal?.throwIfAborted();
-      const page = await request("thread/turns/list", { threadId: source.id, limit: 50, sortDirection: "asc", itemsView: "full", ...(cursor ? { cursor } : {}) });
+      let page;
+      for (;;) {
+        try {
+          page = await request("thread/turns/list", { threadId: source.id, limit: pageSize, sortDirection: "asc", itemsView: "full", ...(cursor ? { cursor } : {}) });
+          break;
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (!adaptivePageSize || error.code !== "RESPONSE_TOO_LARGE" || pageSize === 1) throw error;
+          // Retry the same cursor with fewer turns; never index a truncated response.
+          pageSize = Math.max(1, Math.floor(pageSize / 2));
+        }
+      }
       if (!Array.isArray(page.data) || !(page.nextCursor === null || (typeof page.nextCursor === "string" && page.nextCursor.length))) throw fail("会话分页格式不兼容", 503);
       for (const turn of page.data) {
-        if (turnIds.has(turn.id)) throw fail("会话分页发生变化，请重新选择后重试", 409);
+        if (turnIds.has(turn.id)) throw fail("会话分页发生变化，请重新选择后重试", 409, "SESSION_CHANGED");
         turnIds.add(turn.id);
       }
       append(page.data, true);
@@ -55,7 +66,7 @@ export async function readSessionContent(request, source, { signal, budget = { c
     append(thread.turns, false);
   }
   if (!allowEmpty && !messages.length) throw fail("所选会话中有会话没有可用于创作的文字正文，请重新选择");
-  if ((await readSessionMetadata(request, source.id)).updatedAt !== source.updatedAt) throw fail("会话在读取期间已更新，请重新选择后重试", 409);
+  if ((await readSessionMetadata(request, source.id)).updatedAt !== source.updatedAt) throw fail("会话在读取期间已更新，请重新选择后重试", 409, "SESSION_CHANGED");
   signal?.throwIfAborted();
   return { messages, attachmentCount };
 }

@@ -5,19 +5,21 @@ import { readSessionContent, sessionSummary } from "./session-content.mjs";
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const uuid = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
+const issueCodes = { CONTENT_LIMIT: "content_limit", RESPONSE_TOO_LARGE: "response_limit", PAGE_LIMIT: "page_limit", INDEX_CAPACITY: "index_capacity", SESSION_CHANGED: "changed", TIMEOUT: "timeout" };
+const emptyState = () => ({ state: "empty", indexed: 0, processed: 0, total: 0, failed: 0, issues: [], updatedAt: null });
 const listParams = { limit: 30, sortKey: "updated_at", modelProviders: [], sourceKinds: ["cli", "vscode", "appServer", "exec", "unknown"] };
 
 export function createSessionSearch({ cwd, directory, reader = createSessionReader({ cwd }), now = Date.now, cacheMs = 15_000, refreshMs = 300_000, maxSessions = 5000, syncTimeoutMs = 600_000 }) {
   const cache = new Map();
   let database, opening, running, controller, clearing, closed = false, lastAudit = 0;
-  let state = { state: "empty", indexed: 0, total: 0, failed: 0, updatedAt: null };
+  let state = emptyState();
   const db = async () => {
     if (closed) throw fail("会话搜索已关闭", 503);
     if (clearing) throw fail("正在清除索引，请稍后重试", 409);
     if (!database) {
       database = createSessionIndexClient({ directory });
       opening = database.list().then(items => {
-        if (items.length) state = { ...state, state: "stale", indexed: items.length, total: items.length };
+        if (items.length) state = { ...state, state: "stale", indexed: items.length, processed: items.length, total: items.length };
       });
     }
     await opening;
@@ -25,7 +27,7 @@ export function createSessionSearch({ cwd, directory, reader = createSessionRead
     if (database.failed) throw fail("本地正文索引不可用，请清除索引后重新建立", 503);
     return database;
   };
-  const status = () => ({ ...state });
+  const status = () => structuredClone(state);
   const readList = async (options, signal) => {
     const result = await reader.request("thread/list", { ...listParams, archived: false, ...options }, signal);
     if (!Array.isArray(result.data) || !(result.nextCursor == null || typeof result.nextCursor === "string")) throw fail("Codex 会话列表格式不兼容，请更新 CLI", 503);
@@ -40,7 +42,7 @@ export function createSessionSearch({ cwd, directory, reader = createSessionRead
     const signal = activeController.signal;
     const timer = setTimeout(() => activeController.abort(), syncTimeoutMs);
     timer.unref?.();
-    state = { ...state, state: "building", failed: 0, error: undefined };
+    state = { ...state, state: "building", processed: 0, total: 0, failed: 0, issues: [], error: undefined };
     cache.clear();
     running = (async () => {
       const sources = new Map();
@@ -69,17 +71,12 @@ export function createSessionSearch({ cwd, directory, reader = createSessionRead
       for (const source of [...sources.values()].sort((a, b) => b.updatedAt - a.updatedAt)) {
         signal.throwIfAborted();
         const old = existing.get(source.id);
-        if (!audit && old && old.updatedAt === source.updatedAt && old.title === source.title && old.archived === source.archived && source.updatedAt * 1000 < (state.updatedAt || 0) - 2000) continue;
+        if (!audit && old && old.updatedAt === source.updatedAt && old.title === source.title && old.archived === source.archived && source.updatedAt * 1000 < (state.updatedAt || 0) - 2000) { state.processed++; continue; }
         try {
-          let bytes = 0;
           const deadline = AbortSignal.timeout(120_000);
           const readSignal = AbortSignal.any([signal, deadline]);
-          const content = await readSessionContent(async (method, params) => {
-            const value = await reader.request(method, params, readSignal);
-            bytes += Buffer.byteLength(JSON.stringify(value));
-            if (bytes > 24 * 1024 * 1024) throw fail("会话数据超过读取上限", 413);
-            return value;
-          }, source, { signal: readSignal, maxCharacters: 1_000_000, allowEmpty: true });
+          const content = await readSessionContent((method, params) => reader.request(method, params, readSignal), source,
+            { signal: readSignal, maxCharacters: 1_000_000, allowEmpty: true, adaptivePageSize: true });
           signal.throwIfAborted();
           await database.put(source, content.messages);
           existing.set(source.id, source);
@@ -89,8 +86,11 @@ export function createSessionSearch({ cwd, directory, reader = createSessionRead
           await database.remove([source.id]);
           existing.delete(source.id);
           state.failed++;
-          state.error = error.status ? error.message : "部分会话正文无法完整读取，请稍后更新索引。";
+          const code = issueCodes[error.code] || (error.name === "TimeoutError" || error.code === "ABORT_ERR" ? "timeout" : "read_failed");
+          const issue = state.issues.find(item => item.code === code);
+          if (issue) issue.count++; else state.issues.push({ code, count: 1 });
         }
+        state.processed++;
         state.indexed = existing.size;
         // Yield between sessions so searches/cancellation remain responsive.
         await new Promise(resolve => setImmediate(resolve));
@@ -116,7 +116,7 @@ export function createSessionSearch({ cwd, directory, reader = createSessionRead
           database = undefined; opening = undefined;
           clearSessionIndexFiles(directory);
           cache.clear(); lastAudit = 0;
-          state = { state: "empty", indexed: 0, total: 0, failed: 0, updatedAt: null };
+          state = emptyState();
         }).catch(error => {
           state = { ...state, state: "partial", error: "本地索引清除失败，请检查索引目录后重试。" };
           throw error;

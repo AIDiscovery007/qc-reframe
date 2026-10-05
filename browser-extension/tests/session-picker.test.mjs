@@ -7,6 +7,9 @@ import ts from 'typescript';
 const code = ts.transpileModule(await readFile(new URL('../entrypoints/workspace/SessionPicker.tsx', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
 }).outputText;
+const selectCode = ts.transpileModule(await readFile(new URL('../entrypoints/popup/SelectField.tsx', import.meta.url), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+}).outputText;
 function picker(props = {}) {
   const hooks = [], effects = [], timers = new Set(), requests = [];
   let index = 0, tree;
@@ -21,11 +24,15 @@ function picker(props = {}) {
     },
   };
   const exports = {};
-  const jsx = (type, props) => ({ type, props });
-  runInNewContext(code, { exports, AbortController, Map, setTimeout: fn => { timers.add(fn); return fn; }, clearTimeout: fn => timers.delete(fn),
+  const jsx = (type, props) => typeof type === 'function' ? type(props) : ({ type, props });
+  const select = {};
+  runInNewContext(selectCode, { exports: select, require: name => name === 'react/jsx-runtime' ? { jsx, jsxs: jsx } : { default: () => null } });
+  runInNewContext(code, { exports, AbortController, Map, document: { activeElement: null }, setTimeout: fn => { timers.add(fn); return fn; }, clearTimeout: fn => timers.delete(fn),
     require: name => name === 'react' ? react : name === 'react/jsx-runtime' ? { jsx, jsxs: jsx }
       : name.endsWith('/client') ? { request: (message, signal) => new Promise((resolve, reject) => requests.push({ message, signal, resolve, reject })) }
-      : name.endsWith('/motion-dialog') ? { showMotionDialog: () => () => {} } : name.endsWith('/brand') ? { logo: '' } : { default: () => null },
+      : name.endsWith('/motion-dialog') ? { showMotionDialog: () => () => {} } : name.endsWith('/brand') ? { logo: '' }
+      : name.endsWith('/SelectField') ? select
+      : name.endsWith('/TaskOrchestration') ? { default: props => jsx('section', { ...props, children: [props.title, props.detail, props.children, props.actions] }) } : { default: () => null },
   });
   const render = () => { index = 0; tree = exports.default({ value: [], onConfirm: async () => {}, onClose() {}, ...props }); effects.splice(0).forEach(fn => fn()); return tree; };
   const nodes = value => !value ? [] : Array.isArray(value) ? value.flatMap(nodes) : typeof value === 'object' ? [value, ...nodes(value.props?.children)] : [value];
@@ -42,6 +49,7 @@ function picker(props = {}) {
     disabled: () => nodes(tree).filter(node => ['input', 'button', 'select'].includes(node.type)).every(node => node.props.disabled),
     selectedText: () => nodes(nodes(tree).find(node => node.props?.className === 'session-selected')).filter(node => typeof node === 'string').join(' '),
     text: () => nodes(tree).filter(node => typeof node === 'string').join(' '),
+    task: () => nodes(tree).find(node => node.props?.progressLabel === '正文索引进度')?.props,
     unmount() { hooks.forEach(hook => hook?.cleanup?.()); },
   };
 }
@@ -124,7 +132,7 @@ test('content search requires an explicit first build and retains title search a
   assert.doesNotMatch(view.selectedText(), /old snippet/);
   view.click('建立索引'); assert.equal(view.requests.at(-1).message.action, 'refresh');
   await answer(view, indexStatus('building', 1));
-  assert.match(view.text(), /正在建立索引 1 \/ 8/);
+  assert.match(view.text(), /正在建立正文索引 已处理 1 \/ 8/);
   view.unmount();
 });
 test('content snippets render as plain text and never enter selected rows', async () => {
@@ -198,7 +206,7 @@ test('search responses started while clearing cannot restore the previous index 
 test('partial coverage is visible, clear keeps selections and waits for another explicit build', async () => {
   const view = picker({ value: [row('a')] }); view.scope('content'); view.flushTimers();
   await answer(view, { data: [row('b')], nextCursor: null, index: indexStatus('partial', 6) });
-  assert.match(view.text(), /6 \/ 8.*2 个未能读取.*未覆盖全部会话/);
+  assert.match(view.text(), /6 \/ 8.*2 个暂未收录/);
   view.click('清除索引'); assert.equal(view.requests.at(-1).message.action, 'clear');
   await answer(view, indexStatus('empty')); view.flushTimers();
   await answer(view, { data: [], nextCursor: null, index: indexStatus('empty') });
@@ -227,5 +235,26 @@ test('initial index failure exposes clear and rebuild without losing selected se
   view.click('建立索引'); assert.equal(view.requests.at(-1).message.action, 'refresh');
   await answer(view, indexStatus('building'));
   assert.deepEqual(view.selected(), ['a']);
+  view.unmount();
+});
+
+test('progress counts processed sessions and explains skipped content without showing a fatal error', async () => {
+  const view = picker(); view.scope('content'); view.flushTimers();
+  await answer(view, { data: [], nextCursor: null, index: { ...indexStatus('building', 2), processed: 6, failed: 4, issues: [{ code: 'response_limit', count: 3 }, { code: 'changed', count: 1 }] } });
+  assert.equal(view.task().phase, 'running'); assert.equal(view.task().progress, 75);
+  assert.match(view.text(), /已处理 6 \/ 8 · 2 个可搜索/);
+  assert.match(view.text(), /单条对话数据仍超过 24 MB/); assert.match(view.text(), /读取期间会话发生变化/);
+  assert.match(view.text(), /已收录会话中暂未找到结果，索引仍在更新/);
+  assert.doesNotMatch(view.text(), /正文索引需要处理/);
+  view.unmount();
+});
+
+test('an empty result list refreshes as newly indexed sessions become searchable before completion', async () => {
+  const view = picker(); view.scope('content'); view.flushTimers();
+  await answer(view, { data: [], nextCursor: null, index: indexStatus('building', 0) });
+  view.flushTimers(); await answer(view, { ...indexStatus('building', 1), processed: 1 });
+  view.flushTimers(); assert.equal(view.requests.at(-1).message.type, 'alchemy:sessions-list');
+  await answer(view, { data: [row('fresh')], nextCursor: null, index: indexStatus('building', 1) });
+  assert.deepEqual(view.candidates().map(item => item.props['data-session-id']), ['fresh']);
   view.unmount();
 });

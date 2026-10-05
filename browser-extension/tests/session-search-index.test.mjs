@@ -110,11 +110,11 @@ test("atomic replacement removes old text, bulk deletion persists after restart,
 test("resource limits reject whole updates without truncating or destroying prior searchable content", t => {
   const { index } = fixture(t, { maxSessions: 2, maxCharacters: 30, maxSessionCharacters: 20 });
   index.put(meta("a", "A"), ["原文"]);
-  assert.throws(() => index.put(meta("a", "A"), ["x".repeat(20)]), status(413));
+  assert.throws(() => index.put(meta("a", "A"), ["x".repeat(20)]), { status: 413, code: "CONTENT_LIMIT" });
   assert.deepEqual(ids(index.search({ query: "原文" })), ["a"]);
   index.put(meta("b", "B"), ["x".repeat(19)]);
-  assert.throws(() => index.put(meta("c", "C"), []), status(413));
-  assert.throws(() => index.put(meta("a", "A"), ["y".repeat(19)]), status(413));
+  assert.throws(() => index.put(meta("c", "C"), []), { status: 413, code: "INDEX_CAPACITY" });
+  assert.throws(() => index.put(meta("a", "A"), ["y".repeat(19)]), { status: 413, code: "INDEX_CAPACITY" });
   assert.deepEqual(ids(index.search({ query: "原文" })), ["a"]);
   assert.throws(() => index.put(meta("a", "A"), ["ﷺ".repeat(2)]), status(413));
   index.remove(["b"]);

@@ -185,10 +185,10 @@ createServer(async (req, res) => {
         const sessionContents=['雨夜的便利店里，林夏拆开多年未寄出的信。小说插图需要暖色窗灯和蓝色雨幕。','旅行成片包含清晨码头、沿海骑行和夕阳灯塔，封面突出安静的海边周末。','星际邮差驾驶旧飞船送信，伙伴是一只机械猫。漫画第一幕发生在荒漠空间站。'];
         let indexFailure=previewOptions.get('sessionIndex')==='error';
         const indexState=indexFailure?'empty':previewOptions.get('sessionIndex')||'empty';
-        let sessionIndex={state:indexState,indexed:indexState==='empty'?0:indexState==='ready'?sessionRows.length:Math.min(2,sessionRows.length),total:sessionRows.length,failed:indexState==='partial'?1:0,updatedAt:indexState==='empty'?null:Date.now()};
+        let sessionIndex={state:indexState,indexed:indexState==='empty'?0:indexState==='ready'?sessionRows.length:Math.min(2,sessionRows.length),processed:indexState==='empty'?0:indexState==='building'?2:sessionRows.length,total:sessionRows.length,failed:indexState==='partial'?sessionRows.length-2:0,issues:indexState==='partial'?[{code:'response_limit',count:Math.max(0,sessionRows.length-3)},{code:'changed',count:1}]:[],updatedAt:indexState==='empty'?null:Date.now()};
         let indexStarted=0;
-        const refreshSessionIndex=()=>{sessionIndex={...sessionIndex,state:'building',failed:0};indexStarted=Date.now();};
-        const readSessionIndex=()=>{if(indexStarted){sessionIndex.indexed=Math.min(sessionRows.length,Math.floor((Date.now()-indexStarted)/700));if(sessionIndex.indexed===sessionRows.length){sessionIndex={...sessionIndex,state:'ready',updatedAt:Date.now()};indexStarted=0;}}return {...sessionIndex};};
+        const refreshSessionIndex=()=>{sessionIndex={...sessionIndex,state:'building',processed:0,failed:0,issues:[]};indexStarted=Date.now();};
+        const readSessionIndex=()=>{if(indexStarted){sessionIndex.processed=Math.min(sessionRows.length,Math.floor((Date.now()-indexStarted)/700));sessionIndex.indexed=Math.max(sessionIndex.indexed,sessionIndex.processed);if(sessionIndex.processed===sessionRows.length){sessionIndex={...sessionIndex,state:'ready',updatedAt:Date.now()};indexStarted=0;}}return {...sessionIndex};};
         const selectedSessionRows=ids=>(ids||[]).map(id=>sessionRows.find(row=>row.id===id)).filter(Boolean);
         const collected=new Map();
         let failedPage=false;
@@ -286,7 +286,7 @@ createServer(async (req, res) => {
           if(message.type==='alchemy:sessions-index') {
             if(indexFailure&&message.action!=='clear')return {error:'示例：本地正文索引初始化失败，请清除后重新建立'};
             if(message.action==='refresh')refreshSessionIndex();
-            if(message.action==='clear'){indexFailure=false;indexStarted=0;sessionIndex={state:'empty',indexed:0,total:sessionRows.length,failed:0,updatedAt:null};}
+            if(message.action==='clear'){indexFailure=false;indexStarted=0;sessionIndex={state:'empty',indexed:0,processed:0,total:sessionRows.length,failed:0,issues:[],updatedAt:null};}
             return {ok:true,value:readSessionIndex()};
           }
           if(message.type==='alchemy:update-project-input') {

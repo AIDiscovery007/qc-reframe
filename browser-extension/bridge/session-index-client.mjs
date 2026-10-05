@@ -29,7 +29,7 @@ export function createSessionIndexClient({ directory }) {
       const item = pending.get(message.id);
       if (!item) return;
       pending.delete(message.id);
-      if (message.error) item.reject(fail(message.error.message, message.error.status));
+      if (message.error) item.reject(Object.assign(fail(message.error.message, message.error.status), { code: message.error.code }));
       else item.resolve(message.result);
     });
   };

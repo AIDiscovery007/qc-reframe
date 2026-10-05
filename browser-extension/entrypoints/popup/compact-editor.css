@@ -35,7 +35,7 @@
 .quick-heading h1 { flex:1;min-width:0;margin:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
 .quick-heading .select-field { flex:0 0 114px;margin:0; }
 .quick-heading .select-field > span:first-child,.quick-prompt-head .select-field > span:first-child,.quick-tools .select-field > span:first-child { display:none; }
-.quick-heading select,.quick-prompt-head select { width:100%;min-height:32px;padding:5px 24px 5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:11px; }
+.quick-heading select,.quick-prompt-head select { width:100%;min-height:32px;padding-block:5px;padding-left:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:11px; }
 .quick-canvas { display:grid;place-items:center;height:180px;min-width:0;position:relative; }
 .quick-canvas > .image-preview { position:absolute;inset:0; }
 .quick-canvas .image-preview img { height:100%; }
@@ -69,6 +69,5 @@
 .app:not(.workspace-app) .compact-main > .error { margin:8px 16px; }
 
 .quick-tools .select-field { margin:0;min-width:0;max-width:120px; }
-.quick-tools .select-control select { height:30px;min-height:30px;padding:0 24px 0 8px;font-size:11px; }
-.quick-tools .select-control > .icon { right:6px; }
+.quick-tools .select-control select { height:30px;min-height:30px;padding-block:0;padding-left:8px;font-size:11px; }
 .quick-generation-hint { margin:8px 0;font-size:11px;color:var(--muted); }

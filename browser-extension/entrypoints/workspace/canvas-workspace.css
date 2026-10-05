@@ -28,8 +28,7 @@
 .canvas-ready-dot,.canvas-stale-dot { width:5px;height:5px;border-radius:50%;background:#839c4b; }
 .canvas-stale-dot { background:#c78b39; }
 .canvas-versions { width:112px;flex:none; }
-.workspace-app .canvas-versions select { height:34px;min-height:0;width:100%;font-size:11px;border:0;background:transparent;padding-left:5px;padding-right:24px; }
-.canvas-versions .select-control { --select-inset:6px; }
+.workspace-app .canvas-versions select { height:34px;min-height:0;width:100%;font-size:11px;border:0;background:transparent;padding-left:5px; }
 .canvas-workspace button:disabled { opacity:.35;cursor:default; }
 .canvas-subject-settings { position:absolute;bottom:calc(100% + 8px);right:0;width:280px;max-width:calc(100vw - 32px);display:grid;grid-template-columns:1fr 34px 34px;gap:10px;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px #302b201a;white-space:normal;font-size:11px; }
 .canvas-subject-head { grid-column:1/-1;display:flex;align-items:center;justify-content:space-between; }

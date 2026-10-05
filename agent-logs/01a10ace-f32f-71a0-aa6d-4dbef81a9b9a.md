@@ -101,3 +101,31 @@
 - 本轮Git授权：用户在当前监工会话明确要求“提交”，范围为本轮搜索功能、P2修复、测试、文档及对应复核日志；仅本地提交，不推送、不发布、不升版本。最终复核与提交协调通知已送达UIUX 01a10aa7-1bd6-75d2-853b-2553005db757，工具返回对应threadId、isError=false，无需回执。
 
 - Git交付（2026-10-05）：已按用户“提交”授权提交为 `7a8df0f3342d3b22d00cb645f73bd8f44b022105`（feat: speed up session search and add local content index），30个相关文件；分支codex/creative-workspace。暂存差异及diff check通过，功能提交后工作区干净；本条交付记录另作文档提交。未推送、未发布、未升版本、未重启bridge或重载实际扩展。
+
+## 2026-10-05 · 会话索引状态与任务编排动效协调
+
+- 已从UIUX会话原始用户消息核实新要求（turn 01a10c33-8094-76a2-83fe-b20ae011609b）：使用qc-motion-design实现1.2秒本地导出模拟、240ms状态衔接、280ms完成勾选，取消/重播/键盘/减少动态效果，并自测正文读取上限等错误、打磨弹窗。当前登记有效，基线951d6c4；上轮提交授权已完成，不沿用到新任务。
+- 范围为SessionPicker/任务状态组件/样式/显式模拟预览及session读取、索引进度、失败分类、测试文档；UIUX负责集成，其内部子agent负责后端，无重叠编辑。监工本轮仅核对原文、登记与日志，约三项定向检查，无需额外研究委派。状态执行中，待正式交付复核。
+- 验收重点：先区分截图的sessionIndex=error显式fixture和真实bridge错误；容量上限属于明确边界，不能仅隐藏错误或放宽上限。真实原因、可检索覆盖范围和重试/清除动作应可辨；模拟导出不得冒充真实索引进度。取消/重播、迟到完成、卸载清理、焦点和减少动态效果需行为验证，保留整会话选择及顶部已选。
+- 授权边界：本地实施与必要验证，不提交推送发布、不调用模型；运行服务如确需更新先确认空闲，真实正文不输出到日志。范围协调通知已送达UIUX 01a10aa7-1bd6-75d2-853b-2553005db757，工具返回对应threadId、isError=false；送达不等于实现通过。
+
+- 监工最终复核（2026-10-05）：本轮已复核整合至本地工作区，无整合提交。独立build/compile/564项全量及diff check通过，日志/tmp/reframe-supervisor-motion-{build,compile,tests}.log；独立后端82项定向通过，并补充读取器与正文提取组合验证：第二页超大后重连4次，同游标50→25→12→6→3缩页，13条合成消息顺序完整、无重复遗漏。索引取消无关RPC累计预算，保留单响应/正文/页数/时间/容量限制；创作快照原限制保持。未发现本轮可确认缺陷。
+- 监工UI复核：生产构建fixture独立完成模拟连续启动/重播/取消、Enter启动/Esc取消、焦点归位、动态reduced motion（0s）且保留17%进度与最终3份模拟结果；部分未收录展开分类、键盘更新→停止清除→建立、正文“灯塔”命中及五选置顶通过。390×844时五行宽300px、页面宽390px无横向溢出、底部操作可见；914×1034截图prototypes/session-context/screenshots/supervisor-task-index-final-914.png，console error/warn为空，媒体/视口覆盖已恢复。
+- 验证边界：预览error/partial为合成状态；未扫描真实私人正文、调用模型、重启实际bridge或重载扩展，不将合成缩页重连等同于真实CLI跨重连游标兼容性实测。原截图754条逐项失败原因仍无法从缺失的历史元数据追溯；本轮验证证明可复现的预算误报已修复及具体失败分类可见。启用本轮源码仍需服务重启/扩展重载；无推送发布或登记清理。最终复核通知已送达UIUX 01a10aa7-1bd6-75d2-853b-2553005db757，工具返回对应threadId、isError=false，无需回执。
+
+## 2026-10-05 · 会话提示精简与下拉箭头统一
+
+- 用户四处批注：删除“可先选择已收录会话”“仅在本机”及原因末尾覆盖说明；下拉向下箭头与边框留白并全局统一。定向检查登记、现有差异及公共select样式约三项，小输出，无需额外探索子agent。当前UIUX登记有效，上一轮动效/预算改动未提交，保留。
+- 已向当前UIUX 01a10aa7-1bd6-75d2-853b-2553005db757派工，工具返回对应threadId、isError=false。优先复用.select-control公共样式/组件并检查其他原生select；范围文案、TaskOrchestration/SessionPicker和必要公共样式/旧断言。状态执行中。保留分类错误与进度/选择语义，无提交推送发布、bridge重启或实际扩展重载。
+
+- 监工本轮复核（2026-10-05）：四处批注实现已复核整合至本地工作区，无整合提交。三处指定辅助文案删除，搜索范围复用SelectField，canvas版本与compact下拉旧覆盖移除，统一箭头right12px/文字padding-right40px。独立picker17/17及diff check通过；核对执行者最新build/compile/564项全量通过日志（/tmp/reframe-select-{build,compile,tests}.log），未冒称重复运行全量。
+- 监工浏览器证据：独立生产预览partial示例展开原因，三处文案均不存在、真实分类仍可见；搜索范围与逆向模式实测12px/40px。914×1034及390×844检查通过，窄屏scrollWidth=390、搜索下拉124px、确认按钮底部764px可见，console warn/error为空；viewport已恢复。截图browser-extension/prototypes/session-context/screenshots/supervisor-session-cleanup-914.png。预览为示例，未重载实际扩展/重启bridge；本轮未提交、推送或发布。
+- 复核通知已送达UIUX 01a10aa7-1bd6-75d2-853b-2553005db757，工具返回对应threadId、isError=false；现已收到该会话正式完工报告，汇报闭环完成，状态已复核整合（本地工作区，无提交）。版本选择与紧凑面板仅源码核对公共12px/40px覆盖，未额外浏览器实测。执行者另报收到索引完成自动折叠新需求，将另行交付复核，不纳入本轮通过结论。
+
+## 2026-10-05 · 索引完成自动收起
+
+- 监工最终复核（2026-10-05）：已核实执行者会话中的用户直接批注原文，本轮“索引完成自动收起”已复核整合到本地工作区，无整合提交。独立picker17/17与diff check通过；已核对执行者build/compile/564项日志（/tmp/reframe-disclosure-{build,compile,tests}.log）。源码确认scope/状态/错误变化控制开合，普通搜索及同状态计数刷新不会覆盖手动选择；复用公共details/summary及motion.css，无新增动画体系。
+- 独立UI证据：partial初始收起仍展示2/12及10个失败，Enter展开后搜索保留展开；更新→ready自动收起，内部焦点归summary；Space再次展开、更新后移入搜索框，完成收起时搜索焦点保留。914×1034及390×844无横向溢出，窄屏摘要324px，确认操作可见；console warn/error为空，viewport恢复。截图browser-extension/prototypes/session-context/screenshots/supervisor-session-collapsed-914.png。错误/减少动态效果路径沿用执行者本轮证据，未宣称监工重复实测；无真实bridge重启、扩展重载、提交推送发布。
+- 本轮最终复核通知已送达UIUX 01a10aa7-1bd6-75d2-853b-2553005db757，工具返回对应threadId、isError=false；无需重复回执。
+
+- Git授权（2026-10-05）：用户明确要求“提交git”，本次包含已复核的任务编排、索引读取预算及分类修复、提示精简、全局下拉留白和完成自动收起，以及对应测试/说明/日志。沿用本轮build/compile/564项与独立UI复核证据；仅本地提交，不推送、不发布、不升版本。

@@ -32,6 +32,7 @@ test("worker request errors preserve safe status and do not poison later operati
   const { client, directory } = await fixture(t);
   await assert.rejects(client.put(meta("a"), [null]), error => error.status === 400 && !error.message.includes(directory));
   await assert.rejects(client.search({ query: "x".repeat(201) }), { status: 400 });
+  await assert.rejects(client.put(meta("large"), ["x".repeat(1_000_000)]), { status: 413, code: "CONTENT_LIMIT" });
   await client.put(meta("a"), ["有效正文"]);
   assert.equal((await client.get("a")).id, "a");
   assert.equal(client.eval, undefined); assert.equal(client.request, undefined);

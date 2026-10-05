@@ -1,0 +1,36 @@
+.task-orchestration { --task-accent:#8b731b;position:relative;isolation:isolate;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);transition:border-radius 240ms cubic-bezier(.77,0,.175,1); }
+.task-orchestration::before { content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;background:#edf1e5;opacity:0;transition:opacity 240ms cubic-bezier(.77,0,.175,1); }
+.task-orchestration[data-state=running] { border-radius:16px; }
+.task-orchestration[data-state=success] { --task-accent:#5b7140; }
+.task-orchestration[data-state=success]::before { opacity:1; }
+.task-orchestration-head { display:flex;align-items:center;gap:10px; }
+.task-orchestration-mark { display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:10px;background:var(--surface-muted);color:var(--task-accent);transition:transform 240ms cubic-bezier(.77,0,.175,1); }
+.task-orchestration[data-state=running] .task-orchestration-mark { transform:translateY(-2px); }
+.task-orchestration-mark svg { width:21px;height:21px; }
+.task-check { stroke-dasharray:1;stroke-dashoffset:1;opacity:0;transition:stroke-dashoffset 280ms cubic-bezier(.23,1,.32,1),opacity 120ms ease; }
+.task-orchestration[data-state=success] .task-check { stroke-dashoffset:0;opacity:1; }
+.task-symbol { opacity:1;transition:opacity 120ms ease; }
+.task-orchestration[data-state=success] .task-symbol { opacity:0; }
+.task-orchestration-copy { min-width:0;flex:1; }
+.task-orchestration-copy strong { display:block;font-size:12px;font-weight:600;line-height:1.5; }
+.task-orchestration-copy p { margin:3px 0 0;font-size:11px;line-height:1.6;color:var(--muted);font-variant-numeric:tabular-nums;overflow-wrap:anywhere; }
+.task-progress-track { position:relative;height:4px;margin-top:12px;overflow:hidden;border-radius:4px;background:var(--surface-muted); }
+.task-progress-track > span { display:block;height:100%;background:var(--yellow);transform-origin:left;transition:transform 160ms linear; }
+.task-progress-semantic { position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden; }
+.task-orchestration-actions { display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px; }
+.app .task-orchestration-actions button { font:inherit;font-size:11px;border:1px solid transparent;border-radius:7px;padding:6px 10px;min-height:30px;cursor:pointer;transition:transform 120ms ease; }
+.app .task-action-primary { background:var(--yellow);color:var(--ink);font-weight:600; }
+.app .task-action-secondary { background:transparent;color:var(--muted); }
+.app .task-orchestration-actions button:disabled { cursor:default;opacity:.45; }
+.app .task-orchestration-actions button:focus-visible { outline:2px solid var(--task-accent);outline-offset:3px; }
+.task-orchestration[data-motion=instant],.task-orchestration[data-motion=instant]::before,.task-orchestration[data-motion=instant] * { transition:none!important;animation:none!important; }
+.task-orchestration[data-motion=instant] .task-orchestration-mark { transform:none; }
+@media(hover:hover) and (pointer:fine) { .task-orchestration[data-motion=full] button:active:not(:disabled) { transform:scale(.97); }.app .task-action-secondary:hover:not(:disabled) { background:var(--surface-muted);color:var(--ink); } }
+.task-demo { min-height:100dvh;background:var(--paper);padding:32px; }
+.task-demo header { display:flex;align-items:center;justify-content:space-between;gap:16px; }
+.task-demo header img { width:34px;height:34px; }.task-demo header a { color:var(--muted);font-size:12px; }
+.task-demo-content { max-width:560px;margin:14vh auto 0; }
+.task-demo-eyebrow { color:var(--muted);font-size:11px;letter-spacing:1px; }.task-demo h1 { font-size:28px;margin:12px 0; }.task-demo-intro { font-size:13px;color:var(--muted);margin-bottom:28px; }
+.task-demo .task-orchestration { padding:22px; }.task-demo .task-orchestration-copy strong { font-size:15px; }.task-demo .task-orchestration-actions { margin-top:22px; }
+.task-demo-note { font-size:11px;line-height:1.8;color:var(--muted);margin:14px 0 0; }
+@media(max-width:500px) { .task-demo { padding:20px; }.task-demo-content { margin-top:10vh; } }

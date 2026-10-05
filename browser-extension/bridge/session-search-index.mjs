@@ -3,7 +3,7 @@ import { mkdirSync, lstatSync, chmodSync, openSync, closeSync, constants } from 
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
-const fail = (message, status = 400) => Object.assign(new Error(message), { status });
+const fail = (message, status = 400, code) => Object.assign(new Error(message), { status, code });
 const normalize = text => text.normalize("NFKC").toLowerCase();
 const validId = id => typeof id === "string" && /^[\w-]{1,100}$/.test(id);
 const summary = row => row && ({ id: row.id, title: row.title, updatedAt: row.updatedAt, archived: !!row.archived });
@@ -86,15 +86,15 @@ export function createSessionSearchIndex({ directory, limits = {} }) {
           const text = typeof message === "string" ? message : message?.text;
           if (typeof text !== "string") throw fail("会话索引只接受已筛选的文字正文");
           characters += Math.max(text.length, normalize(text).length);
-          if (characters > bounds.maxSessionCharacters) throw fail("单个会话超过本机检索索引容量，未截断正文", 413);
+          if (characters > bounds.maxSessionCharacters) throw fail("单个会话超过本机检索索引容量，未截断正文", 413, "CONTENT_LIMIT");
           for (const part of text.split(/\r?\n/)) if (part.trim()) paragraphs.push({ kind: "content", text: part });
         }
-        if (characters > bounds.maxSessionCharacters || paragraphs.length > 100_000) throw fail("单个会话超过本机检索索引容量，未截断正文", 413);
+        if (characters > bounds.maxSessionCharacters || paragraphs.length > 100_000) throw fail("单个会话超过本机检索索引容量，未截断正文", 413, "CONTENT_LIMIT");
         atomic(() => {
           const previous = db.prepare("SELECT characters FROM sources WHERE id=?").get(meta.id);
           const total = db.prepare("SELECT count(*) count,coalesce(sum(characters),0) characters FROM sources").get();
           if (total.count + (previous ? 0 : 1) > bounds.maxSessions || total.characters - (previous?.characters || 0) + characters > bounds.maxCharacters)
-            throw fail("本机会话检索索引容量已满，未截断正文；请清理索引后重试", 413);
+            throw fail("本机会话检索索引容量已满，未截断正文；已建立的索引仍可搜索", 413, "INDEX_CAPACITY");
           db.prepare("DELETE FROM sources WHERE id=?").run(meta.id);
           db.prepare("INSERT INTO sources VALUES (?,?,?,?,?)").run(meta.id, meta.title, meta.updatedAt, Number(meta.archived), characters);
           for (const paragraph of paragraphs) {

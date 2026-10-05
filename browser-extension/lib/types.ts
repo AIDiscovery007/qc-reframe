@@ -1,5 +1,6 @@
 export type SessionSummary = { id: string; title: string; updatedAt: number };
-export type SessionIndexStatus = { state: "empty" | "stale" | "building" | "partial" | "ready"; indexed: number; total: number; failed: number; updatedAt: number | null; error?: string };
+export type SessionIndexIssue = { code: "content_limit" | "response_limit" | "page_limit" | "index_capacity" | "changed" | "timeout" | "read_failed"; count: number };
+export type SessionIndexStatus = { state: "empty" | "stale" | "building" | "partial" | "ready"; indexed: number; processed?: number; total: number; failed: number; issues?: SessionIndexIssue[]; updatedAt: number | null; error?: string };
 export type SessionSearchResult = SessionSummary & { match?: "title" | "content"; snippet?: string };
 export type SessionPage = { data: SessionSearchResult[]; nextCursor: string | null; index?: SessionIndexStatus };
 export type SessionContext = { sources: SessionSummary[]; snapshotId?: string; hash?: string; capturedAt?: string; messageCount?: number; attachmentCount?: number };

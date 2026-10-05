@@ -16,7 +16,7 @@ if (index) parentPort.on("message", message => {
   }
   try { parentPort.postMessage({ id, result: index[method](...args) }); }
   catch (error) {
-    parentPort.postMessage({ id, error: { status: error.status || 503,
+    parentPort.postMessage({ id, error: { status: error.status || 503, code: error.code,
       message: error.status ? error.message : "本机会话检索索引不可用，请重建索引后重试" } });
   }
   // Synchronous handlers process queued operations in FIFO order before closing.
