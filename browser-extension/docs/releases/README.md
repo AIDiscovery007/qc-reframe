@@ -6,10 +6,11 @@
 
 后续待发布改动见 [unreleased](unreleased.md)。
 
-最新版本：[v0.3.3 · 原地导航、输入保存与服务重启](v0.3.3.md)。
+最新版本：[v0.4.0 · 会话创作、正文搜索与 CLI 恢复](v0.4.0.md)。
 
 | 版本 | 更新内容 | 详情 |
 | --- | --- | --- |
+| 0.4.0 | 会话创作、已选置顶、标题与正文搜索、人物描述、CLI 兼容升级与恢复 | [版本说明](v0.4.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.0) |
 | 0.3.3 | 提醒原地导航、工作台复用、输入原位保存、展开编辑器、十种提示音与本机服务重启 | [版本说明](v0.3.3.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.3.3) |
 | 0.3.2 | 全局入口复用工作台、项目路径与版本独立记忆、草稿与导航优先级修复 | [版本说明](v0.3.2.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.3.2) |
 | 0.3.1 | 固定工具栏与紧凑页头、动态推理强度、提醒复用工作台与初始化竞态修复 | [版本说明](v0.3.1.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.3.1) |

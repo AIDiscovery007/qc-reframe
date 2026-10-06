@@ -148,3 +148,12 @@
 - 设置分类改为 App 单一受控状态，主监工以当前构建页面独立运行 `workspace.html?state=library&settingsRegression=1`：无项目交接、分类切换、手动切页后相同恢复目标、关闭重开均 PASS，控制台无 warn/error。390px 检查 document.scrollWidth=390，dialog left=12/right=378；截图 `/tmp/reframe-supervisor-onboarding-qa/settings-recovery.png`。历史 CLI 版本矩阵和真实模型未验证，实际扩展未重载。
 - 已向 UIUX 会话 01a10c6a-a0cb-7673-87b2-ea9849107451 送达复核通过与提交准备通知，工具 isError=false。本轮状态已复核整合至工作区，待执行本地提交；不清理任职。
 - Git 交付：`172113fba545b49295bd218f06552edc45b83d51`（fix: improve CLI compatibility and recovery flows），34 个相关文件，分支 codex/creative-workspace；暂存差异与 diff check 通过，提交后工作区干净。本条及执行者整合记录另作文档提交。未推送、发布、升版本、重启现用 bridge、重载实际扩展或调用真实模型；本监工临时预览与页面已关闭。
+
+## 2026-10-06 · v0.4.0 正式发布
+
+- 用户明确要求“发布一个大版本更新，0.4.xx”，监工按 0.4.0 执行；授权包含版本提交、目标 main 推送、v0.4.0 标签、正式 GitHub Release 与阶段收尾通知，不包含真实 CLI 升级、模型调用、运行服务重启或实际扩展重载。
+- 起始分支 codex/creative-workspace，HEAD c483bd7，工作区干净；GitHub 目标 AIDiscovery007/qc-reframe，现有账号有 ADMIN 权限，latest 为 v0.3.3，远端无 v0.4 标签。保持当前 checkout，从已验收分支按快进推送 main，不强推。
+- 已将版本与发布资料准备派给当前 UIUX 01a10c6a-a0cb-7673-87b2-ea9849107451，送达 isError=false；监工负责资料复核、zip/compile/test、附件清单与哈希核验、提交和发布。阶段状态执行中，尚未发布。
+- 发布产物验证：监工在 0.4.0 源码上依次实际执行 zip、compile、test，603/603 通过、0 skipped，日志 `/tmp/reframe-v0.4.0-{zip,compile,tests}.log`。ZIP 34 文件、777336 字节，与构建目录逐字节一致，MV3/名称/版本及各尺寸图标通过；无 bridge、本地数据、测试、原型、依赖目录或 source map。SHA-256 为 `2ecb9dccb743011f3287c66d853c2cec57f1963d71500f829f7c0fa2070e0d90`，已生成仅含文件名的 SHA256SUMS。
+- 资料复核：当前版本/下载/克隆入口一致，发布文档本地相对链接通过，历史版本说明保留；说明同步更新服务与扩展、数据保留、可重建索引及真实模型/旧 CLI 矩阵未验证边界。无额外模型请求、真实服务重启或扩展重载。仅修正 Worker 与分页描述后即可发布，最终结果待远端核验。
+- 最终资料复核通过：后台工作线程及按对话轮数缩页重试的术语修正已落实，版本与升级说明和实际实现一致，diff check 通过；版本资料进入正式提交，远端发布结果随后补记。
