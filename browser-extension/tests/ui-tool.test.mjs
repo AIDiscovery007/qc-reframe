@@ -23,10 +23,12 @@ test('invalid UI commands and parameters exit 2 before starting verification', a
     ['verify', '--scenario', 'missing'], ['verify', '--fault', 'missing'],
     ['verify', '--scenario', 'popup', '--fault', 'canvas-padding'],
     ['inspect'], ['sync', '--no-build'], ['verify', 'extra'],
+    ['gate', '--tier', 'unsafe'], ['visual'], ['baseline'], ['accept'], ['change'],
+    ['visual', '--report', '/missing', '--scenario', 'generation-actions'],
   ]) {
     await assert.rejects(cli(args), error => {
       assert.equal(error.code, 2, args.join(' '));
-      assert.match(error.stderr, /未知|重复|需要|必须|不匹配/, args.join(' '));
+      assert.match(error.stderr, /未知|重复|需要|必须|不匹配|使用|非视觉/, args.join(' '));
       assert.equal(error.stdout, '', args.join(' '));
       return true;
     });
@@ -79,8 +81,9 @@ test('independent components retain targeted geometry and the behavior regressio
   ]) {
     const result = await contextFor([file]);
     assert.equal(result.fullCoverageFallback, false, file);
-    assert.deepEqual(result.rules.map(rule => rule.id), [ruleId], file);
-    assert.deepEqual(result.scenarios.filter(scenario => !scenario.regression).map(scenario => scenario.id), expectedGeometry, file);
+    assert.deepEqual(result.rules.filter(rule => rule.kind === 'geometry').map(rule => rule.id), [ruleId], file);
+    assert.ok(result.scenarios.some(scenario => scenario.example), file);
+    assert.deepEqual(result.scenarios.filter(scenario => !scenario.regression && !scenario.example).map(scenario => scenario.id), expectedGeometry, file);
     assert.equal(result.scenarios.filter(scenario => scenario.regression).length, 4);
   }
 });
@@ -135,4 +138,19 @@ test('fixture fingerprint covers preview dependencies independently of product b
   assert.deepEqual(await fixtureState(directory), original);
   await writeFile(join(directory, 'browser-extension/tests/another.browser.js'), 'new fixture');
   assert.notEqual((await fixtureState(directory)).hash, original.hash);
+});
+
+
+test('maintenance CLI records are reviewable, stale records fail and quick gate runs from another directory', async t => {
+  const directory = await temporary(t), output = join(directory, 'proposal.json');
+  const created = JSON.parse((await cli(['change', '--files', 'browser-extension/entrypoints/popup/style.css', '--reason', 'Contract verification only', '--output', output, '--json'], directory)).stdout);
+  assert.equal(created.reviewStatus, 'proposed');
+  assert.equal(JSON.parse((await cli(['change', '--record', output, '--json'], directory)).stdout).status, 'passed');
+  created.files[0].sha256 = '0'.repeat(64);
+  await writeFile(output, JSON.stringify(created));
+  await assert.rejects(cli(['change', '--record', output, '--json'], directory), error => error.code === 1 && JSON.parse(error.stdout).status === 'failed');
+  const quick = JSON.parse((await cli(['gate', '--tier', 'quick', '--json'], directory)).stdout);
+  assert.equal(quick.status, 'passed');
+  assert.equal(quick.steps.length, 1);
+  assert.ok((await readFile(quick.reportPath, 'utf8')).includes('static-and-maintenance'));
 });

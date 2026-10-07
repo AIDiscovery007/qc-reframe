@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "intent": "同值颜色复用既有语义token；保持现有设计值与交互，验证root与host继承作用域",
+  "createdAt": "2026-10-07T09:12:14.182Z",
+  "reviewStatus": "proposed",
+  "files": [
+    {
+      "path": "browser-extension/entrypoints/popup/task-reminders.css",
+      "sha256": "6416a80c1961b4d20aadc30a12f37a2202fb1b15300a15b27af3361ee82fc7d3"
+    },
+    {
+      "path": "browser-extension/entrypoints/workspace/canvas-workspace.css",
+      "sha256": "940f02e8b0343e8e8eb986505dfc2aeca34a699352311cc26e4b3c5f93996d2b"
+    },
+    {
+      "path": "browser-extension/entrypoints/workspace/gallery.css",
+      "sha256": "d609c865888c7a66930b0828d8a54bc5712aca990bfcf17c9a97912b02495948"
+    }
+  ],
+  "rules": [
+    "UI-CSS-IMPORT",
+    "UI-TOKEN-DEFINED",
+    "UI-TOKEN-COLOR",
+    "UI-LAYOUT-CANVAS",
+    "UI-LAYOUT-QUICK",
+    "UI-IMAGE-PREVIEW",
+    "UI-EXAMPLE-STATE",
+    "UI-EXAMPLE-KEYBOARD"
+  ],
+  "scenarios": [
+    "workspace-wide",
+    "workspace-prompt",
+    "workspace-narrow",
+    "popup",
+    "popup-narrow",
+    "popup-image-failed",
+    "generation-actions",
+    "auto-style",
+    "creation-context",
+    "settings-recovery",
+    "example-workspace-empty",
+    "example-popup-empty",
+    "example-input-loading",
+    "example-reverse-busy",
+    "example-reverse-failed",
+    "example-no-model",
+    "example-long-instruction",
+    "example-narrow-input",
+    "example-narrow-result",
+    "example-image-viewer",
+    "example-native-controls"
+  ],
+  "scopeReason": "共享/未知依赖没有完整影响图，回退全部登记场景，不静默跳过。",
+  "evidence": [
+    {
+      "kind": "build-and-types",
+      "result": "npm run build 与 compile通过，生产设计值不变",
+      "log": "agent-logs/01a11556-7e12-7440-b956-f968b3a00034.md",
+      "section": "阶段6维护机制与同值迁移"
+    },
+    {
+      "kind": "static",
+      "result": "96个来源全量检查，0 finding；目录同步通过",
+      "command": "node agent-tool/ui.mjs check --json"
+    },
+    {
+      "kind": "computed-token-scope",
+      "result": "6/6通过：生产聚合CSS在document :root与自建closed ShadowRoot :host默认颜色/覆盖继承/缺作用域负例",
+      "command": "node --test agent-tool/ui/token-scope.test.mjs",
+      "boundary": "自建DOM fixture；非真实扩展closed内部读取"
+    },
+    {
+      "kind": "product-tests",
+      "result": "692/692通过",
+      "command": "npm --prefix browser-extension test"
+    },
+    {
+      "kind": "integrated-gate",
+      "result": "静态通过，21预览场景通过，16真实扩展检查通过；full仅因3个初始视觉基线未审阅而失败",
+      "log": "agent-logs/01a11556-7e12-7440-b956-f968b3a00034.md",
+      "section": "阶段2–6最终技术交付 · 2026-10-07",
+      "report": "<OS临时目录>/reframe-ui-gate-R4jX5S/gate.json"
+    }
+  ],
+  "reviewChecklist": [
+    "确认设计意图及合法变体",
+    "复核组件复用与所有受影响表面",
+    "附上静态/交互/截图证据",
+    "设计变化时单独审阅指定视觉基线"
+  ]
+}

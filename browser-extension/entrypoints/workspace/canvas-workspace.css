@@ -112,7 +112,7 @@
 .workspace-app .canvas-editor-expand { margin-left:auto;border:0;background:transparent;font-size:12px;flex:none;padding:6px 10px;color:inherit; }
 .workspace-app .canvas-instruction-expand { position:absolute;right:8px;top:8px;width:30px;height:30px;padding:6px;border-radius:6px; }
 .canvas-prompt-heading { display:flex;align-items:center;justify-content:space-between;gap:10px;height:34px;flex:none;font-size:12px;color:var(--muted); }
-.canvas-prompt-sheet[popover] { position:fixed;inset:auto;left:var(--editor-left);bottom:var(--editor-bottom,0px);width:var(--editor-width);height:var(--prompt-editor-height);max-height:calc(100dvh - var(--editor-bottom,0px) - 100px);margin:0;box-sizing:border-box;color:var(--ink);background:#fffefa;padding:0 20px 16px; }
+.canvas-prompt-sheet[popover] { position:fixed;inset:auto;left:var(--editor-left);bottom:var(--editor-bottom,0px);width:var(--editor-width);height:var(--prompt-editor-height);max-height:calc(100dvh - var(--editor-bottom,0px) - 100px);margin:0;box-sizing:border-box;color:var(--ink);background:var(--surface);padding:0 20px 16px; }
 .canvas-prompt-sheet[popover]:popover-open { display:flex; }
 .canvas-prompt-sheet[popover]::backdrop,.canvas-composer[popover]::backdrop { background:transparent;pointer-events:none; }
 .canvas-prompt-sheet[data-expanded="true"] { height:calc(100dvh - 165px); }

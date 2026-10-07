@@ -12,6 +12,8 @@
 | UI-LAYOUT-CANVAS | 工作台画布关系：宽屏双画布等宽，共享标签、画布、图条轨道；窄屏关闭侧 inert。 | workspace | [browser-extension/entrypoints/workspace/CanvasWorkspace.tsx](../../../browser-extension/entrypoints/workspace/CanvasWorkspace.tsx)、[browser-extension/entrypoints/workspace/canvas-workspace.css](../../../browser-extension/entrypoints/workspace/canvas-workspace.css)、[browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css) |
 | UI-LAYOUT-QUICK | 轻量画布与图条：保持已确认的轻量画布和图条尺寸，空态与有图状态分开验证。 | popup | [browser-extension/entrypoints/popup/QuickWorkspace.tsx](../../../browser-extension/entrypoints/popup/QuickWorkspace.tsx)、[browser-extension/entrypoints/popup/compact-editor.css](../../../browser-extension/entrypoints/popup/compact-editor.css) |
 | UI-IMAGE-PREVIEW | 图片预览入口：预览按钮贴合实际 contain 图片边缘，图片失败后不提供无效入口。 | workspace, popup | [browser-extension/entrypoints/popup/ImagePreview.tsx](../../../browser-extension/entrypoints/popup/ImagePreview.tsx)、[browser-extension/entrypoints/popup/image-preview.css](../../../browser-extension/entrypoints/popup/image-preview.css) |
+| UI-EXAMPLE-STATE | 生产组件代表状态：预览数据驱动真实组件的空态、读取、忙碌、失败、禁用、长文本和窄屏；不通过改DOM伪造业务状态。 | workspace, popup | [browser-extension/entrypoints/popup/QuickWorkspace.tsx](../../../browser-extension/entrypoints/popup/QuickWorkspace.tsx)、[browser-extension/entrypoints/workspace/CanvasWorkspace.tsx](../../../browser-extension/entrypoints/workspace/CanvasWorkspace.tsx) |
+| UI-EXAMPLE-KEYBOARD | 原生控件与浮层交互：真实键盘验证原生select、帮助展开、图片缩放、dialog焦点约束、Escape关闭和焦点返回。 | workspace | [browser-extension/entrypoints/popup/SelectField.tsx](../../../browser-extension/entrypoints/popup/SelectField.tsx)、[browser-extension/entrypoints/popup/InlineHelp.tsx](../../../browser-extension/entrypoints/popup/InlineHelp.tsx)、[browser-extension/entrypoints/popup/ImagePreview.tsx](../../../browser-extension/entrypoints/popup/ImagePreview.tsx)、[browser-extension/lib/motion-dialog.ts](../../../browser-extension/lib/motion-dialog.ts) |
 
 ## 组件复用入口
 
@@ -39,6 +41,17 @@
 | auto-style | workspace 1440×1000 | /workspace.html?state=projects&mode=style&autoStyleRegression=1&inputSaveDelay=250 | autoStyleRegression |
 | creation-context | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&inputSaveDelay=1800&creationContextRegression=mode | creationContextRegression |
 | settings-recovery | workspace 1440×1000 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
+| example-workspace-empty | workspace 1440×1000 | /workspace.html?state=empty | UI-EXAMPLE-STATE |
+| example-popup-empty | popup 400×740 | /popup.html?state=empty | UI-EXAMPLE-STATE |
+| example-input-loading | workspace 1440×1000 | /workspace.html?state=alignment&reference=pending&referenceDelay=60000 | UI-EXAMPLE-STATE |
+| example-reverse-busy | popup 400×740 | /popup.html?state=running | UI-EXAMPLE-STATE |
+| example-reverse-failed | popup 400×740 | /popup.html?state=failed | UI-EXAMPLE-STATE |
+| example-no-model | popup 400×740 | /popup.html?state=models-new | UI-EXAMPLE-STATE |
+| example-long-instruction | workspace 1440×1000 | /workspace.html?state=alignment | UI-EXAMPLE-STATE, UI-LAYOUT-CANVAS |
+| example-narrow-input | workspace 600×900 | /workspace.html?state=alignment | UI-EXAMPLE-STATE, UI-LAYOUT-CANVAS |
+| example-narrow-result | workspace 600×900 | /workspace.html?state=alignment | UI-EXAMPLE-STATE, UI-LAYOUT-CANVAS |
+| example-image-viewer | workspace 1440×1000 | /workspace.html?state=alignment | UI-EXAMPLE-KEYBOARD |
+| example-native-controls | workspace 1440×1000 | /workspace.html?state=alignment | UI-EXAMPLE-KEYBOARD |
 
 ## CSS 变量清单
 
@@ -95,7 +108,9 @@
 
 ## 覆盖边界
 
-- 真实扩展安装、权限、跨域、宿主网页及 closed ShadowRoot 内部几何未验证。
+- 预览示例不验证真实扩展；extension独立命令负责声明的宿主页面与closed ShadowRoot外部行为，closed ShadowRoot内部几何仍未覆盖。
 - 静态 token 定义检查不证明每个选择器的继承、级联和 computed value 正确。
-- 第一阶段没有像素视觉基线；截图用于复核，不能证明全部设计或动效正确。
+- visual工具提供像素对比；真实基线仍须人工审阅后接受，截图或差异阈值不能证明全部设计与动效正确。
 - 仅覆盖目录列出的场景与规则；预览有通知条及尺寸修正，不能混作实机截图。
+- 阶段2代表状态由生产组件及预览数据运行，覆盖图片查看、原生select、帮助、dialog键盘与焦点；不是每个组件与每种状态的笛卡尔积。
+- 未覆盖原生系统下拉的像素外观、触屏/屏幕阅读器、旋转应用中禁止关闭、嵌套dialog与真实模型；headless原生picker键盘不支持时单独标记skipped。

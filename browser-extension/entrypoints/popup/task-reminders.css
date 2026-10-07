@@ -1,5 +1,5 @@
 .reminder-dot { display: inline-block; width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 0 1px rgb(38 36 31 / .12); margin-inline-start: 6px; }
-.reminder-toast { position: fixed; inset: auto 20px 20px auto; margin: 0; max-width: calc(100vw - 32px); padding: 12px 14px; border: 1px solid #e5e1d8; border-radius: 14px; background: #fffefa; color: #26241f; box-shadow: 0 8px 30px rgb(40 34 24 / .12); font: 13px/1.6 -apple-system, 'PingFang SC', sans-serif; z-index: 1000; }
+.reminder-toast { position: fixed; inset: auto 20px 20px auto; margin: 0; max-width: calc(100vw - 32px); padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); box-shadow: 0 8px 30px rgb(40 34 24 / .12); font: 13px/1.6 -apple-system, 'PingFang SC', sans-serif; z-index: 1000; }
 .reminder-toast:popover-open { display: flex; align-items: center; gap: 12px; }
 .reminder-toast button { cursor: pointer; border: 0; background: transparent; color: inherit; font: inherit; padding: 4px; }
 .reminder-toast .text-button { text-decoration: underline; text-underline-offset: 3px; }

@@ -44,9 +44,30 @@
 
 报告保留在 OS 临时目录 `reframe-ui-*`，包含 JSON 测量、Markdown 摘要、所有场景截图和失败/inspect trace；路径在 stdout。诊断限制16个目标、每个至多5层自身/祖先样式。可用扩展目录中的 `npx playwright show-trace /absolute/path/scene.trace.zip` 查看。报告不会写入版本库；不再需要时可删除这次输出目录。正常退出及 SIGINT/SIGTERM 清理本次进程，系统强制杀死可能留下临时文件或进程。
 
-聚焦验证：`node --test browser-extension/tests/ui-static.test.mjs browser-extension/tests/ui-tool.test.mjs`；真实 Chromium 采样器正反例：`node --test agent-tool/ui/probe.test.mjs`。后者需已安装浏览器，独立于默认产品测试。当前无像素视觉基线和自动接受截图命令，真实扩展/closed ShadowRoot 另行验收。
+聚焦验证：`node --test browser-extension/tests/ui-static.test.mjs browser-extension/tests/ui-tool.test.mjs`；真实 Chromium 采样器正反例：`node --test agent-tool/ui/probe.test.mjs`。后者需已安装浏览器，独立于默认产品测试。组件样例、有限视觉比较、隔离真实扩展与分层门禁见下文；各自证据不可替代。
 
 报告另外记录预览 fixture 指纹及文件清单，覆盖 `ui.mjs`、`preview.mjs`、`gallery-preview.mjs`、浏览器回归脚本和画廊 fixture 文件。结束时再次核对；运行中这些输入变化会使结果作废。它独立于产品构建指纹，纯 fixture 修改可以用 `--no-build` 重新验证。
+
+## 状态样例、视觉、扩展与门禁
+
+| 命令 | 用途 / 输出 |
+| --- | --- |
+| `ui.mjs examples [--origin http://127.0.0.1:PORT]` | 临时HTML导航，链接生产预览；预览需单独启动，自动验证仍运行verify。 |
+| `ui.mjs baseline --report /absolute/report.json [--scenario ID]` | 生成3个核心场景或指定场景的候选、比较HTML与manifest，不接受截图。 |
+| `ui.mjs visual --report /absolute/report.json [--baseline-dir DIR]` | 固定策略像素比较；缺基线或环境不兼容退出1。 |
+| `ui.mjs accept --candidate DIR --scenario ID --reason TEXT --reviewer NAME [--baseline-dir DIR]` | 人类明确审阅后一次接受一个核心场景，保留来源与审阅记录；reviewer字符串不是授权。 |
+| `ui.mjs extension` | 消费已有verify构建指纹，启动临时profile中的真实MV3；网络仅本次合成fixture，失败/信号清理自己资源。 |
+| `ui.mjs gate --tier quick\|browser\|full [--base REF] [--no-build] [--baseline-dir DIR]` | quick=静态增量+目录+例外；browser再加全场景预览+真实扩展；full再要求已审阅像素基线。 |
+| `ui.mjs change --files PATH … --reason TEXT [--output FILE]` | 生成proposed设计变更记录：来源hash、受影响规则/场景、复核清单。输出文件必须不存在。 |
+| `ui.mjs change --record FILE` | 校验记录与当前来源/映射一致，不证明记录中的证据真实执行或已审阅。 |
+
+上表命令均加前缀 `node agent-tool/`；完整参数以 `--help` 为准。路径参数除`--files`按仓库根解析外，报告/候选/基线/output按当前目录解析，推荐绝对路径。npm别名在扩展目录：`ui:check`、`ui:verify`、`ui:full`。`gate browser/full`保守运行全部登记场景，避免不完整依赖图漏测；context仍可帮助手工定位。
+
+新命令沿用exit0成功、exit1失败/未覆盖、exit2参数错误。候选生成成功表示材料可审阅，不代表视觉验收通过；`gate browser`也不包含视觉批准。OS临时目录统一保存报告，CI设置TMPDIR后归档，扩展profile正常清理但证据保留。
+
+[GitHub workflow](../.github/workflows/uiux.yml)在PR及main/master push运行浏览器门禁与测试，初始Linux基线缺失时明确列出待审阅，上传候选；指定workflow_dispatch的require_visual或存在Linux基线manifest后运行full，缺少任一核心场景即失败。仓库分支保护须由维护者将此job设为必需检查；本地文件存在不能证明远端CI执行或分支保护已启用。Mac与Linux基线分目录，不能互相冒用。
+
+详细设计变更、到期例外与首次基线流程见[维护指南](../browser-extension/docs/uiux/maintenance.md)。
 
 ## 基准的副作用与限制
 

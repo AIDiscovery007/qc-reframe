@@ -36,7 +36,7 @@
 .gallery-preview::backdrop{background:rgb(30 27 21 / .56)}
 .gallery-preview .preview-layout{display:grid;grid-template-columns:minmax(0,1fr) 270px;height:100%;position:relative}
 .gallery-preview .preview-close{position:absolute;z-index:1;right:16px;top:16px;width:34px;height:34px;border:0;border-radius:50%;background:var(--surface-muted)}
-.gallery-preview .preview-art{min-width:0;min-height:0;padding:30px;display:flex;align-items:center;justify-content:center;background:#f0ede6}
+.gallery-preview .preview-art{min-width:0;min-height:0;padding:30px;display:flex;align-items:center;justify-content:center;background:var(--surface-muted)}
 .gallery-preview .preview-art img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
 .gallery-preview .preview-info{padding:65px 26px 26px;display:flex;flex-direction:column}
 .gallery-preview .eyebrow{font-size:10px;color:var(--muted);letter-spacing:2px;margin-bottom:12px}

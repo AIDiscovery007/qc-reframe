@@ -1,0 +1,58 @@
+name: UIUX infrastructure
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      require_visual:
+        description: Require reviewed Linux visual baselines (missing or incompatible baselines fail)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  uiux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TMPDIR: ${{ runner.temp }}/reframe-ui
+      UI_BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD' }}
+      REQUIRE_VISUAL: ${{ inputs.require_visual || false }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: browser-extension/package-lock.json
+      - run: mkdir -p "$TMPDIR"
+      - run: npm ci
+        working-directory: browser-extension
+      - run: npx playwright install --with-deps chromium
+        working-directory: browser-extension
+      - name: Static, state examples and isolated real extension
+        run: |
+          if ! git rev-parse --verify "$UI_BASE^{commit}" >/dev/null 2>&1; then
+            UI_BASE=$(git hash-object -t tree /dev/null)
+          fi
+          echo "UI_BASE=$UI_BASE" >> "$GITHUB_ENV"
+          node agent-tool/ui.mjs gate --tier browser --base "$UI_BASE" --json > "$TMPDIR/browser-gate.json"
+      - run: npm run compile && npm test
+        working-directory: browser-extension
+      - run: node --test agent-tool/ui/*.test.mjs
+      - name: Reviewed visual gate
+        if: ${{ inputs.require_visual || hashFiles('browser-extension/docs/uiux/visual-baselines/linux/**/manifest.json') != '' }}
+        run: node agent-tool/ui.mjs gate --tier full --no-build --base "$UI_BASE" --baseline-dir browser-extension/docs/uiux/visual-baselines/linux --json > "$TMPDIR/full-gate.json"
+      - name: Initial visual review status
+        if: ${{ !inputs.require_visual && hashFiles('browser-extension/docs/uiux/visual-baselines/linux/**/manifest.json') == '' }}
+        run: echo 'Visual acceptance is pending human review of the uploaded Linux candidates. Browser gate does not claim pixel approval.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Reports, candidates, screenshots and failure traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uiux-evidence
+          path: ${{ runner.temp }}/reframe-ui
+          retention-days: 14

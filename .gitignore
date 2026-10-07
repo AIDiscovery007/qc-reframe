@@ -21,3 +21,10 @@
 !/.agents/roles/uiux-engineer.md
 !/.agents/roles/architecture-engineer.md
 !/.agents/roles/assignments.md
+
+# UIUX verification workflow only.
+!/.github/
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/uiux.yml

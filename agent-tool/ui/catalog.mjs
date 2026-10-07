@@ -8,6 +8,8 @@ export const rules = [
   { id: 'UI-LAYOUT-CANVAS', title: '工作台画布关系', kind: 'geometry', surfaces: ['workspace'], sources: [workspace + 'CanvasWorkspace.tsx', workspace + 'canvas-workspace.css', workspace + 'results.css'], intent: '宽屏双画布等宽，共享标签、画布、图条轨道；窄屏关闭侧 inert。' },
   { id: 'UI-LAYOUT-QUICK', title: '轻量画布与图条', kind: 'geometry', surfaces: ['popup'], sources: [popup + 'QuickWorkspace.tsx', popup + 'compact-editor.css'], intent: '保持已确认的轻量画布和图条尺寸，空态与有图状态分开验证。' },
   { id: 'UI-IMAGE-PREVIEW', title: '图片预览入口', kind: 'geometry', surfaces: ['workspace', 'popup'], sources: [popup + 'ImagePreview.tsx', popup + 'image-preview.css'], intent: '预览按钮贴合实际 contain 图片边缘，图片失败后不提供无效入口。' },
+  { id: 'UI-EXAMPLE-STATE', title: '生产组件代表状态', kind: 'interaction', surfaces: ['workspace', 'popup'], sources: [popup + 'QuickWorkspace.tsx', workspace + 'CanvasWorkspace.tsx'], intent: '预览数据驱动真实组件的空态、读取、忙碌、失败、禁用、长文本和窄屏；不通过改DOM伪造业务状态。' },
+  { id: 'UI-EXAMPLE-KEYBOARD', title: '原生控件与浮层交互', kind: 'interaction', surfaces: ['workspace'], sources: [popup + 'SelectField.tsx', popup + 'InlineHelp.tsx', popup + 'ImagePreview.tsx', 'browser-extension/lib/motion-dialog.ts'], intent: '真实键盘验证原生select、帮助展开、图片缩放、dialog焦点约束、Escape关闭和焦点返回。' },
 ];
 
 export const components = [
@@ -34,9 +36,27 @@ export const scenarios = [
   { id: 'settings-recovery', surface: 'workspace', path: '/workspace.html?state=library&settingsRegression=1', viewport: wide, regression: 'settingsRegression', rules: [] },
 ];
 
+export const exampleScenarios = [
+  { id: 'example-workspace-empty', title: '工作台新项目空态', surface: 'workspace', path: '/workspace.html?state=empty', viewport: wide, example: 'empty', states: ['empty'], components: ['CanvasWorkspace'], steps: '关闭首次连接设置，查看尚未选择参考图的工作台。' },
+  { id: 'example-popup-empty', title: '轻量上传空态', surface: 'popup', path: '/popup.html?state=empty', viewport: { width: 400, height: 740 }, example: 'empty', states: ['empty'], components: ['QuickWorkspace'], steps: '查看上传入口；没有项目时不显示任务提交区。' },
+  { id: 'example-input-loading', title: '参考图读取中', surface: 'workspace', path: '/workspace.html?state=alignment&reference=pending&referenceDelay=60000', viewport: wide, example: 'loading', states: ['loading', 'disabled'], components: ['CanvasWorkspace'], steps: '读取延迟60秒，检查原画布等待反馈与提交保护。' },
+  { id: 'example-reverse-busy', title: '逆向忙碌与取消入口', surface: 'popup', path: '/popup.html?state=running', viewport: { width: 400, height: 740 }, example: 'busy', states: ['busy', 'disabled'], components: ['QuickWorkspace'], steps: '查看阶段状态、取消入口和输入禁用；不调用真实模型。' },
+  { id: 'example-reverse-failed', title: '逆向失败与恢复入口', surface: 'popup', path: '/popup.html?state=failed', viewport: { width: 400, height: 740 }, example: 'failed', states: ['failed'], components: ['QuickWorkspace'], steps: '查看可读错误与检查模型/登录的恢复入口。' },
+  { id: 'example-no-model', title: '模型未验证的禁用保护', surface: 'popup', path: '/popup.html?state=models-new', viewport: { width: 400, height: 740 }, example: 'disabled', states: ['disabled'], components: ['QuickWorkspace'], steps: '参考图存在但没有已验证模型，提交与指令输入应禁用。' },
+  { id: 'example-long-instruction', title: '长指令与展开提示词', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: wide, example: 'long', states: ['long-text'], components: ['CanvasWorkspace', 'TaskInstruction'], steps: '切到完整复刻，输入长指令并打开提示词；自动验收保留草稿并检查几何。' },
+  { id: 'example-narrow-input', title: '窄屏输入区', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: { width: 600, height: 900 }, example: 'narrow-input', states: ['narrow'], components: ['CanvasWorkspace'], steps: '窗口宽度600px，点击输入画布；结果侧应inert。' },
+  { id: 'example-narrow-result', title: '窄屏结果区', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: { width: 600, height: 900 }, example: 'narrow-result', states: ['narrow'], components: ['CanvasWorkspace'], steps: '窗口宽度600px，点击生成结果；输入侧应inert。' },
+  { id: 'example-image-viewer', title: '图片查看与键盘返回', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: wide, example: 'image', states: ['keyboard', 'dialog', 'focus'], components: ['ImagePreview / ImageViewer', 'motion-dialog'], steps: '聚焦图片放大入口按Enter，缩放/适应窗口；Tab留在dialog内，Escape返回触发器。' },
+  { id: 'example-native-controls', title: '原生下拉、帮助与设置弹窗', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: wide, example: 'controls', states: ['keyboard', 'dialog', 'focus'], components: ['SelectField', 'InlineHelp', 'motion-dialog'], steps: '打开设置→界面与动效；键盘改变原生下拉、Escape收起选项、Enter/Space展开帮助，最后Escape关闭设置。' },
+].map(scenario => ({ ...scenario, rules: [scenario.example === 'image' || scenario.example === 'controls' ? 'UI-EXAMPLE-KEYBOARD' : 'UI-EXAMPLE-STATE', ...(['long', 'narrow-input', 'narrow-result'].includes(scenario.example) ? ['UI-LAYOUT-CANVAS'] : [])] }));
+scenarios.push(...exampleScenarios);
+for (const component of components) component.examples = exampleScenarios.filter(scenario => scenario.components.includes(component.name)).map(scenario => scenario.id);
+
 export const uncovered = [
-  '真实扩展安装、权限、跨域、宿主网页及 closed ShadowRoot 内部几何未验证。',
+  '预览示例不验证真实扩展；extension独立命令负责声明的宿主页面与closed ShadowRoot外部行为，closed ShadowRoot内部几何仍未覆盖。',
   '静态 token 定义检查不证明每个选择器的继承、级联和 computed value 正确。',
-  '第一阶段没有像素视觉基线；截图用于复核，不能证明全部设计或动效正确。',
+  'visual工具提供像素对比；真实基线仍须人工审阅后接受，截图或差异阈值不能证明全部设计与动效正确。',
   '仅覆盖目录列出的场景与规则；预览有通知条及尺寸修正，不能混作实机截图。',
+  '阶段2代表状态由生产组件及预览数据运行，覆盖图片查看、原生select、帮助、dialog键盘与焦点；不是每个组件与每种状态的笛卡尔积。',
+  '未覆盖原生系统下拉的像素外观、触屏/屏幕阅读器、旋转应用中禁止关闭、嵌套dialog与真实模型；headless原生picker键盘不支持时单独标记skipped。',
 ];

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { root, contextFor, syncCatalog } from './ui/inventory.mjs';
 import { scenarios } from './ui/catalog.mjs';
+import { readFile, writeFile, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const help = `Reframe UIUX tools (run from any directory)
   node agent-tool/ui.mjs context [--files PATH ...] [--json]
@@ -8,12 +11,23 @@ const help = `Reframe UIUX tools (run from any directory)
   node agent-tool/ui.mjs sync [--check] [--json]
   node agent-tool/ui.mjs verify [--scenario ID] [--no-build] [--fault NAME] [--json]
   node agent-tool/ui.mjs inspect --scenario ID [--no-build] [--json]
+  node agent-tool/ui.mjs examples [--origin URL] [--json]
+  node agent-tool/ui.mjs visual --report FILE [--scenario ID] [--baseline-dir DIR] [--json]
+  node agent-tool/ui.mjs baseline --report FILE [--scenario ID] [--baseline-dir DIR] [--json]
+  node agent-tool/ui.mjs accept --candidate DIR --scenario ID --reason TEXT --reviewer NAME [--baseline-dir DIR] [--json]
+  node agent-tool/ui.mjs extension [--json]
+  node agent-tool/ui.mjs gate [--tier quick|browser|full] [--base REF] [--no-build] [--baseline-dir DIR] [--json]
+  node agent-tool/ui.mjs change --files PATH ... --reason TEXT [--output FILE] [--json]
+  node agent-tool/ui.mjs change --record FILE [--json]
 
 verify builds by default, starts its own isolated preview/browser, writes reports to
 an OS temporary directory and stops its own processes. --no-build requires a matching
 source/build fingerprint from a prior verify. No bridge, real data or model calls.
 Faults: canvas-padding, quick-height, image-offset (expected to FAIL).
 sync updates the generated catalog only; no visual baseline updates.
+baseline proposes candidates; accept requires explicit review of one named scene.
+extension checks an existing fingerprinted build in a disposable profile.
+gate browser includes preview and extension; full additionally requires accepted visual baselines.
 Exit: 0 passed (warnings allowed), 1 check/run failed, 2 invalid arguments.
 Scenarios: ${scenarios.map(scenario => scenario.id).join(', ')}
 `;
@@ -24,6 +38,12 @@ function parse(args) {
     context: ['--files', '--json'], check: ['--changed', '--base', '--json'],
     sync: ['--check', '--json'], verify: ['--scenario', '--no-build', '--fault', '--json'],
     inspect: ['--scenario', '--no-build', '--json'],
+    examples: ['--origin', '--json'], extension: ['--json'],
+    visual: ['--report', '--scenario', '--baseline-dir', '--json'],
+    baseline: ['--report', '--scenario', '--baseline-dir', '--json'],
+    accept: ['--candidate', '--scenario', '--reason', '--reviewer', '--baseline-dir', '--json'],
+    gate: ['--tier', '--base', '--no-build', '--baseline-dir', '--json'],
+    change: ['--files', '--reason', '--output', '--record', '--json'],
   };
   if (!allowed[command]) throw new Error('未知命令');
   const options = { command, files: [], build: true };
@@ -35,13 +55,18 @@ function parse(args) {
     if (arg === '--files') {
       while (rest[index + 1] && !rest[index + 1].startsWith('--')) options.files.push(rest[++index]);
       if (!options.files.length) throw new Error('--files 需要至少一个路径');
-    } else if (['--scenario', '--base', '--fault'].includes(arg)) {
+    } else if (['--scenario', '--base', '--fault', '--origin', '--report', '--baseline-dir', '--candidate', '--reason', '--reviewer', '--tier', '--output', '--record'].includes(arg)) {
       if (!rest[index + 1] || rest[index + 1].startsWith('-')) throw new Error(`${arg} 需要值`);
       options[arg.slice(2)] = rest[++index];
     } else if (arg === '--no-build') options.build = false;
     else options[arg.slice(2)] = true;
   }
   if (command === 'inspect' && !options.scenario) throw new Error('inspect 必须提供 --scenario');
+  if (['visual', 'baseline'].includes(command) && !options.report) throw new Error(command + ' 必须提供 --report');
+  if (command === 'accept' && ['candidate', 'scenario', 'reason', 'reviewer'].some(key => !options[key])) throw new Error('accept 必须提供 candidate/scenario/reason/reviewer');
+  if (options.tier && !['quick', 'browser', 'full'].includes(options.tier)) throw new Error('未知门禁层级');
+  if (command === 'change' && (options.record ? options.files.length || options.reason || options.output : !options.files.length || !options.reason)) throw new Error('change 使用 --record 或 --files/--reason，不能混用');
+  if (['visual', 'baseline', 'accept'].includes(command) && options.scenario && !['workspace-wide', 'workspace-narrow', 'popup'].includes(options.scenario)) throw new Error('非视觉核心场景');
   if (options.scenario && !scenarios.some(scenario => scenario.id === options.scenario)) throw new Error('未知场景 ' + options.scenario);
   if (options.fault && !['canvas-padding', 'quick-height', 'image-offset'].includes(options.fault)) throw new Error('未知故障 ' + options.fault);
   if (options.fault && options.scenario && options.scenario !== (options.fault === 'canvas-padding' ? 'workspace-wide' : 'popup')) throw new Error('故障与场景不匹配');
@@ -67,17 +92,14 @@ async function main() {
       result = await syncCatalog(options.check);
       if (!options.json) console.log(`${result.written ? '已生成' : '同步检查通过'} ${result.file}`);
     } else if (options.command === 'check') {
-      const { checkStyles } = await import('./ui/static.mjs');
-      result = await checkStyles({ root, changed: options.changed, base: options.base || 'HEAD' });
-      try { await syncCatalog(true); }
-      catch (error) { result.findings.push({ ruleId: 'UI-CATALOG-SYNC', severity: 'error', file: 'browser-extension/docs/uiux/catalog.md', line: 1, message: error.message }); }
-      result.status = result.findings.some(finding => finding.severity === 'error') ? 'failed' : 'passed';
+      const { check } = await import('./ui/gate.mjs');
+      result = await check({ changed: !!options.changed, base: options.base || 'HEAD' });
       if (!options.json) {
         for (const finding of result.findings) console.log(`${finding.severity} ${finding.ruleId} ${finding.file}:${finding.line} ${finding.message}`);
         console.log(`${result.status} · ${result.findings.length} findings; coverage: ${JSON.stringify(result.coverage)}`);
       }
       if (result.status === 'failed') process.exitCode = 1;
-    } else {
+    } else if (['verify', 'inspect'].includes(options.command)) {
       const { verify } = await import('./ui/runner.mjs');
       result = await verify({ ...options, inspect: options.command === 'inspect', progress: message => console.error(message) });
       if (!options.json) {
@@ -85,6 +107,30 @@ async function main() {
         console.log(`${result.status}\n${result.error || ''}\n报告：${result.summaryPath}\n测量：${result.reportPath}`);
       }
       if (result.status !== 'passed') process.exitCode = 1;
+    } else {
+      const baselineDirectory = options['baseline-dir'];
+      if (options.command === 'examples') {
+        const { renderExamples, exampleCoverage } = await import('./ui/examples.mjs');
+        const directory = await mkdtemp(join(tmpdir(), 'reframe-ui-examples-'));
+        const htmlPath = join(directory, 'index.html');
+        await writeFile(htmlPath, renderExamples({ baseURL: options.origin }));
+        result = { status: 'generated', htmlPath, coverage: exampleCoverage, note: 'Navigation only; start preview separately. Run verify for executable evidence.' };
+      } else if (options.command === 'extension') {
+        const { verifyExtension } = await import('./ui/extension.mjs');
+        result = await verifyExtension({ progress: message => console.error(message) });
+      } else if (options.command === 'gate') {
+        const { gate } = await import('./ui/gate.mjs');
+        result = await gate({ ...options, baselineDirectory, progress: message => console.error(message) });
+      } else if (options.command === 'change') {
+        const { createChange, checkChange } = await import('./ui/maintenance.mjs');
+        result = options.record ? await checkChange(JSON.parse(await readFile(options.record, 'utf8'))) : await createChange(options);
+      } else {
+        const { compareVisual, proposeVisual, acceptVisual } = await import('./ui/visual.mjs');
+        const selection = { baselineDirectory, scenarioIds: options.scenario ? [options.scenario] : undefined };
+        result = options.command === 'accept' ? await acceptVisual(options.candidate, { ...options, baselineDirectory }) : await (options.command === 'baseline' ? proposeVisual : compareVisual)(JSON.parse(await readFile(options.report, 'utf8')), selection);
+      }
+      if (['failed', 'uncovered'].includes(result.status)) process.exitCode = 1;
+      if (!options.json) console.log(JSON.stringify(result, null, 2));
     }
     if (options.json) console.log(JSON.stringify(result, null, 2));
   } catch (error) {

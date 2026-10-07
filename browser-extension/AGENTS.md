@@ -136,7 +136,7 @@
 
 在本目录运行 `npm run build` → `npm run compile` → `npm test`；扩展测试依赖当前构建。按改动增加回归测试，覆盖路径隔离、旧数据恢复、消息认证、模型选择等真实风险，不写仅镜像实现的测试。纯文档改动按 Contribution.md 检查即可。
 
-UIUX 规范、工具选择及人类设计变更同步遵循 [Contribution.md](../Contribution.md#uiux-规范与设计变更同步)。按受影响组件与场景验证，工具覆盖范围和局限查 [Agent 工具库](../agent-tool/README.md)，不以局部检查通过代替全部界面验收。
+UIUX 规范、工具选择及人类设计变更同步遵循 [Contribution.md](../Contribution.md#uiux-规范与设计变更同步)。按受影响组件与状态样例验证，基线审阅、到期例外与分层门禁查 [UIUX 维护指南](docs/uiux/maintenance.md)，命令和覆盖限制查 [Agent 工具库](../agent-tool/README.md)。分别记录预览、隔离真实扩展与视觉证据，不以局部检查或本地工作流配置代替整体验收、用户实际环境或远端 CI 结果。
 
 UI 使用 `npm run preview` 检查相关空态、等待、失败、已有结果与窄屏状态；再按任务范围验证真实扩展。预览不能代替浏览器权限和跨域验收。工具若无法操作 closed Shadow DOM 或扩展管理页面，说明实际限制并保留待人工验证项，不绕过限制、不虚报成功。
 

@@ -24,7 +24,10 @@
     "preview": "node ../agent-tool/preview.mjs",
     "test": "node --test tests/*.test.mjs",
     "compile": "tsc --noEmit",
-    "postinstall": "wxt prepare"
+    "postinstall": "wxt prepare",
+    "ui:check": "node ../agent-tool/ui.mjs gate --tier quick",
+    "ui:verify": "node ../agent-tool/ui.mjs gate --tier browser",
+    "ui:full": "node ../agent-tool/ui.mjs gate --tier full"
   },
   "dependencies": {
     "img-fx": "0.5.1",

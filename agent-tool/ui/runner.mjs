@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, release } from 'node:os';
+import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 import { once } from 'node:events';
 import { root, extension, requireExtension, sourceState, fingerprint, fixtureState } from './inventory.mjs';
-import { scenarios, uncovered } from './catalog.mjs';
+import { scenarios, rules, uncovered } from './catalog.mjs';
 import { probeLayout } from './probe.mjs';
+import { prepareExample, checkExample } from './examples.mjs';
 
 const { chromium } = requireExtension('playwright');
 const buildDirectory = resolve(extension, '.output/chrome-mv3');
@@ -119,7 +121,7 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
   if (fault && id && id !== faults[fault].scenario) throw new Error(`故障 ${fault} 只能用于 ${faults[fault].scenario}`);
   const selected = scenarios.filter(scenario => !id && !fault || scenario.id === (id || faults[fault]?.scenario));
   const directory = await mkdtemp(join(tmpdir(), 'reframe-ui-'));
-  const report = { schemaVersion: 1, startedAt: new Date().toISOString(), environment: { platform: process.platform, arch: process.arch, node: process.version, locale: 'zh-CN', timezone: 'Asia/Taipei', dpr: 1, motion: 'reduce', previewShell: 'existing-notice-and-size-overrides' }, source: null, fault: fault || null, uncovered, scenarios: [], status: 'failed' };
+  const report = { schemaVersion: 1, startedAt: new Date().toISOString(), environment: { platform: process.platform, arch: process.arch, osRelease: release(), headless: true, node: process.version, locale: 'zh-CN', timezone: 'Asia/Taipei', dpr: 1, motion: 'reduce', previewShell: 'existing-notice-and-size-overrides' }, source: null, fault: fault || null, uncovered, scenarios: [], status: 'failed' };
   let browser, preview, interrupted = false;
   const children = new Set();
   const interrupt = () => {
@@ -158,6 +160,11 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
           await page.waitForFunction(key => ['passed', 'failed'].includes(document.documentElement.dataset[key]), scenario.regression, { timeout: 60000 });
           const actual = await page.evaluate(key => document.documentElement.dataset[key], scenario.regression);
           item.checks.push({ ruleId: 'UI-BEHAVIOR', status: actual === 'passed' ? 'passed' : 'failed', target: scenario.regression, expected: 'passed', actual });
+        } else if (scenario.example) {
+          await prepareExample(page, scenario);
+          const geometryRules = scenario.rules.filter(id => rules.some(rule => rule.id === id && rule.kind === 'geometry'));
+          if (geometryRules.length) Object.assign(item, await page.evaluate(probeLayout, { surface: scenario.surface, rules: geometryRules, inspect }));
+          item.checks.push(...await checkExample(page, scenario));
         } else {
           await ready(page, scenario);
           if (fault) await page.addStyleTag({ content: faults[fault].css });
@@ -168,6 +175,13 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
       }
       if (item.errors.length) item.checks.push({ ruleId: 'UI-PAGE-ERROR', status: 'failed', target: scenario.id, expected: '无未捕获页面异常', actual: item.errors });
       item.status = item.checks.some(check => check.status === 'failed') ? 'failed' : item.checks.some(check => check.status === 'passed') ? 'passed' : 'uncovered';
+      const fonts = await page.evaluate(async () => {
+        await document.fonts.ready;
+        const canvas = document.createElement('canvas'), context = canvas.getContext('2d');
+        const stacks = [...new Set(['body', '.app', 'button', 'select', 'textarea'].flatMap(selector => [...document.querySelectorAll(selector)].map(node => getComputedStyle(node).font)))].sort();
+        return { stacks: stacks.map(font => { context.font = font; return [font, context.measureText('Reframe 0123456789 中文字体测量').width]; }), loaded: [...document.fonts].map(font => [font.family, font.style, font.weight, font.status]).sort() };
+      });
+      item.fontsHash = createHash('sha256').update(JSON.stringify(fonts)).digest('hex');
       const screenshot = join(directory, scenario.id + '.png');
       await page.screenshot({ path: screenshot, fullPage: true });
       item.evidence.screenshot = screenshot;
