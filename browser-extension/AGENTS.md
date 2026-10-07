@@ -72,7 +72,8 @@
 | `bridge/models.mjs`、`bridge/model-context.mjs` | 动态模型目录、真实验证、选择保存与账号/CLI 上下文检查。 |
 | `bridge/generation.mjs` | 按路径以纯文字、单张风格参考图或主体与参考图组合，携带 Prompt 调用 imagegen，读取真实图片结果。 |
 | `.agents/skills/alchemy/` | 随仓库分发的运行技能及必要参考文档。修改技能时维护伴随引用，不引入私人案例。 |
-| `scripts/manage.mjs`、`scripts/preview.mjs`、`tests/` | 安装及服务管理、明确标记的 UI 示例、隔离的自动测试。 |
+| `scripts/manage.mjs`、`scripts/icons.mjs`、`tests/` | 安装及服务管理、构建图标、隔离的自动测试。 |
+| [Agent 工具库](../agent-tool/README.md) | 根目录开发辅助脚本，包含 UI 示例预览与性能基准；用途、入口和副作用查工具索引。 |
 
 ## 连接、模型和图片边界
 
@@ -93,6 +94,8 @@
 - `.local/`、设计提取与构建产物始终按 ignore 规则保留在本地。切勿把真实用户数据加入测试 fixture，或从日志中复制 token 到文档。
 
 ## UI 与品牌约定
+
+开发前先查 [UIUX 规范索引](docs/uiux/README.md)，按设计来源、组件和场景选择已有实现及检查。设计变更的同步步骤见 [Contribution.md](../Contribution.md#uiux-规范与设计变更同步)；本节保留产品约束，不复制工具契约与命令。
 
 - 带蒙板的原生弹窗统一通过 `lib/motion-dialog.ts` 启用 `closedby="any"`，不支持时按蒙板边界和完整指针手势兼容处理；关闭请求复用各组件的 cancel 回调和忙碌保护。内部空白、内容操作和向外拖拽不触发关闭，叠层仅关闭最上层。
 
@@ -132,6 +135,8 @@
 ## 验证与完成
 
 在本目录运行 `npm run build` → `npm run compile` → `npm test`；扩展测试依赖当前构建。按改动增加回归测试，覆盖路径隔离、旧数据恢复、消息认证、模型选择等真实风险，不写仅镜像实现的测试。纯文档改动按 Contribution.md 检查即可。
+
+UIUX 规范、工具选择及人类设计变更同步遵循 [Contribution.md](../Contribution.md#uiux-规范与设计变更同步)。按受影响组件与场景验证，工具覆盖范围和局限查 [Agent 工具库](../agent-tool/README.md)，不以局部检查通过代替全部界面验收。
 
 UI 使用 `npm run preview` 检查相关空态、等待、失败、已有结果与窄屏状态；再按任务范围验证真实扩展。预览不能代替浏览器权限和跨域验收。工具若无法操作 closed Shadow DOM 或扩展管理页面，说明实际限制并保留待人工验证项，不绕过限制、不虚报成功。
 

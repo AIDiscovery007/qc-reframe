@@ -1,10 +1,11 @@
 // Public artwork and synthetic fixtures for the built gallery's visual QA only.
-import sharp from 'sharp';
+import { createRequire } from "node:module";
+const sharp = createRequire(new URL("../browser-extension/package.json", import.meta.url))("sharp");
 import { readFile } from 'node:fs/promises';
 const names = ['街头字形海报','水彩咖啡日记','光影人物习作','赤色机甲档案','山野之间','蓝色时刻','无界形状','柔软物质','慢生活手记','白日梦'];
 const sizes = [[1049,1499],[1109,1419],[1024,1536],[941,1672],[1600,1000],[1200,1200],[1800,900],[1000,1400],[1600,900],[1200,1200]];
 const folders = ['urban-poster','watercolor-mug','watercolor-portrait','red-mecha'];
-const originals = await Promise.all(folders.map(name => readFile(new URL(`../docs/gallery/${name}/result.png`, import.meta.url))));
+const originals = await Promise.all(folders.map(name => readFile(new URL(`../browser-extension/docs/gallery/${name}/result.png`, import.meta.url))));
 const thumbs = await Promise.all(originals.map(image => sharp(image).resize({width:480,height:480,fit:'inside'}).webp({quality:80}).toBuffer()));
 export function galleryAsset(path, res) {
   const match = path.match(/^\/gallery-fixture\/(thumb|original)\/([0-9])$/);

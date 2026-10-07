@@ -4,5 +4,7 @@
 
 | 岗位 | 当前会话 | 职责简介 | 工作日志 |
 | --- | --- | --- | --- |
-| [supervisor](supervisor.md) | [接任 Reframe 监工并继续场景链路验证](codex://threads/01a10ace-f32f-71a0-aa6d-4dbef81a9b9a) | 分工、复核、冲突整合及授权提交发布。 | [工作日志](../../agent-logs/01a10ace-f32f-71a0-aa6d-4dbef81a9b9a.md)；执行任务复核结论记入对应执行者日志。 |
+| [supervisor](supervisor.md) | [接任 Reframe 监工与后续维护](codex://threads/01a11545-ff7f-7890-a09f-1cca67b84a65) | 分工、复核、冲突整合及授权提交发布。 | [工作日志](../../agent-logs/01a11545-ff7f-7890-a09f-1cca67b84a65.md)；执行任务复核结论记入对应执行者日志。 |
 | [project-manager](project-manager.md) | [项目管理](codex://threads/01a0ff95-4f2e-77b3-af99-550a20b63407) | 协作准则、任职索引与阶段收尾。 | [工作日志](../../agent-logs/01a0ff95-4f2e-77b3-af99-550a20b63407.md)；阶段收尾记入对应任务日志。 |
+| [uiux-engineer](uiux-engineer.md) | [梳理 Reframe UIUX 规范与工具](codex://threads/01a11556-7e12-7440-b956-f968b3a00034) | UIUX 规范、设计一致性与诊断工具实现维护。 | [工作日志](../../agent-logs/01a11556-7e12-7440-b956-f968b3a00034.md) |
+| [architecture-engineer](architecture-engineer.md) | [梳理 reframe 架构重构方向](codex://threads/01a1148f-9217-71d1-a2e2-24b7a91fb96c) | 架构审查、实现与工程工具维护。 | [工作日志](../../agent-logs/01a1148f-9217-71d1-a2e2-24b7a91fb96c.md) |

@@ -222,3 +222,13 @@
 - 发布成功：提交 b98284fbf1e8c995bcff4ef4e6ca64182f21a844 已推送 main，v0.4.1 标签解引用同提交。正式 Release：https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.1；GitHub latest=v0.4.1，非 draft/prerelease。两附件 uploaded，名称/大小与本地一致，远端 ZIP SHA-256 同上；SHA256SUMS 自身摘要 fa2e582f053d964ace7700ff7b1b95ee3678e049e20680bc77e6b931cd9e8bfc 也匹配本地。
 - 成功核验后已向当前 PM 送达版本、链接、提交和附件证据（isError=false），交接已完成执行者登记与原日志收尾；保留未完成任职及所有聊天/历史，不操作用户运行服务或安装扩展。发布标签保持不变，收尾文档另行提交。
 - 收尾复核通过：PM 仅移除已完成 UIUX/架构两条任职，原任务补日期、版本、发布提交及验证边界；保留监工/PM 与全部日志/聊天，diff --check 通过。阶段收尾文档随本条提交并同步 main，v0.4.1 标签仍固定发布提交 b98284f。
+
+## 2026-10-07 · 卸任与监工交接
+
+- 用户明确要求“完事儿后卸任，让一个新的监工接任，做好交接”。v0.4.1 发布及阶段收尾已完成，本轮创建新的监工会话并由当前项目管理办理任职替换；不归档聊天，不恢复已收尾执行者，不新增业务任务或再次发布。
+- 交接基线：分支 codex/creative-workspace，HEAD 与 origin/main 均为 31ae87e762b529d82f81f852af823f0615fb8173；交接前工作区干净。v0.4.1 发布提交 b98284fbf1e8c995bcff4ef4e6ca64182f21a844，正式发布及两附件已远端核验，标签固定不移动。版本说明见 browser-extension/docs/releases/v0.4.1.md，安装升级见 browser-extension/docs/INSTALL_WITH_CODEX.md。
+- 验证：正式 zip→compile→651/651 测试通过，详细产物与远端摘要见上节。统一生成操作栏、自动主体判定、保存/上传失败恢复及上下文隔离已复核。没有遗留返修或待发布事项；历史架构升级意向不构成新一轮整仓改造任务。
+- 运行边界：未重启用户现用服务、重载已安装扩展、升级 CLI 或调用真实模型；本机实际运行版本未核验。不能把 GitHub 发布成功表述为用户本机已升级。测试预览进程和标签已关闭。
+- 当前项目管理为 01a0ff95-4f2e-77b3-af99-550a20b63407；UIUX 01a10c6a-a0cb-7673-87b2-ea9849107451、架构 01a1148f-9217-71d1-a2e2-24b7a91fb96c 均已阶段收尾，仅保留原日志。后续执行岗位需按用户指派启用。职责与流程以 AGENTS.md、Contribution.md、.agents/roles/supervisor.md 和动态任职表为准。
+- 交接完成：[接任 Reframe 监工与后续维护](codex://threads/01a11545-ff7f-7890-a09f-1cca67b84a65) 已直接核实用户授权并明确接收，新会话日志已建立；PM 已替换唯一 supervisor 条目并保留自身登记。旧监工复核任职表、接任日志、PM 记录与 diff --check 通过，自此卸任，后续职责由新监工承担。全部历史日志与聊天保留。
+- 补充边界：本地 main 引用仍为 b33059cb9b3aea2d8b96850f212d072e3715b61b；前述同步仅指当前 HEAD 与 origin/main，未移动本地 main。交接共 4 份文档保留未提交、未推送，不沿用已完成发布授权继续推送。

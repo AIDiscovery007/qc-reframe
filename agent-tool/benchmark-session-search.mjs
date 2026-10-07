@@ -2,13 +2,14 @@
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { performance } from "node:perf_hooks";
-import { withCodex } from "../bridge/codex-rpc.mjs";
-import { createSessionReader } from "../bridge/session-rpc.mjs";
+import { withCodex } from "../browser-extension/bridge/codex-rpc.mjs";
+import { createSessionReader } from "../browser-extension/bridge/session-rpc.mjs";
 
-const count = Number(process.argv[2] || 5);
-if (!Number.isInteger(count) || count < 2 || count > 20) throw new Error("Use 2–20 requests");
+const count = Number(process.argv[2] ?? 5);
+if (process.argv.length > 3 || !Number.isInteger(count) || count < 2 || count > 20)
+  throw new Error("Usage: node agent-tool/benchmark-session-search.mjs [request count: 2–20]");
 const binary = process.env.CODEX_BIN || "codex";
-const { stdout } = await promisify(execFile)(binary, ["--version"]);
+const { stdout } = await promisify(execFile)(binary, ["--version"], { timeout: 30_000 });
 const params = { limit: 30, sortKey: "updated_at", modelProviders: [],
   sourceKinds: ["cli", "vscode", "appServer", "exec", "unknown"], archived: false };
 const rounded = value => Math.round(value * 10) / 10;

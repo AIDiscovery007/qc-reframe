@@ -2,12 +2,16 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
-import sharp from "sharp";
-import { uiOperations, operationFor, allowsOperation } from "../lib/operation-policy.ts";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+const sharp = createRequire(new URL("../browser-extension/package.json", import.meta.url))("sharp");
+import { uiOperations, operationFor, allowsOperation } from "../browser-extension/lib/operation-policy.ts";
 import { galleryAsset, gallerySetup, galleryMessages } from "./gallery-preview.mjs";
 
-const port = Number(process.env.PREVIEW_PORT || 43188);
-const root = resolve(".output/chrome-mv3");
+const port = Number(process.env.PREVIEW_PORT ?? 43188);
+if (process.argv.length > 2 || !Number.isInteger(port) || port < 0 || port > 65535 || process.env.PREVIEW_PORT === "")
+  throw new Error("Usage: PREVIEW_PORT=0..65535 node agent-tool/preview.mjs (default: 43188)");
+const root = resolve(fileURLToPath(new URL("../browser-extension/.output/chrome-mv3/", import.meta.url)));
 const result = {
   title: "暖纸底几何叠色",
   observations: [
@@ -25,10 +29,10 @@ const result = {
 const svg =
   '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="400"><rect width="320" height="400" fill="#e8e1c9"/><circle cx="160" cy="175" r="95" fill="#5b6f4c"/><rect x="55" y="232" width="210" height="63" fill="#bb6c51"/></svg>';
 const image = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
-const gallery = Object.fromEntries(await Promise.all(["reference", "subject", "result"].map(async role => [role, `data:image/png;base64,${(await readFile(new URL(`../docs/gallery/watercolor-mug/${role}.png`, import.meta.url))).toString("base64")}`])));
-const person = `data:image/png;base64,${(await readFile(new URL("../docs/gallery/watercolor-portrait/subject.png", import.meta.url))).toString("base64")}`;
+const gallery = Object.fromEntries(await Promise.all(["reference", "subject", "result"].map(async role => [role, `data:image/png;base64,${(await readFile(new URL(`../browser-extension/docs/gallery/watercolor-mug/${role}.png`, import.meta.url))).toString("base64")}`])));
+const person = `data:image/png;base64,${(await readFile(new URL("../browser-extension/docs/gallery/watercolor-portrait/subject.png", import.meta.url))).toString("base64")}`;
 // Optional local image pair for visual comparison only; never load project records or write assets.
-const alignment = await Promise.all([process.env.PREVIEW_INPUT_IMAGE || 'docs/gallery/urban-poster/reference.png', process.env.PREVIEW_RESULT_IMAGE || 'docs/gallery/urban-poster/result.png'].map(async path => {
+const alignment = await Promise.all([process.env.PREVIEW_INPUT_IMAGE || new URL("../browser-extension/docs/gallery/urban-poster/reference.png", import.meta.url), process.env.PREVIEW_RESULT_IMAGE || new URL("../browser-extension/docs/gallery/urban-poster/result.png", import.meta.url)].map(async path => {
   const bytes = await readFile(path), metadata = await sharp(bytes).metadata();
   return { image: `data:image/${metadata.format};base64,${bytes.toString('base64')}`, width: metadata.width, height: metadata.height };
 }));
@@ -55,22 +59,22 @@ const server = createServer(async (req, res) => {
     if (galleryAsset(path, res)) return;
     if (path === "/settings-recovery-regression.js") {
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("../tests/settings-recovery.browser.js", import.meta.url)));
+      res.end(await readFile(new URL("../browser-extension/tests/settings-recovery.browser.js", import.meta.url)));
       return;
     }
     if (path === "/generation-actions-regression.js") {
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("../tests/generation-actions.browser.js", import.meta.url)));
+      res.end(await readFile(new URL("../browser-extension/tests/generation-actions.browser.js", import.meta.url)));
       return;
     }
     if (path === "/auto-style-regression.js") {
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("../tests/auto-style.browser.js", import.meta.url)));
+      res.end(await readFile(new URL("../browser-extension/tests/auto-style.browser.js", import.meta.url)));
       return;
     }
     if (path === "/creation-context-regression.js") {
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("../tests/creation-context.browser.js", import.meta.url)));
+      res.end(await readFile(new URL("../browser-extension/tests/creation-context.browser.js", import.meta.url)));
       return;
     }
     if (path === "/hover-preview") {

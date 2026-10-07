@@ -1,4 +1,4 @@
-# This repository snapshot contains only the browser extension.
+# Track the browser extension, engineering tools and collaboration documents.
 # Local skills, experiments, downloaded images and prompts remain on disk.
 /*
 !/.gitignore
@@ -8,6 +8,7 @@
 !/GLOSSARY.md
 !/agent-logs/
 !/browser-extension/
+!/agent-tool/
 
 # Track only collaboration role documents; keep local skills and other agent data ignored.
 !/.agents/

@@ -2,12 +2,12 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { createSessionSearchIndex } from "../bridge/session-search-index.mjs";
+import { createSessionSearchIndex } from "../browser-extension/bridge/session-search-index.mjs";
 
-// Synthetic fixtures only. Usage: node scripts/benchmark-session-index.mjs [sessions=500]
+// Synthetic fixtures only. Usage: node agent-tool/benchmark-session-index.mjs [sessions=500]
 const count = Number(process.argv[2] ?? 500);
 if (process.argv.length > 3 || !Number.isInteger(count) || count < 1 || count > 1000)
-  throw new Error("Usage: node scripts/benchmark-session-index.mjs [session count: 1–1000]");
+  throw new Error("Usage: node agent-tool/benchmark-session-index.mjs [session count: 1–1000]");
 
 const phrases = [
   "林夏走过海边看到晨光，拿起相机拍摄远处的帆船。",

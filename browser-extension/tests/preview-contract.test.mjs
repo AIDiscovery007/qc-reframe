@@ -8,10 +8,10 @@ import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { createSessionSearch } from "../bridge/session-search.mjs";
 
-let server, script;
+let server, script, baseURL;
 before(async () => {
-  server = spawn(process.execPath, ["scripts/preview.mjs"], {
-    cwd: new URL("../", import.meta.url), env: { ...process.env, PREVIEW_PORT: "0" }, stdio: ["ignore", "pipe", "pipe"],
+  server = spawn(process.execPath, ["agent-tool/preview.mjs"], {
+    cwd: new URL("../../", import.meta.url), env: { ...process.env, PREVIEW_PORT: "0" }, stdio: ["ignore", "pipe", "pipe"],
   });
   const url = await new Promise((resolve, reject) => {
     let output = "", errors = "";
@@ -24,6 +24,7 @@ before(async () => {
       if (match) resolve(match[0]);
     });
   });
+  baseURL = url;
   const response = await fetch(`${url}/preview.js`);
   assert.equal(response.status, 200);
   script = await response.text();
@@ -86,4 +87,29 @@ test("preview uses production operation permissions on one-shot and connected re
     port.disconnect();
   }
   assert.equal((await runtime.sendMessage({ type: "alchemy:state" })).ok, true);
+});
+
+
+test("root preview serves built entries, gallery images and browser regression scripts", async () => {
+  for (const page of ["popup.html", "workspace.html"]) {
+    const response = await fetch(`${baseURL}/${page}`);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /src="\/preview.js"/);
+    const assets = [...html.matchAll(/(?:src|href)="([^" ]+\.(?:js|css))"/g)].map(match => match[1]);
+    assert.ok(assets.length > 1);
+    for (const asset of assets) assert.equal((await fetch(new URL(asset, baseURL))).status, 200, asset);
+  }
+  for (const [path, type] of [["thumb/0", "image/webp"], ["original/0", "image/png"], ["original/9", "image/svg+xml"]]) {
+    const response = await fetch(`${baseURL}/gallery-fixture/${path}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), type);
+    assert.ok((await response.arrayBuffer()).byteLength > 100);
+  }
+  for (const name of ["settings-recovery", "generation-actions", "auto-style", "creation-context"]) {
+    const response = await fetch(`${baseURL}/${name}-regression.js`);
+    assert.equal(response.status, 200, name);
+    assert.match(response.headers.get("content-type"), /javascript/);
+    assert.ok((await response.text()).length > 100);
+  }
 });

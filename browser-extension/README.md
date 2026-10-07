@@ -288,7 +288,7 @@ imagegen 默认位于 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`（未设置
 
 品牌标识采用 Raft 的亮黄 `#ffd440`、墨黑 `#141111`、青色 `#27ccf3` 与粉色 `#fe7da8`，几何 R 标识保留品牌原有的圆角与右下硬阴影；界面内容使用更轻的色面与留白。当前品牌源图为 `assets/brand/reframe.svg`。界面内嵌该 SVG，避免扩展资源地址在网页浮层中不可用；`npm run icons` 从同一源图生成 `public/icon/` 中的 16/32/48/96/128 px 图标。`build` 与 `zip` 会先更新图标。
 
-Git 保存 `browser-extension/`、根目录 README、贡献指南与忽略规则。本地 `.local/`（配对令牌、Prompt JSON、参考图、截图）、下载/实验目录、依赖与构建产物不提交，也不会被删除；必要的品牌 SVG/PNG 和项目配置 JSON 正常提交。`alchemy` 的发布副本位于本目录 `.agents/skills/alchemy/`，包含运行所需参考文档；不包含作者的历史案例、Prompt JSON、来源索引或图片。`ALCHEMY_SKILL_PATH` 可指定其他完整安装。`imagegen` 使用新用户自己 Codex 中的技能，不随本仓库分发。
+Git 保存 `browser-extension/`、`agent-tool/`、根目录 README、贡献指南与忽略规则。本地 `.local/`（配对令牌、Prompt JSON、参考图、截图）、下载/实验目录、依赖与构建产物不提交，也不会被删除；必要的品牌 SVG/PNG 和项目配置 JSON 正常提交。`alchemy` 的发布副本位于本目录 `.agents/skills/alchemy/`，包含运行所需参考文档；不包含作者的历史案例、Prompt JSON、来源索引或图片。`ALCHEMY_SKILL_PATH` 可指定其他完整安装。`imagegen` 使用新用户自己 Codex 中的技能，不随本仓库分发。
 
 ```bash
 npm run dev       # WXT 开发模式
@@ -298,6 +298,8 @@ npm run build     # .output/chrome-mv3
 npm run zip       # 扩展 ZIP，不包含本机 bridge / skill
 npm run preview   # 弹窗视觉预览，不调用 Codex
 ```
+
+开发辅助脚本统一位于根目录 [Agent 工具库](../agent-tool/README.md)，具体依赖、调用目录、输入输出和副作用见该索引。上述命令从 `browser-extension/` 执行，`npm run preview` 调用 `../agent-tool/preview.mjs`；安装/服务管理和图标构建仍使用本目录 `scripts/`。
 
 预览地址 `http://127.0.0.1:43188/?state=result`，也支持 `empty`、`running`、`failed`、`reenact`、`style-new`、`reenact-new`（尚未逆向的参考图）、`generation`、`generation-completed`（生图交互示例），均使用明确标记的示例数据。主体图上传和指令编辑使用真实表单；预览的提交按钮不调用 Codex。增加 `&reminder=toast&tasks=unread` 查看提醒及未读示例，`&reminderTask=image` 切换图片提醒，点击提醒在当前工作台内定位对应示例结果；`&case=任意新值` 重置该组未读示例，`popup.html?state=projects&reminder=unread&reminderTask=image&panelClip=1&case=clip` 验证裁剪和滚动已读（快捷界面组件 fixture，不代表真实 content 浮层）。`&notificationDenied=1` 模拟通知权限关闭；设置声音只修改预览偏好，不播放声音。预览不能替代真实扩展中的权限、声音、悬浮和跨域图片验收。 工作台提交边界可用 `?state=projects&generationStartDelay=4000&generationDelay=2000` 验证（主体重演路径为首次生成，提取风格为已有结果）；加 `generationStart=failed` 模拟提交失败，`motion=reduce` 检查静态反馈。提交延迟最多 60 秒，仅作用于示例，不调用模型。
 

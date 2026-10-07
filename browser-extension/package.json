@@ -21,7 +21,7 @@
     "prezip": "npm run icons",
     "zip": "wxt zip",
     "bridge": "node scripts/manage.mjs run",
-    "preview": "node scripts/preview.mjs",
+    "preview": "node ../agent-tool/preview.mjs",
     "test": "node --test tests/*.test.mjs",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare"
@@ -39,6 +39,9 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@wxt-dev/module-react": "^1.1.5",
+    "playwright": "1.63.0",
+    "postcss": "8.5.29",
+    "postcss-value-parser": "4.2.0",
     "typescript": "^5.9.3",
     "web-ext": "^10.5.0",
     "wxt": "^0.21.3"
