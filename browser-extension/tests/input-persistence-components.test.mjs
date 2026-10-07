@@ -7,7 +7,7 @@ import ts from 'typescript';
 const sources = await Promise.all(['workspace/CanvasWorkspace', 'popup/QuickWorkspace'].map(async path =>
   ts.createSourceFile(path, await readFile(new URL(`../entrypoints/${path}.tsx`, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)));
 const tick = () => new Promise(resolve => setImmediate(resolve));
-const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const file = { type: 'image/png', size: 100 };
 function setup(kind, options = {}) {
   const names = kind === 'canvas' ? ['saveInput', 'readFiles', 'remove', 'update', 'reorder', 'rotateInput'] : ['saveSubject', 'uploadSubject', 'removeSubject', 'rotateSubject'];
@@ -43,7 +43,7 @@ for (const kind of ['canvas', 'quick']) {
     assert.equal(ui.state.inputs.length, 0);
     assert.equal(ui.state.selected.length, 0);
     assert.ok(ui.state.errors.at(-1));
-    assert.deepEqual(ui.state.availability, [false, true]);
+    assert.deepEqual(ui.state.availability, [false, false]);
   });
   test(`${kind}: upload waits for persistence and rejects rapid duplicate submission`, async () => {
     const saved = deferred(), ui = setup(kind, { onSubject: () => saved.promise });
@@ -62,6 +62,19 @@ for (const kind of ['canvas', 'quick']) {
     assert.equal(ui.state.selected.length, 0);
     assert.equal(ui.state.errors.at(-1), 'disk full');
     assert.equal(ui.globals.pendingInput.current, false);
+    assert.equal(ui.state.availability.at(-1), false, '失败不能作为无主体继续提交');
+  });
+  test(`${kind}: retry or explicit removal recovers from a failed upload`, async () => {
+    for (const action of ['retry', 'remove']) {
+      const ui = setup(kind);
+      await upload(ui, { type: 'text/plain', size: 100 });
+      assert.equal(ui.state.availability.at(-1), false);
+      if (action === 'retry') await upload(ui);
+      else await (kind === 'canvas' ? ui.remove() : ui.removeSubject());
+      assert.equal(ui.state.availability.at(-1), true);
+      assert.equal(ui.state.errors.at(-1), '');
+      assert.equal(ui.state.inputs.at(-1), action === 'retry' ? 'new-image' : '');
+    }
   });
   test(`${kind}: navigation during normalization cannot save into another input`, async () => {
     const normalized = deferred(), ui = setup(kind, { normalizeImage: () => normalized.promise });
@@ -80,10 +93,19 @@ for (const kind of ['canvas', 'quick']) {
     assert.equal(ui.state.selected.length, 0);
     assert.deepEqual(ui.state.availability, [false]);
   });
+  test(`${kind}: a late save failure cannot change errors or availability after navigation`, async () => {
+    const saved = deferred(), ui = setup(kind, { onSubject: () => saved.promise });
+    const pending = upload(ui); await tick();
+    ui.globals.scope.current = 'B:style:v2';
+    saved.reject(new Error('late failure')); await pending;
+    assert.deepEqual(ui.state.errors, ['']);
+    assert.deepEqual(ui.state.availability, [false]);
+    assert.equal(ui.state.selected.length, 0);
+  });
   test(`${kind}: rotation propagates persistence failure so preview stays open`, async () => {
     const ui = setup(kind, { onSubject: async () => { throw new Error('save failed'); } });
     await assert.rejects(kind === 'canvas' ? ui.rotateInput('rotated') : ui.rotateSubject('rotated'), /save failed/);
-    assert.deepEqual(ui.state.availability, [false, true]);
+    assert.deepEqual(ui.state.availability, [false, false]);
   });
   test(`${kind}: failed removal keeps selected input`, async () => {
     const ui = setup(kind, { onSubject: async () => { throw new Error('save failed'); } });

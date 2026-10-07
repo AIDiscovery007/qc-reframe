@@ -10,6 +10,7 @@
 | project-manager（项目管理） | [职责、边界与输入输出](.agents/roles/project-manager.md) |
 | executor（执行 agent） | [职责、边界与输入输出](.agents/roles/executor.md) |
 | uiux-engineer（UIUX 设计工程师） | [职责、边界与输入输出](.agents/roles/uiux-engineer.md) |
+| architecture-engineer（架构工程师） | [职责、边界与输入输出](.agents/roles/architecture-engineer.md) |
 
 - **岗位分类与继承。** 除 supervisor、project-manager 两个非执行岗位外，所有现有及未来新增岗位自动归入执行者，完整继承 [executor](.agents/roles/executor.md) 及本文的登记、范围协调、日志、交付、返修、主动汇报、复核和授权规则。专业岗位定义仅补充专业职责与验收标准，不建立独立协作层级或豁免通用执行规则。执行者按实际岗位登记一条记录，不重复登记 executor；用户当前明确指派优先。
 - 岗位文件定义职责，本文规定共同协作流程。岗位不绑定会话 ID；用户可直接引用岗位文件，为当前 session 指定岗位。单纯读取文件不构成任职。

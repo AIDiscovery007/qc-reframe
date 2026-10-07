@@ -45,16 +45,18 @@ export default function QuickWorkspace({ revealPrompt, targetGeneration, context
     const current = () => attempt === revision.current && context === scope.current;
     pendingInput.current = true;
     setUploading(true); setError(""); onAvailability(false);
+    let saved = false;
     try {
       const image = await read();
       if (!current()) return false;
       await onSubject(image);
+      saved = true;
       return current();
     } catch (error) {
       if (current()) setError((error as Error).message);
       if (rethrow) throw error;
       return false;
-    } finally { if (current()) { pendingInput.current = false; setUploading(false); onAvailability(true); } }
+    } finally { if (current()) { pendingInput.current = false; setUploading(false); onAvailability(saved); } }
   };
   const uploadSubject = async (file?: File) => {
     if (!file) return;

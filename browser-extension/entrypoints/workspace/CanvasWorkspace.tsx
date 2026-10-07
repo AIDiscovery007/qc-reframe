@@ -12,7 +12,7 @@ import PromptSheet from "./PromptSheet";
 import useEditorExpansion from "./useEditorExpansion";
 
 const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
-export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contextKey, mode, image, subjectImage, subjects, selected, onSelect, instruction, disabled, modeDisabled, reverseDisabled, running, cancelling, status, error, errorTaskId, stale, hasPrompt, promptEditing, reduced, versions, prompt, actionsTarget, onMode, onInstruction, onSubject, onAvailability, onSubjects, onReference, onReferenceRotate, onSwap, onReverse, onExtract, onCancel, onRetryReference, sessionTitle, onSessions }: {
+export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contextKey, mode, image, subjectImage, subjects, selected, onSelect, instruction, disabled, modeDisabled, reverseDisabled, running, cancelling, status, error, errorTaskId, stale, hasPrompt, promptEditing, reduced, versions, prompt, actionsTarget, onMode, onInstruction, onSubject, onAvailability, onSubjects, onReference, onReferenceRotate, onSwap, onReverse, onCancel, onRetryReference, sessionTitle, onSessions }: {
   revealPrompt?: number; onPromptRevealed?(): void; contextKey: string; mode: Mode; image?: string; subjectImage: string; subjects: MultiSubject[]; selected: string; onSelect(id: string): void;
   instruction: string; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; running: boolean; cancelling: boolean;
   status?: string; error?: string; errorTaskId?: string; stale: boolean; hasPrompt: boolean; promptEditing: boolean; reduced: boolean;
@@ -20,7 +20,7 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
   versions: ReactNode; prompt: ReactNode; actionsTarget?: HTMLElement | null;
   onMode(mode: Mode): void; onInstruction(value: string): void; onSubject(image: string): void | Promise<void>; onAvailability(available: boolean): void;
   onSubjects(subjects: MultiSubject[]): void | Promise<void>; onReference(image: string): Promise<void>; onReferenceRotate(image: string): Promise<void>; onSwap(id?: string): void;
-  onReverse(): void; onExtract(): void; onCancel(): void; onRetryReference?: () => void;
+  onReverse(): void; onCancel(): void; onRetryReference?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const composer = useRef<HTMLDivElement>(null);
@@ -74,13 +74,14 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
     const current = () => attempt === revision.current && context === scope.current;
     pendingInput.current = true;
     setUploading(true); setUploadError(""); onAvailability(false);
-    try { await save(current); return current(); }
+    let saved = false;
+    try { await save(current); saved = true; return current(); }
     catch (reason) {
       if (current()) setUploadError((reason as Error).message);
       if (rethrow) throw reason;
       return false;
     } finally {
-      if (current()) { pendingInput.current = false; setUploading(false); onAvailability(true); }
+      if (current()) { pendingInput.current = false; setUploading(false); onAvailability(saved); }
     }
   };
   const readFiles = async (files: File[]) => {
@@ -131,7 +132,7 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
   return <section className="canvas-workspace" data-prompt-open={sheetOpen} aria-label={`${modes[mode]}工作区`}>
     <div className="canvas-input" ref={inputArea}>
       <div className="canvas-stage" inert={sheetOpen}>
-        <div className="canvas-label"><strong>{label}</strong><span>{modes[mode]}</span></div>
+        <div className="canvas-label"><strong>{label}</strong></div>
         <div className="canvas-large" aria-label="图片展示区" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); target.current = isSubject ? current?.id || "subject" : "reference"; void readFiles([...event.dataTransfer.files]); }}>
           {currentImage ? <ImagePreview src={currentImage} alt={label} disabled={locked} rotation={{ disabled: locked, maxBytes: (isSubject ? 2 : 4) * 1024 * 1024, onApply: rotateInput }} />
             : !isSubject ? <LoadingPlaceholder active={!error}>{error || "正在读取参考图…"}</LoadingPlaceholder>
@@ -169,7 +170,6 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
         <div className="canvas-composer-bar">
         {hasPrompt && <button ref={trigger} className="quiet-button canvas-prompt-link" aria-label={sheetOpen ? "收起提示词" : "展开提示词"} aria-expanded={sheetOpen} aria-controls="workspace-prompt-sheet" onClick={() => { setSettings(false); setOpen(true); }}><Icon name={sheetOpen ? "chevronDown" : "edit"} /><span>{sheetOpen ? "收起" : "提示词"}</span><i className={stale ? "canvas-stale-dot" : "canvas-ready-dot"} /></button>}
           <span data-reminder-task={!uploadError && error ? errorTaskId : undefined} className={uploadError || error ? "canvas-error" : ""} role={uploadError || error ? "alert" : "status"} title={uploadError || error || status}>{uploadError || error || (uploading ? "正在读取图片…" : status || (stale ? "提示词待更新" : ""))}<RecoveryAction error={uploadError || error} />{onRetryReference && <button className="text-button" onClick={onRetryReference}>重试</button>}</span>
-          {mode === "style" && subjectImage && <button className="quiet-button canvas-generic" disabled={locked || promptEditing || !instruction.trim()} title="不使用主体图，仅提取通用风格" onClick={onExtract}>仅提取风格</button>}
 
         </div>
       </div>

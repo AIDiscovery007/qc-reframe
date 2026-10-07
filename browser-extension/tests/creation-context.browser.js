@@ -13,7 +13,7 @@ const waitFor = async (predicate, message) => {
 };
 const setValue = (element, value) => {
   Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value').set.call(element, value);
-  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
 };
 const navigate = task => { location.hash = 'workspace=' + new URLSearchParams({ task, request: crypto.randomUUID() }); };
 const mode = () => find('[aria-label="逆向模式"]');
@@ -34,7 +34,9 @@ const scenario = new URLSearchParams(location.search).get('creationContextRegres
 try {
   assert(['mode', 'version', 'project', 'failure'].includes(scenario), '必须指定有效回归场景');
   assert(Number(new URLSearchParams(location.search).get('inputSaveDelay')) >= 1000, '需设置至少 1000ms 的 inputSaveDelay');
-  await waitFor(() => mode() && version(), '工作台应就绪');
+  await waitFor(mode, '工作台应就绪');
+  if (mode().value !== 'recreate') setValue(mode(), 'recreate');
+  await waitFor(() => mode()?.value === 'recreate' && version(), '复刻版本应就绪');
   // Initial rendering may already display originalTask. Make the next navigation observable:
   // matching the old DOM alone must not let uploads race its asynchronous prompt reveal.
   if (version().value === originalTask) {

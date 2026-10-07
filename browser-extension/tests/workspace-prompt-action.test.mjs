@@ -8,7 +8,7 @@ import { creationContext, emptyCreationState, resolveCreation } from '../lib/cre
 // Exercise the actual workspace action derivation and submitted input for each path.
 const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
 const tree = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ['instructionStale', 'genericPrompt', 'needsPrompt', 'reverseHint', 'genericHint', 'reverseDisabled', 'reverse', 'extractStyle'];
+const names = ['instructionStale', 'genericPrompt', 'needsPrompt', 'subjectError', 'reverseHint', 'genericHint', 'reverseDisabled', 'reverse'];
 const declarations = new Map();
 function visit(node) {
   if (ts.isVariableDeclaration(node) && names.includes(node.name.getText(tree))) declarations.set(node.name.getText(tree), node.initializer.getText(tree));
@@ -98,17 +98,62 @@ test('upload failure/loading, empty instructions, edits and busy state never sub
   assert.equal(multi.calls.length, 0);
 });
 
-test('explicit generic extraction ignores an existing subject without changing the dedicated action', () => {
-  const ui = fixture('style', { result: {}, job: { reenact: { basePrompt: 'instruction' } } });
-  ui.extractStyle();
-  assert.equal(ui.calls[0].mode, 'style');
-  assert.equal(ui.calls[0].input, undefined);
-  assert.equal(ui.drafts['project:style:new'], 'subject');
-  ui.reverse();
-  assert.equal(ui.calls[1].input.subjectImage, 'subject');
-  for (const overrides of [{ blocked: true }, { promptDraft: {} }, { selection: {} }, { taskInstruction: () => ' ' }]) {
-    const invalid = fixture('style', overrides);
-    invalid.extractStyle();
-    assert.equal(invalid.calls.length, 0);
+test('style follows effective subjects across saves, deletion, history and project switches', () => {
+  const generic = { id: 'generic', mode: 'style', instruction: 'instruction', result: {} };
+  const dedicated = { ...generic, id: 'dedicated', reenact: { basePrompt: 'instruction' } };
+  const project = { id: 'project', jobs: [generic, dedicated] };
+  const references = { generic: { image: 'reference' }, dedicated: { image: 'reference', reenact: { subjectImage: 'historical-subject' } } };
+  let state = { ...emptyCreationState, versions: { 'project:style': 'generic' } };
+  let selection = { projectId: 'project', image: 'reference', inputVersions: { style: 'generic' }, inputRevision: 1, inputs: { style: { instruction: 'instruction' } } };
+  const submit = (expected, source = selection, saved = project, refs = references) => {
+    const context = resolveCreation(state, source, saved, refs, 'style', 'instruction');
+    const ui = fixture('style', { contextFor: () => context, subjectImage: () => context.subjectImage, job: context.job, result: context.job?.result });
+    ui.reverse();
+    assert.equal(ui.calls.length, 1);
+    assert.equal(ui.calls[0].input?.subjectImage, expected);
+  };
+  submit(undefined);
+  selection = { ...selection, inputRevision: 2, inputs: { style: { instruction: 'instruction', subjectImage: 'uploaded' } } };
+  state = creationContext(state, { type: 'adopt', selection, savedMode: 'style' });
+  submit('uploaded');
+  state = creationContext(state, { type: 'select', key: 'project:style', version: 'dedicated' });
+  submit('historical-subject');
+  state = creationContext(state, { type: 'select', key: 'project:style', version: 'generic' });
+  submit('uploaded');
+  selection = { ...selection, inputRevision: 3, inputs: { style: { instruction: 'instruction', subjectImage: '' } } };
+  state = creationContext(state, { type: 'adopt', selection, savedMode: 'style' });
+  submit(undefined);
+  submit(undefined, { projectId: 'other', image: 'reference', inputs: { style: { instruction: 'instruction' } } }, { id: 'other', jobs: [] });
+  submit(undefined);
+  assert.equal(project.jobs[1].reenact.basePrompt, 'instruction');
+  assert.equal(references.dedicated.reenact.subjectImage, 'historical-subject');
+});
+
+test('missing subject resources block style extraction; valid replacements and explicit deletion recover', () => {
+  const job = { id: 'v1', mode: 'style', instruction: 'instruction', result: {}, reenact: { basePrompt: 'instruction' } };
+  const project = { id: 'project', jobs: [job] };
+  const selection = { projectId: 'project', inputVersions: { style: 'v1' } };
+  const references = { v1: { image: 'reference', subjectError: '历史主体图损坏' } };
+  const check = (state, selected, expected, blocked = false) => {
+    const context = resolveCreation(state, selected, project, references, 'style', 'instruction');
+    const ui = fixture('style', { contextFor: () => context, subjectImage: () => context.subjectImage, job, result: job.result });
+    ui.reverse();
+    assert.equal(ui.reverseDisabled, blocked);
+    assert.equal(ui.calls.length, blocked ? 0 : 1);
+    if (blocked) {
+      assert.equal(ui.reverseHint, context.subjectError);
+      assert.equal(context.subjectImage, '', '损坏的当前主体不得回退到历史主体');
+    }
+    else assert.equal(ui.calls[0].input?.subjectImage, expected);
+  };
+  check(emptyCreationState, selection, undefined, true);
+  references.v1 = { image: 'reference', reenact: { subjectImage: 'historical-subject' } };
+  check(emptyCreationState, { ...selection, inputs: { style: { subjectImage: '', subjectError: '当前主体图损坏' } } }, undefined, true);
+  check(emptyCreationState, { ...selection, inputs: { style: { subjectImage: 'replacement' } } }, 'replacement');
+  check(emptyCreationState, { ...selection, inputs: { style: { subjectImage: '' } } }, undefined);
+  references.v1 = { image: 'reference', subjectError: '历史主体图损坏' };
+  for (const subjectImage of ['draft-replacement', '']) {
+    const state = creationContext(emptyCreationState, { type: 'edit', key: 'project:style', version: 'v1', subjectImage });
+    check(state, selection, subjectImage || undefined);
   }
 });

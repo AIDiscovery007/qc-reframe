@@ -88,6 +88,8 @@ export function resolveCreation(state: CreationState, selection: Selection | und
   const reference = job && references[job.id];
   const subjectImage = state.subjectDrafts[draftKey] ?? (input ? input.subjectImage || "" : undefined)
     ?? reference?.generationSubjectImage ?? reference?.reenact?.subjectImage ?? "";
+  const subjectError = state.subjectDrafts[draftKey] !== undefined || state.multiSubjectDrafts[draftKey] !== undefined
+    ? undefined : input ? input.subjectError : reference?.subjectError;
   const subjects = state.multiSubjectDrafts[draftKey] ?? input?.subjects ?? reference?.generationSubjects ?? reference?.reenact?.subjects ?? [];
   const instruction = state.instructions[draftKey] ?? input?.instruction ?? job?.instruction ?? job?.reenact?.basePrompt ?? defaultInstruction;
   const savedSubjects = reference?.reenact?.subjects || [];
@@ -96,7 +98,7 @@ export function resolveCreation(state: CreationState, selection: Selection | und
     const saved = savedSubjects[index];
     return !saved || item.id !== saved.id || item.subjectImage !== saved.subjectImage || item.role !== saved.role || item.detail !== saved.detail;
   }) || instruction.trim() !== (job.instruction ?? job.reenact?.basePrompt)?.trim());
-  return { key, draftKey, jobs, job, input, subjectImage, subjects, instruction, instructionStale, multiStale,
+  return { key, draftKey, jobs, job, input, subjectImage, subjectError, subjects, instruction, instructionStale, multiStale,
     sessions: input?.sessions ?? job?.sessionContext?.sources ?? [], image: job ? reference?.image : selection?.image };
 }
 

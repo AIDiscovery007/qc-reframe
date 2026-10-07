@@ -63,6 +63,11 @@ const server = createServer(async (req, res) => {
       res.end(await readFile(new URL("../tests/generation-actions.browser.js", import.meta.url)));
       return;
     }
+    if (path === "/auto-style-regression.js") {
+      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+      res.end(await readFile(new URL("../tests/auto-style.browser.js", import.meta.url)));
+      return;
+    }
     if (path === "/creation-context-regression.js") {
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       res.end(await readFile(new URL("../tests/creation-context.browser.js", import.meta.url)));
@@ -407,7 +412,7 @@ const server = createServer(async (req, res) => {
           }
           if(message.type==='alchemy:reference') {
             const saved=findJob(message.id);
-            return {ok:true,value:{...selection(projects.find(p=>p.id===saved.projectId)),image:saved.image||template,jobId:saved.id,reenact:saved.reenact?(saved.mode==='multi-reenact'?{...saved.reenact,subjects:saved.generations?.at(-1)?.subjects||saved.reenact.subjects}:{...saved.reenact,subjectImage:subject}):undefined,generationSubjectImage:saved.generations?.at(-1)?.subjectImage}};
+            return {ok:true,value:{...selection(projects.find(p=>p.id===saved.projectId)),image:saved.image||template,jobId:saved.id,reenact:saved.reenact?(saved.mode==='multi-reenact'?{...saved.reenact,subjects:saved.generations?.at(-1)?.subjects||saved.reenact.subjects}:{...saved.reenact,subjectImage:saved.reenact.subjectImage||subject}):undefined,generationSubjectImage:saved.generations?.at(-1)?.subjectImage}};
           }
           if(message.type==='alchemy:start') {
             await new Promise(resolve=>setTimeout(resolve,Math.min(10000,Math.max(0,Number(previewOptions.get('startDelay'))||0))));
@@ -508,6 +513,8 @@ const server = createServer(async (req, res) => {
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/settings-recovery-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('generationActionsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/generation-actions-regression.js"></script></body>'));
+    if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('autoStyleRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/auto-style-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('creationContextRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/creation-context-regression.js"></script></body>'));
     if (path === '/popup.html'  && new URL(req.url, 'http://127.0.0.1').searchParams.has('panelClip'))

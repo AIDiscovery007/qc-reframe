@@ -137,7 +137,6 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const modeJobs = (mode: Mode) => contextFor(mode).jobs;
   const modeJob = (mode: Mode) => contextFor(mode).job;
   const subjectKey = (mode: Mode) => contextFor(mode).key;
-  const currentInput = (mode: Mode) => contextFor(mode).input;
   const subjectImage = (mode: Mode) => contextFor(mode).subjectImage;
   const selectedSessions = () => contextFor("session").sessions;
   const taskInstruction = (mode: Mode) => contextFor(mode).instruction;
@@ -751,8 +750,10 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const instructionStale = contextFor(preferences.mode).instructionStale;
   const genericPrompt = !!result && preferences.mode === "style" && !job?.reenact;
   const needsPrompt = !result || instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt;
+  const subjectError = contextFor(preferences.mode).subjectError;
   const genericHint = genericPrompt && !subjectImage("style") ? "添加主体图后可生成专属提示词" : "";
   const reverseHint = !selection ? "先选择一张参考图。" : referenceError ? "历史参考图不可用，请重新上传参考图。" : !displayImage ? "等待参考图读取完成。"
+    : subjectError ? subjectError
     : subjectUnavailable[subjectKey(preferences.mode)] ? "主体图尚未就绪，请完成上传。"
     : preferences.mode === "reenact" && !subjectImage("reenact") ? "先上传主体图。"
     : preferences.mode === "multi-reenact" && (multiSubjects.length < 2 || multiSubjects.some(item => !item.subjectImage)) ? "请添加至少 2 张可用的主体图。"
@@ -766,13 +767,6 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     void start(mode, mode === "multi-reenact" ? { subjects: multiSubjects, basePrompt: multiPrompt }
       : mode !== "recreate" && mode !== "session" && subjectImage(mode) ? { subjectImage: subjectImage(mode), basePrompt: taskInstruction(mode) } : undefined);
   };
-  const extractStyle = () => {
-    if (blocked || !selection?.image || promptDraft || !taskInstruction("style").trim()) return;
-    const image = subjectImage("style");
-    if (image) dispatchCreation({ type: "edit", key: subjectKey("style"), version: modeJob("style")?.id || "new", subjectImage: image });
-    void start("style");
-  };
-
 
   const versionSelector = modeJobs(preferences.mode).length > 0 && <SelectField className="version-select" label="" aria-label="提示词版本" value={job?.id || "new"} disabled={busy}
               onChange={(e) => { setCopied(false); dispatchCreation({ type: "select", key: `${activeProject!.id}:${preferences.mode}`, version: e.target.value }); }}>
@@ -956,7 +950,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           instruction={taskInstruction(preferences.mode)} onInstruction={value => changeInstruction(preferences.mode, value)}
           disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy} reverseDisabled={reverseDisabled} running={!!running} cancelling={cancelling}
           status={reverseStatus || (promptDraft ? "编辑未保存" : reverseHint || genericHint || (preferences.mode === "session" && job?.sessionContext?.attachmentCount ? `会话含 ${job.sessionContext.attachmentCount} 个附件，未读取附件内容` : "") || (job?.status === "cancelled" ? "已取消" : ""))}
-          error={referenceError || currentInput(preferences.mode)?.subjectError || selection.error || job?.error} errorTaskId={!referenceError && !selection.error && job?.status === "failed" ? job.id : undefined} stale={instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt}
+          error={referenceError || subjectError || selection.error || job?.error} errorTaskId={!referenceError && !subjectError && !selection.error && job?.status === "failed" ? job.id : undefined} stale={instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt}
           hasPrompt={!!result} promptEditing={!!promptDraft} reduced={reduced} versions={versionSelector} actionsTarget={reverseActions}
           onMode={mode => void saveMode(mode)} onSubject={changeSubject}
           onAvailability={available => setSubjectUnavailable(items => ({ ...items, [subjectKey(preferences.mode)]: !available }))}
@@ -964,7 +958,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           onReference={image => applyReferenceUpload(image, preferences.mode, taskInstruction(preferences.mode))}
           onReferenceRotate={image => applyReferenceRotation(image, preferences.mode, taskInstruction(preferences.mode))}
           onSwap={id => { if (preferences.mode !== "recreate" && preferences.mode !== "session") void swapImages(preferences.mode, taskInstruction(preferences.mode), id); }}
-          onReverse={reverse} onExtract={extractStyle} onCancel={cancel}
+          onReverse={reverse} onCancel={cancel}
           onRetryReference={referenceError ? () => setReferenceErrors(items => { const next = { ...items }; delete next[job!.id]; return next; }) : undefined}
           prompt={result && activeJob && <PromptEditor taskId={activeJob.id} sheet result={result} draft={promptDraft} lang={lang} copied={copied} saving={!!savingPrompt} disabled={!connected} versionSelector={null} onExport={exportResult}
             onLanguage={setLang} onCopy={copy} onEdit={() => setPromptDrafts(items => ({ ...items, [activeJob.id]: { promptZh: result.promptZh, promptEn: result.promptEn, negativePrompt: result.negativePrompt } }))}
@@ -991,7 +985,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       {workspace && !historyOpen && !galleryOpen && selection && <div className="canvas-primary-actions" role="group" aria-label="生成操作">
         <div className="canvas-reverse-actions" ref={setReverseActions} />
         <div className="canvas-generation-actions" ref={setGenerationActions} role="group" aria-label="图片生成操作">
-          {!result && <><button className="primary generate-button" disabled aria-describedby="generation-prerequisite"><Icon name="image" />生成图片</button><p id="generation-prerequisite" className="hint">{running ? "提示词生成后即可生图。" : "先生成提示词，再生成图片。"}</p></>}
+          {!result && <button className="primary generate-button" disabled><Icon name="image" />生成图片</button>}
         </div>
       </div>}
       </div>

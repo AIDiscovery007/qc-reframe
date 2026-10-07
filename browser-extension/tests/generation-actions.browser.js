@@ -87,7 +87,7 @@ try {
   setValue(versions, current);
   await waitFor(() => generate()?.textContent === '再生成图片', '切回版本应恢复其生图历史');
   setValue(versions, 'new');
-  await waitFor(() => find('#generation-prerequisite'), '无结果时应解释生图前置条件');
+  await waitFor(() => find('.canvas-generation-actions .generate-button')?.disabled, '无结果时生图应保持禁用');
   assert(generate().disabled && find('.canvas-generate').textContent === '生成提示词', '无结果时两个动作仍可见且区分可用状态');
   find('.canvas-generate').click();
   await waitFor(() => find('.canvas-generate')?.getAttribute('aria-busy') === 'true', '应开始逆向');
@@ -95,7 +95,7 @@ try {
   await waitFor(() => find('.canvas-generate')?.getAttribute('aria-busy') === 'false' && generate() && !generate().disabled, '逆向完成应直接激活主操作');
   assert(sheet().inert, '逆向完成不应强制展开提示词');
   setValue(find('[aria-label="提示词版本"]'), 'new');
-  await waitFor(() => find('#generation-prerequisite'), '新输入应回到生图未就绪状态');
+  await waitFor(() => find('.canvas-generation-actions .generate-button')?.disabled, '新输入应回到生图未就绪状态');
   find('.canvas-generate').click();
   await waitFor(() => find('.canvas-generate')?.textContent === '取消提示词', '提示词任务应有取消入口');
   find('.canvas-generate').click();
