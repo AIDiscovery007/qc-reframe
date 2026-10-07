@@ -25,7 +25,7 @@ export async function fingerprint(directory) {
 
 // Preview inputs are versioned separately so fixture-only edits do not rebuild the product.
 export async function fixtureState(directory = root) {
-  const files = ['agent-tool/ui.mjs', 'agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs'];
+  const files = ['agent-tool/ui.mjs', 'agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs', 'browser-extension/bridge/image-order.mjs'];
   for (const path of await filesIn(resolve(directory, 'browser-extension/tests'))) {
     if (path.endsWith('.browser.js')) files.push(relative(directory, path));
   }

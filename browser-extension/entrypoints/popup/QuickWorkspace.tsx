@@ -1,3 +1,4 @@
+import { orderedImageIds } from "../../lib/image-order";
 import RecoveryAction from "./RecoveryAction";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { normalizeImage } from "../../lib/image";
@@ -10,8 +11,9 @@ import Icon from "./Icon";
 
 const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
 
-export default function QuickWorkspace({ revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, instruction, job, disabled, modeDisabled, reverseDisabled, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, onGenerationViewUpdate, generationDisabled, generationHint }: {
+export default function QuickWorkspace({ revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, referenceIndex, onImageOrder, instruction, job, disabled, modeDisabled, reverseDisabled, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, onGenerationViewUpdate, generationDisabled, generationHint }: {
   revealPrompt?: number; targetGeneration?: string; contextKey: string; selection?: Selection; title?: string; mode: Mode; subject: string; instruction: string; job?: Job;
+  referenceIndex: number; onImageOrder(referenceIndex: number, onSaved: () => void): Promise<void>;
   generationHint?: string; generationDisabled: boolean; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; status?: string; stale: boolean; cancelling: boolean; copied: boolean; lang: "zh" | "en"; versions: ReactNode;
   onMode(mode: Mode): void; onSubject(image: string): void | Promise<void>; onAvailability(available: boolean): void;
   onInstruction(value: string): void; onReference(file?: File): void; onRotateReference(image: string): Promise<void>; onSwap(): void;
@@ -29,6 +31,8 @@ export default function QuickWorkspace({ revealPrompt, targetGeneration, context
   const referenceFile = useRef<HTMLInputElement>(null);
   const promptToggle = useRef<HTMLButtonElement>(null);
   const subjectTab = useRef<HTMLButtonElement>(null);
+  const referenceTab = useRef<HTMLButtonElement>(null);
+  const focusAfterOrder = useRef(false);
   const pendingJob = useRef("");
   useEffect(() => {
     if (job?.status === "running") pendingJob.current = job.id;
@@ -37,7 +41,13 @@ export default function QuickWorkspace({ revealPrompt, targetGeneration, context
       pendingJob.current = "";
     }
   }, [job?.id, job?.status]);
-  useEffect(() => { select("reference"); setUploading(false); setError(""); return () => { revision.current++; pendingInput.current = false; onAvailability(true); }; }, [contextKey]);
+  useEffect(() => { select("reference"); }, [selection?.projectId || selection?.id, mode]);
+  useEffect(() => { setUploading(false); setError(""); return () => { revision.current++; pendingInput.current = false; onAvailability(true); }; }, [contextKey]);
+  useEffect(() => {
+    if (!focusAfterOrder.current) return;
+    focusAfterOrder.current = false;
+    (selected === "subject" ? subjectTab : referenceTab).current?.focus({ preventScroll: true });
+  }, [referenceIndex, contextKey]);
   useEffect(() => { if (revealPrompt !== undefined) setPromptOpen(true); else if (targetGeneration) setPromptOpen(false); }, [revealPrompt, targetGeneration]);
   const saveSubject = async (read: () => Promise<string>, rethrow = false) => {
     if (disabled || pendingInput.current) return false;
@@ -74,6 +84,16 @@ export default function QuickWorkspace({ revealPrompt, targetGeneration, context
   const paired = mode === "style" || mode === "reenact";
   const image = selected === "subject" && paired ? subject : selection?.image;
   const label = selected === "subject" && paired ? "主体图" : "参考图";
+  const imageIds = orderedImageIds(paired && subject ? ["subject"] : [], referenceIndex);
+  const imageIndex = imageIds.indexOf(selected);
+  const reorder = async () => {
+    if (disabled || pendingInput.current) return;
+    const context = contextKey, attempt = ++revision.current;
+    pendingInput.current = true; setUploading(true); setError("");
+    try { await onImageOrder(referenceIndex === 0 ? 1 : 0, () => { focusAfterOrder.current = true; }); }
+    catch (error) { if (context === scope.current && attempt === revision.current) setError((error as Error).message); }
+    finally { if (context === scope.current && attempt === revision.current) { pendingInput.current = false; setUploading(false); } }
+  };
   const locked = disabled || uploading;
   return <section className="quick-workspace" aria-label="快捷逆向">
     <div className="quick-heading"><h1>{title || "选择参考图"}</h1><SelectField label="" aria-label="逆向模式" value={mode} disabled={modeDisabled || uploading} onChange={e => onMode(e.target.value as Mode)}>{Object.entries(modes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</SelectField></div>
@@ -83,13 +103,14 @@ export default function QuickWorkspace({ revealPrompt, targetGeneration, context
         : <button className="quick-upload" disabled={locked} onClick={() => selected === "subject" ? subjectFile.current?.click() : referenceFile.current?.click()}><Icon name="plus" />{uploading ? "正在读取…" : `上传${label}`}</button>}
     </div>
     {selection && <div className="quick-filmstrip" role="group" aria-label="图片图条">
-      <button aria-label="查看参考图" aria-pressed={selected === "reference"} onClick={() => select("reference")}>{selection.image && <img src={selection.image} alt="" />}参考图</button>
-      {paired && <button ref={subjectTab} aria-label="查看主体图" aria-pressed={selected === "subject"} onClick={() => select("subject")}>{subject ? <img src={subject} alt="" /> : <Icon name="plus" />}主体图{mode === "style" && !subject ? " · 可选" : ""}</button>}
+      {imageIds.map((id, i) => <button key={id} ref={id === "subject" ? subjectTab : referenceTab} aria-label={id === "reference" ? "查看参考图" : "查看主体图"} aria-description={`图 ${i + 1}`} aria-pressed={selected === id} onClick={() => select(id as "reference" | "subject")}>{(id === "reference" ? selection.image : subject) && <img src={id === "reference" ? selection.image : subject} alt="" />}图 {i + 1} · {id === "reference" ? "参考图" : "主体图"}</button>)}
+      {paired && !subject && <button ref={subjectTab} aria-label="查看主体图" aria-pressed={selected === "subject"} onClick={() => select("subject")}><Icon name="plus" />主体图{mode === "style" ? " · 可选" : ""}</button>}
     </div>}
     <div className="quick-tools">
       {versions}
       <button className="icon-button" aria-label={`替换${label}`} title={`替换${label}`} disabled={locked} onClick={() => selected === "subject" ? subjectFile.current?.click() : referenceFile.current?.click()}><Icon name="plus" /></button>
       {paired && <><button className="icon-button" aria-label="互换主体与参考" title="互换主体与参考" disabled={locked || !subject || !selection?.image} onClick={onSwap}><Icon name="swap" /></button><button className="icon-button" aria-label="移除主体" title="移除主体" disabled={locked || !subject} onClick={() => void removeSubject()}><Icon name="trash" /></button></>}
+      {paired && subject && <><button className="icon-button" aria-label="图片前移" title="图片前移" disabled={locked || imageIndex <= 0} onClick={() => void reorder()}>←</button><button className="icon-button" aria-label="图片后移" title="图片后移" disabled={locked || imageIndex !== 0} onClick={() => void reorder()}>→</button></>}
       {job?.result && <button ref={promptToggle} className="text-button quick-prompt-toggle" aria-expanded={promptOpen} aria-controls="quick-prompt" onClick={() => setPromptOpen(!promptOpen)}><Icon name="edit" />提示词<Icon name="chevronDown" /></button>}
     </div>
     <input ref={referenceFile} hidden type="file" accept="image/png,image/jpeg,image/webp" aria-label="上传参考图" onChange={e => { onReference(e.target.files?.[0]); e.target.value = ""; }} />

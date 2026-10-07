@@ -47,7 +47,8 @@ try {
   if (mode().value !== 'style') setValue(mode(), 'style');
   await waitFor(() => mode()?.value === 'style' && version(), '风格版本应加载');
   await showInput();
-  assert(!find('.canvas-label span') && !find('.canvas-generic') && !find('#generation-prerequisite'), '三处冗余 UI 应删除');
+  assert(/^图 \d+$/.test(find('.canvas-label span')?.textContent || ''), '画布标签应显示当前图片编号');
+  assert(!find('.canvas-generic') && !find('#generation-prerequisite'), '通用风格与生图前提不应重复显示');
   const historical = version().value;
   const originalSubject = subject();
   assert(originalSubject, '历史专属版本应恢复主体');

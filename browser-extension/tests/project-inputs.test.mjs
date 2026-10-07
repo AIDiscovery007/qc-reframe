@@ -51,6 +51,50 @@ async function settled(request, id) {
 
 const variant = name => `data:image/png;base64,${Buffer.concat([decodeImage(image).bytes, Buffer.from(name)]).toString("base64")}`;
 
+for (const mode of ["reenact", "multi-reenact"]) test(`${mode} restores legacy order, isolates edits and preserves historical generation snapshots`, async t => {
+  const calls = [];
+  const { request, restart, dir } = await setup(t, { generator: async args => { calls.push(args); return decodeImage(image); } });
+  const subjects = [{ id: "person", role: "人物", detail: "身份", subjectImage: image }, { id: "bag", role: "物品", detail: "手持", subjectImage: otherImage }];
+  const count = mode === "reenact" ? 1 : 2;
+  const composition = mode === "reenact" ? { subjectImage: otherImage } : { subjects };
+  const created = await (await request("/jobs", post({ image, mode, referenceIndex: count, instruction: "融合", reenact: composition }))).json();
+  await settled(request, created.id);
+  assert.equal((await request(`/jobs/${created.id}/generations`, post({ language: "zh" }))).status, 202);
+  const completed = await settled(request, created.id);
+  const jobFile = join(dir, "records", `${created.id}.json`);
+  const projectFile = join(dir, "records", `project-${created.projectId}.json`);
+  const legacy = JSON.parse(await readFile(jobFile));
+  delete legacy.referenceIndex;
+  delete legacy.generations[0].referenceIndex;
+  if (mode === "multi-reenact") legacy.generations[0].subjects.push({ ...legacy.reenact.subjects[1], id: "extra" });
+  const historicalCount = mode === "multi-reenact" ? count + 1 : count;
+  await writeFile(jobFile, JSON.stringify(legacy));
+  const project = JSON.parse(await readFile(projectFile));
+  delete project.inputs[mode].referenceIndex;
+  await writeFile(projectFile, JSON.stringify(project));
+  await restart();
+  const path = `/projects/${created.projectId}`;
+  const restored = await (await request(`${path}/reference`)).json();
+  assert.equal(restored.inputs[mode].referenceIndex, count);
+  assert.equal((await (await request(`/jobs/${created.id}/reference`)).json()).referenceIndex, historicalCount);
+  const generationPath = `/jobs/${created.id}/generations/${completed.generations[0].id}/reference`;
+  assert.equal((await (await request(generationPath)).json()).referenceIndex, historicalCount);
+  assert.equal((await request(`/jobs/${created.id}/generations`, post({ language: "zh" }))).status, 202);
+  const generated = await settled(request, created.id);
+  assert.equal(calls.at(-1).referenceIndex, count);
+  assert.equal(generated.generations.at(-1).referenceIndex, count);
+  for (const referenceIndex of [-1, count + 1, null, "0"])
+    assert.equal((await request(`${path}/input`, post({ expectedRevision: restored.inputRevision, mode, instruction: "融合", ...composition, referenceIndex }))).status, 400);
+  const edited = await (await request(`${path}/input`, post({ expectedRevision: restored.inputRevision, mode, instruction: "融合", ...composition }))).json();
+  assert.equal(edited.inputs[mode].referenceIndex, 0, "new input without a position defaults to reference first");
+  assert.equal(edited.inputVersions[mode], "new", "changing only image order invalidates the old prompt");
+  assert.equal((await request(`${path}/input`, post({ expectedRevision: restored.inputRevision, mode, instruction: "融合", ...composition, referenceIndex: count }))).status, 409);
+  await restart();
+  assert.equal((await (await request(`${path}/reference`)).json()).inputs[mode].referenceIndex, 0);
+  assert.equal((await (await request(generationPath)).json()).referenceIndex, historicalCount, "current edits never rewrite historical input numbering");
+  assert.equal((await (await request(`/jobs/${created.id}`)).json()).result.promptZh, result.promptZh);
+});
+
 test("edited inputs keep project identity, historical snapshots and restart state", async t => {
   const { request, restart } = await setup(t);
   const project = await (await request("/projects", post({ image }))).json();
@@ -173,7 +217,7 @@ test("new task submission commits its current instruction and subjects without r
   const selected = await (await request(`${path}/reference`)).json();
   assert.equal(selected.inputRevision, 2);
   assert.equal(selected.inputVersions.reenact, job.id);
-  assert.deepEqual(selected.inputs.reenact, { instruction: "new", subjectImage: variant("new") });
+  assert.deepEqual(selected.inputs.reenact, { instruction: "new", subjectImage: variant("new"), referenceIndex: 0 });
   assert.equal((await request(`${path}/input`, post({ expectedRevision: 1, mode: "reenact", instruction: "stale", subjectImage: otherImage }))).status, 409);
   assert.equal((await (await request(`${path}/reference`)).json()).inputs.reenact.instruction, "new");
 });
@@ -313,7 +357,7 @@ for (const legacy of [false, true]) test(`historical submissions preserve curren
   const selection = await (await request(`${path}/reference`)).json();
   assert.equal(selection.inputRevision, 3, "historical submission preserves the current input revision");
   assert.equal(selection.inputVersions.reenact, latest.id);
-  assert.deepEqual(selection.inputs.reenact, { instruction: "latest", subjectImage: variant("draft subject") });
+  assert.deepEqual(selection.inputs.reenact, { instruction: "latest", subjectImage: variant("draft subject"), referenceIndex: 0 });
   assert.equal((await (await request(`/jobs/${job.id}/reference`)).json()).instruction, "historical revision");
   assert.equal((await (await request(path)).json()).jobCount, 3);
 });
@@ -348,7 +392,7 @@ for (const emptyInput of [true, false]) test(`changing a legacy reference preser
   const referenceJob = { id: "00000000-0000-0000-0000-000000000001", projectId, mode: "reenact", createdAt: "2026-01-01", imageAsset, subjectAsset: initial, instruction: "selected older prompt", generations: [{ subjectAsset: latestSubject }] };
   const newestJob = { ...referenceJob, id: "00000000-0000-0000-0000-000000000002", createdAt: "2026-01-02", instruction: "newer prompt", generations: [] };
   const oldSubjects = [{ id: "one", role: "人物", detail: "", subjectAsset: initial }, { id: "two", role: "物品", detail: "", subjectAsset: initial }];
-  const latestSubjects = oldSubjects.map(subject => ({ ...subject, subjectAsset: latestSubject }));
+  const latestSubjects = [...oldSubjects, { ...oldSubjects[1], id: "three" }].map(subject => ({ ...subject, subjectAsset: latestSubject }));
   const multi = { id: "00000000-0000-0000-0000-000000000003", projectId, mode: "multi-reenact", createdAt: "2026-01-03", imageAsset, reenact: { basePrompt: "preserve roles", subjects: oldSubjects }, generations: [{ subjects: latestSubjects }] };
   const style = { ...referenceJob, id: "00000000-0000-0000-0000-000000000004", mode: "style", createdAt: "2026-01-04" };
   await writeFile(join(dir, `project-${projectId}.json`), JSON.stringify({ id: projectId, createdAt: "2026-01-01", updatedAt: "2026-01-04", extension: "png", imageAsset,
@@ -357,10 +401,12 @@ for (const emptyInput of [true, false]) test(`changing a legacy reference preser
   await store.saveInput(projectId, { image: decodeImage(variant("rotated")), mode: "recreate", input: { instruction: "rotate" } });
   const selection = await store.reference(projectId);
   assert.equal(selection.inputs.reenact.instruction, "selected older prompt");
+  assert.equal(selection.inputs.reenact.referenceIndex, 1);
   assert.equal(selection.inputs.reenact.subjectImage, variant("latest generation subject"));
   assert.equal(selection.inputs["multi-reenact"].instruction, "preserve roles");
-  assert.deepEqual(selection.inputs["multi-reenact"].subjects.map(subject => subject.subjectImage), Array(2).fill(variant("latest generation subject")));
-  assert.deepEqual(selection.inputs.style, emptyInput ? { instruction: "" } : undefined);
+  assert.equal(selection.inputs["multi-reenact"].referenceIndex, 3);
+  assert.deepEqual(selection.inputs["multi-reenact"].subjects.map(subject => subject.subjectImage), Array(3).fill(variant("latest generation subject")));
+  assert.deepEqual(selection.inputs.style, emptyInput ? { instruction: "", referenceIndex: 0 } : undefined);
   assert.deepEqual(Object.values(selection.inputVersions), Array(5).fill("new"));
 });
 

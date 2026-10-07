@@ -8,6 +8,7 @@ import { root, extension, requireExtension, sourceState, fingerprint, fixtureSta
 import { scenarios, rules, uncovered } from './catalog.mjs';
 import { probeLayout } from './probe.mjs';
 import { prepareExample, checkExample } from './examples.mjs';
+import { checkImageOrderKeyboard } from './image-order.mjs';
 
 const { chromium } = requireExtension('playwright');
 const buildDirectory = resolve(extension, '.output/chrome-mv3');
@@ -156,7 +157,9 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
       page.on('pageerror', error => item.errors.push(error.message.slice(0, 500)));
       try {
         await page.goto(preview.url + scenario.path);
-        if (scenario.regression) {
+        if (scenario.keyboardCase) {
+          item.checks.push(...await checkImageOrderKeyboard(page, scenario));
+        } else if (scenario.regression) {
           await page.waitForFunction(key => ['passed', 'failed'].includes(document.documentElement.dataset[key]), scenario.regression, { timeout: 60000 });
           const actual = await page.evaluate(key => document.documentElement.dataset[key], scenario.regression);
           item.checks.push({ ruleId: 'UI-BEHAVIOR', status: actual === 'passed' ? 'passed' : 'failed', target: scenario.regression, expected: 'passed', actual });

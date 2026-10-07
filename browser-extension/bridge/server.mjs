@@ -1,3 +1,4 @@
+import { referencePosition, savedReferenceIndex } from "./image-order.mjs";
 import { createSessionStore, sessionIds } from "./sessions.mjs";
 import { prepareRestart } from "./restart.mjs";
 import { createTaskFeed } from "./task-feed.mjs";
@@ -538,6 +539,7 @@ export async function createBridge({
             input.subjectAsset = await images.put(subject);
           } else if (body.subjectImage !== undefined && body.subjectImage !== "") throw bad("主体图片无效");
         }
+        input.referenceIndex = referencePosition(body.referenceIndex, input.subjects?.length ?? (input.subjectAsset ? 1 : 0), 0);
         if (projects.summary(project.id)?.inputRevision !== body.expectedRevision) throw bad("项目输入已在其他窗口更新，请重新打开项目", 409);
         if (body.mode === "session") assertSessionRequestActive();
         await projects.saveInput(project.id, { image, mode: body.mode, input, referenceJobId: body.referenceJobId, expectedRevision: body.expectedRevision });
@@ -628,11 +630,11 @@ export async function createBridge({
         }
         if (req.method === "GET" && generationMatch[3] === "reference") {
           if (job.mode === "multi-reenact") {
-            json(200, { image: await storedImage(job), subjects: await restoreSubjects(generation.subjects) });
+            json(200, { image: await storedImage(job), subjects: await restoreSubjects(generation.subjects), referenceIndex: savedReferenceIndex(generation) });
             return;
           }
           if (!["recreate", "session"].includes(job.mode) && !generation.subjectAsset && !generation.subjectExtension) throw bad("此生图记录没有保存主体图快照", 404);
-          json(200, { image: await storedImage(["recreate", "session"].includes(job.mode) ? job : generation, !["recreate", "session"].includes(job.mode)) });
+          json(200, { image: await storedImage(["recreate", "session"].includes(job.mode) ? job : generation, !["recreate", "session"].includes(job.mode)), referenceIndex: savedReferenceIndex(generation) });
           return;
         }
         const fileAction = req.method === "POST" && ["open", "reveal"].includes(generationMatch[3]);
@@ -682,6 +684,8 @@ export async function createBridge({
         if (job.mode === "session" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("会话创作不接受主体图");
         if (job.mode !== "multi-reenact" && body.subjects !== undefined) throw bad("此模式不接受多张主体图");
         if (job.mode === "multi-reenact" && body.subjectImage !== undefined) throw bad("多图重演需要主体图列表");
+        const referenceIndex = savedReferenceIndex(job);
+        if (body.referenceIndex !== undefined && body.referenceIndex !== referenceIndex) throw bad("图片顺序已变化，请重新生成提示词");
         const { negativePrompt } = job.result;
         let prompt = body.language === "zh" ? job.result.promptZh : job.result.promptEn;
         if (!prompt?.trim() || /\[SUBJECT\]/i.test(prompt)) throw bad("提示词仍缺少主体，请补充后重新逆向");
@@ -691,6 +695,8 @@ export async function createBridge({
         const imagePath = job.mode === "recreate" ? undefined : await storedImage(job, false, true);
         const multi = job.mode === "multi-reenact";
         const decodedSubjects = multi ? decodeSubjects(body.subjects !== undefined ? body.subjects : await restoreSubjects(job.reenact?.subjects), (await images.read(job.imageAsset)).length) : undefined;
+        if (multi && JSON.stringify(decodedSubjects.map(subject => subject.id)) !== JSON.stringify(job.reenact?.subjects?.map(subject => subject.id)))
+          throw bad("主体图片顺序已变化，请重新生成提示词");
         const subject = !multi && job.mode !== "recreate" && job.reenact
           ? decodeImage(body.subjectImage !== undefined ? body.subjectImage : await storedImage(job, true)) : undefined;
         if (subject?.bytes.length > 2 * 1024 * 1024) throw bad("主体图最多 2 MB，请压缩后重试");
@@ -701,8 +707,9 @@ export async function createBridge({
         const subjectImagePath = subjectAsset ? images.path(subjectAsset) : undefined;
         const subjects = multi ? await saveSubjects(decodedSubjects) : undefined;
         const subjectImagePaths = subjects?.map((item) => images.path(item.subjectAsset));
+        referencePosition(referenceIndex, subjects?.length ?? (subject ? 1 : 0));
         runtime.reserve(id, job.projectId);
-        const next = { id, model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
+        const next = { id, referenceIndex, model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
         job.generations ||= [];
         job.generations.push(next);
         try {
@@ -715,7 +722,7 @@ export async function createBridge({
         json(202, job);
         void runtime.run(job, next, { modelSettings, completedStage: "图片已生成", failedStage: "生图失败",
           execute: async ({ signal, progress }) => {
-            const output = await generator({ mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, prompt, negativePrompt: next.negativePrompt,
+            const output = await generator({ mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt: next.negativePrompt,
               skillPath: generationSkillPath, cwd: root, signal, modelSettings, onProgress: progress });
             signal.throwIfAborted();
             if (!["png", "jpeg", "webp"].includes(output.extension)) throw new Error("生图返回了不支持的文件格式");
@@ -732,8 +739,9 @@ export async function createBridge({
         if (req.method === "GET" && idMatch[2] === "/reference") {
           const image = await storedImage(job);
           let reenact, subjectError, generationSubjectImage;
+          const latestSubjects = job.generations?.findLast((item) => item.subjects);
           if (job.mode === "multi-reenact") {
-            const subjects = job.generations?.findLast((item) => item.subjects)?.subjects || job.reenact?.subjects;
+            const subjects = latestSubjects?.subjects || job.reenact?.subjects;
             reenact = { ...job.reenact, subjects: (subjects || []).map(({ subjectAsset, ...item }) => ({ ...item, subjectImage: "" })) };
             try { reenact.subjects = await restoreSubjects(subjects); }
             catch (error) {
@@ -758,7 +766,7 @@ export async function createBridge({
               subjectError = error.message;
             }
           }
-          json(200, { id: job.id, jobId: job.id, projectId: job.projectId, image, sourceUrl: job.sourceUrl, capture: job.capture, instruction: job.instruction ?? job.reenact?.basePrompt, ...(job.sessionContext ? { sessions: job.sessionContext.sources } : {}), reenact, subjectError, generationSubjectImage });
+          json(200, { id: job.id, jobId: job.id, projectId: job.projectId, referenceIndex: savedReferenceIndex(latestSubjects || latestSubject || job), image, sourceUrl: job.sourceUrl, capture: job.capture, instruction: job.instruction ?? job.reenact?.basePrompt, ...(job.sessionContext ? { sessions: job.sessionContext.sources } : {}), reenact, subjectError, generationSubjectImage });
           return;
         }
         if (req.method === "POST" && idMatch[2] === "/cancel") {
@@ -826,6 +834,7 @@ export async function createBridge({
         }
         reenact = { basePrompt: instruction, ...(promptSourceJobId ? { promptSourceJobId } : {}) };
       }
+      const referenceIndex = referencePosition(body.referenceIndex, decodedSubjects?.length ?? (subject ? 1 : 0), 0);
       try {
         await readFile(skillPath);
       } catch {
@@ -851,6 +860,7 @@ export async function createBridge({
         imageAsset,
         ...(subjectAsset ? { subjectAsset } : {}),
         mode: body.mode,
+        referenceIndex,
         model: modelSettings.model,
         reasoningEffort: modelSettings.reasoningEffort,
         status: "running",
@@ -888,7 +898,7 @@ export async function createBridge({
           signal.throwIfAborted();
           const result = await agent({ sessionContext, imagePath, subjectImagePath,
             subjectImagePaths: reenact?.subjects?.map((item) => images.path(item.subjectAsset)),
-            subjects: reenact?.subjects, basePrompt: reenact?.basePrompt, instruction: job.instruction,
+            subjects: reenact?.subjects, referenceIndex, basePrompt: reenact?.basePrompt, instruction: job.instruction,
             mode: job.mode, skillPath, cwd: root, signal, modelSettings, onProgress: progress });
           return { result };
         },

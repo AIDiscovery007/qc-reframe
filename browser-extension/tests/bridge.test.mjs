@@ -72,6 +72,55 @@ test("imagegen receives exact prompt, exclusions, explicit skill and ordered rea
   assert.throws(() => generationInput({ ...args, prompt: "Draw [SUBJECT]" }), /补充主体/);
 });
 
+test("custom reference positions keep attachment numbers and subject responsibilities aligned", () => {
+  const subjects = [{ id: "person", role: "人物", detail: "发型" }, { id: "bag", role: "物品", detail: "手持" }];
+  const args = { name: "alchemy", skillPath: "/skill.md", imagePath: "/template.png", subjectImagePaths: ["/person.png", "/bag.png"], subjects,
+    instruction: "按图号融合", mode: "multi-reenact", prompt: "已确认的提示词", negativePrompt: "" };
+  for (const referenceIndex of [0, 1, 2]) {
+    const expected = [...args.subjectImagePaths];
+    expected.splice(referenceIndex, 0, args.imagePath);
+    for (const input of [agentInput({ ...args, referenceIndex }), generationInput({ ...args, referenceIndex })]) {
+      assert.deepEqual(input.filter(item => item.type === "localImage").map(item => item.path), expected);
+      assert.match(input[0].text, new RegExp(`图 ${referenceIndex + 1} 为参考模板`));
+      for (const [index, subject] of subjects.entries())
+        assert.ok(input.some(item => item.text?.includes(JSON.stringify({ image: expected.indexOf(args.subjectImagePaths[index]) + 1, ...subject }))));
+    }
+  }
+  for (const mode of ["style", "reenact"]) for (const referenceIndex of [0, 1]) {
+    const paired = { ...args, mode, subjects: undefined, subjectImagePaths: undefined, subjectImagePath: "/person.png", referenceIndex };
+    const expected = referenceIndex ? ["/person.png", "/template.png"] : ["/template.png", "/person.png"];
+    for (const input of [agentInput(paired), generationInput(paired)]) {
+      assert.deepEqual(input.filter(item => item.type === "localImage").map(item => item.path), expected);
+      assert.match(input[0].text, new RegExp(`图 ${referenceIndex + 1} (?:为风格参考模板|是风格参考图|是参考模板)`));
+    }
+  }
+});
+
+test("new jobs default to reference first and generation cannot override their snapshot order", async t => {
+  const calls = [];
+  const { request } = await setup(t, async () => ({ ...result, promptZh: "图 1 模板，图 2 主体" }), async args => {
+    calls.push(args);
+    return decodeImage(image);
+  });
+  for (const mode of ["reenact", "multi-reenact"]) for (const referenceIndex of [undefined, 1]) {
+    const reenact = mode === "reenact" ? { subjectImage: image, basePrompt: "融合" }
+      : { subjects: [{ id: "person", role: "人物", detail: "身份", subjectImage: image }, { id: "bag", role: "物品", detail: "手持", subjectImage: image }], basePrompt: "融合" };
+    const created = await (await request("/jobs", submit({ mode, referenceIndex, reenact }))).json();
+    const job = await waitFor(request, created.id, "completed");
+    assert.equal(job.referenceIndex, referenceIndex ?? 0);
+    assert.equal((await (await request(`/jobs/${job.id}/reference`)).json()).referenceIndex, referenceIndex ?? 0);
+    const path = `/jobs/${job.id}/generations`;
+    assert.equal((await request(path, { method: "POST", body: JSON.stringify({ language: "zh", referenceIndex: referenceIndex ? 0 : 1 }) })).status, 400);
+    assert.equal((await request(path, { method: "POST", body: JSON.stringify({ language: "zh" }) })).status, 202);
+    const generated = await waitGeneration(request, job.id, "completed");
+    assert.equal(generated.generations[0].referenceIndex, referenceIndex ?? 0);
+    assert.equal(calls.at(-1).referenceIndex, referenceIndex ?? 0);
+    assert.equal((await (await request(`${path}/${generated.generations[0].id}/reference`)).json()).referenceIndex, referenceIndex ?? 0);
+  }
+  for (const referenceIndex of [-1, 2, 0.5, "0", null])
+    assert.equal((await request("/jobs", submit({ mode: "reenact", referenceIndex, reenact: { subjectImage: image, basePrompt: "融合" } }))).status, 400);
+});
+
 for (const mode of ["style", "reenact", "recreate"]) test(`${mode} generates from saved inputs and preserves prompt and previous images`, async (t) => {
   const paired = mode !== "recreate";
   const finalResult = { ...result, promptZh: "中文生成提示词", promptEn: "English generation prompt", negativePrompt: "排除项" };
@@ -549,8 +598,8 @@ test("generic style keeps legacy paired instructions but explicitly identifies t
   const input = agentInput({ name: "alchemy", skillPath: "/skill/SKILL.md", mode: "style", imagePath: "/template.png", instruction });
   assert.deepEqual(input.filter(item => item.type === "localImage").map(item => item.path), ["/template.png"]);
   assert.ok(input.some(item => item.text?.includes(JSON.stringify(instruction))));
-  assert.match(input[0].text, /原图 2 参考模板就是本次唯一附件/);
-  assert.match(input[0].text, /原图 1 主体没有提供/);
+  assert.match(input[0].text, /本次仅有参考模板的实际输入/);
+  assert.match(input[0].text, /主体图没有提供/);
   assert.match(input[0].text, /依赖缺失主体的要求列入 uncertainties/);
   assert.match(input[0].text, /\[SUBJECT\]/);
 });
@@ -593,28 +642,29 @@ test("multi-reenact keeps ordered roles, immutable generation inputs and latest 
   const job = await waitFor(request, (await response.json()).id, "completed");
   const args = inverseCalls[0];
   const input = agentInput({ ...args, name: "alchemy" });
-  assert.deepEqual(input.filter((item) => item.type === "localImage").map((item) => item.path), [...args.subjectImagePaths, args.imagePath]);
+  assert.deepEqual(input.filter((item) => item.type === "localImage").map((item) => item.path), [args.imagePath, ...args.subjectImagePaths]);
   assert.deepEqual(await Promise.all(args.subjectImagePaths.map((path) => readFile(path))), subjects.map((subject) => decodeImage(subject.subjectImage).bytes));
-  assert.match(input[0].text, /图 3 为参考模板/);
+  assert.match(input[0].text, /图 1 为参考模板/);
   assert.ok(input.some((item) => item.text?.includes('"role":"人物"')));
   assert.ok(input.some((item) => item.text?.includes('"detail":"手持"')));
   assert.equal(job.reenact.subjects[0].subjectImage, undefined);
   assert.equal((await (await request(`/projects/${job.projectId}`)).json()).modes["multi-reenact"].status, "completed");
   assert.deepEqual((await (await request(`/jobs/${job.id}/reference`)).json()).reenact, { subjects, basePrompt: "沿用模板构图" });
 
-  const replacement = [{ ...subjects[1], role: "细节", subjectImage: thirdImage }, subjects[0]];
+  const replacement = [{ ...subjects[0], subjectImage: thirdImage }, { ...subjects[1], role: "细节" }];
   const generate = (inputs) => request(`/jobs/${job.id}/generations`, { method: "POST", body: JSON.stringify({ language: "zh", subjects: inputs }) });
+  assert.equal((await generate([...subjects].reverse())).status, 400, "changed subject numbering requires a new prompt");
   assert.equal((await generate(replacement)).status, 202);
   const first = await waitGeneration(request, job.id, "completed");
   const snapshot = first.generations[0];
   assert.deepEqual(first.reenact, job.reenact);
-  assert.deepEqual(snapshot.subjects.map(({ id }) => id), ["bag", "person"]);
+  assert.deepEqual(snapshot.subjects.map(({ id }) => id), ["person", "bag"]);
   const generationArgs = generationCalls[0];
   const generation = generationInput(generationArgs);
-  assert.deepEqual(generation.filter((item) => item.type === "localImage").map((item) => item.path), [...generationArgs.subjectImagePaths, generationArgs.imagePath]);
+  assert.deepEqual(generation.filter((item) => item.type === "localImage").map((item) => item.path), [generationArgs.imagePath, ...generationArgs.subjectImagePaths]);
   assert.deepEqual(await readFile(generationArgs.subjectImagePaths[0]), decodeImage(thirdImage).bytes);
-  assert.match(generation[0].text, /图 3 为参考模板/);
-  assert.deepEqual((await (await request(`/jobs/${job.id}/generations/${snapshot.id}/reference`)).json()), { image, subjects: replacement });
+  assert.match(generation[0].text, /图 1 为参考模板/);
+  assert.deepEqual((await (await request(`/jobs/${job.id}/generations/${snapshot.id}/reference`)).json()), { image, subjects: replacement, referenceIndex: 0 });
   assert.deepEqual((await (await request(`/jobs/${job.id}/reference`)).json()).reenact.subjects, replacement);
   assert.equal((await generate(subjects)).status, 202);
   const second = await waitGeneration(request, job.id, "completed");

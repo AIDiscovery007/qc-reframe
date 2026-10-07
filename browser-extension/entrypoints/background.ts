@@ -131,7 +131,7 @@ export default defineBackground(() => {
     if (typeof id !== "string" || !/^[\da-f]{64}$/.test(id)) throw new Error("无效项目");
     return bridge<Selection>(`/projects/${id}/reference`, token);
   };
-  const start = async (id: string, mode: Mode, referenceJobId?: string, reenact?: SubjectInput, projectId?: string, instruction?: string, inputRevision?: number, sessionIds?: string[], signal?: AbortSignal) => {
+  const start = async (id: string, mode: Mode, referenceJobId?: string, reenact?: SubjectInput, projectId?: string, instruction?: string, inputRevision?: number, sessionIds?: string[], signal?: AbortSignal, referenceIndex?: number) => {
     if (selecting) throw new Error("正在处理图片，请稍候");
     selecting = true;
     try {
@@ -157,7 +157,7 @@ export default defineBackground(() => {
         throw new Error("所选图片已变化，请重试");
       const job = await bridge<Job>("/jobs", stored.preferences?.token || "", {
         image: selection.image,
-        mode, sessionIds,
+        mode, sessionIds, referenceIndex,
         sourceUrl: selection.sourceUrl,
         capture: selection.capture,
         instruction,
@@ -165,7 +165,7 @@ export default defineBackground(() => {
         inputRevision: inputRevision ?? current?.inputRevision, referenceJobId,
         reenact: mode !== "recreate" && mode !== "session" ? reenact : undefined,
       }, signal);
-      const next = { ...selection, projectId: job.projectId || selection.projectId, jobId: job.id, stage: job.stage, error: undefined, instruction: job.instruction,
+      const next = { ...selection, projectId: job.projectId || selection.projectId, jobId: job.id, stage: job.stage, error: undefined, instruction: job.instruction, referenceIndex: job.referenceIndex,
         reenact: mode !== "recreate" && mode !== "session" ? reenact : undefined, subjectError: undefined, generationSubjectImage: undefined, generationSubjects: undefined };
       const currentSelection = await projectReference(job.projectId || selection.projectId!, stored.preferences?.token || "").catch(() => current || selection);
       if (!projectId || stored.selection?.projectId === projectId)
@@ -320,7 +320,7 @@ export default defineBackground(() => {
         try {
           const next = await bridge<Selection>(`/projects/${message.projectId}/input`, token, {
             expectedRevision: message.expectedRevision, referenceJobId: message.referenceJobId, image: message.image, mode: message.mode,
-            instruction: message.instruction, subjectImage: message.subjectImage, subjects: message.subjects, sessionIds: message.sessionIds,
+            referenceIndex: message.referenceIndex, instruction: message.instruction, subjectImage: message.subjectImage, subjects: message.subjects, sessionIds: message.sessionIds,
           }, signal);
           try {
             const latest = (await browser.storage.local.get("selection")).selection as Selection | undefined;
@@ -530,7 +530,7 @@ export default defineBackground(() => {
           : bridge(`${path}/${message.generationId}/cancel`, token, {});
       }
       case "alchemy:start":
-        return start(message.id, message.mode, message.referenceJobId, message.reenact, message.projectId, message.instruction, message.inputRevision, message.sessionIds, signal);
+        return start(message.id, message.mode, message.referenceJobId, message.reenact, message.projectId, message.instruction, message.inputRevision, message.sessionIds, signal, message.referenceIndex);
     }
   };
   browser.runtime.onConnect.addListener(port => {

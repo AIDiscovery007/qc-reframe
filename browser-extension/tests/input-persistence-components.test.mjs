@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { moveImage } from '../lib/image-order.ts';
 
 const sources = await Promise.all(['workspace/CanvasWorkspace', 'popup/QuickWorkspace'].map(async path =>
   ts.createSourceFile(path, await readFile(new URL(`../entrypoints/${path}.tsx`, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)));
@@ -21,11 +22,12 @@ function setup(kind, options = {}) {
   const subjects = [{ id: 'a', subjectImage: 'old-a', role: '人物', detail: '帽子' }, { id: 'b', subjectImage: 'old-b', role: '场景', detail: '' }];
   const globals = {
     disabled: false, locked: false, pendingInput: { current: false }, revision: { current: 0 }, scope: { current: 'A:style:v1' }, contextKey: 'A:style:v1',
+    moveImage, subjectIds: ['a', 'b'], referenceIndex: 0, selectedId: 'a',
     target: { current: 'subject' }, mode: 'style', subjects, current: undefined, isSubject: true, index: 0,
     normalizeImage: async () => 'new-image', crypto: { randomUUID: () => 'added' },
     setUploading: value => state.uploading.push(value), setUploadError: value => state.errors.push(value), setError: value => state.errors.push(value),
     onAvailability: value => state.availability.push(value), onSelect: value => state.selected.push(value), select: value => state.selected.push(value),
-    onSubject: async value => state.inputs.push(value), onSubjects: async value => state.inputs.push(value), onReference: async value => state.inputs.push(value), onReferenceRotate: async value => state.inputs.push(value),
+    onImageOrder: async value => state.inputs.push(value), onSubject: async value => state.inputs.push(value), onSubjects: async value => state.inputs.push(value), onReference: async value => state.inputs.push(value), onReferenceRotate: async value => state.inputs.push(value),
     setSettings() {}, subjectTab: { current: { focus: () => state.focus++ } }, inputArea: { current: null }, settingsPanel: { current: null },
     ...options,
   };
@@ -128,7 +130,7 @@ test('canvas: batch upload persists only complete images and preserves existing 
 });
 
 test('canvas: role and ordering failures are handled locally', async () => {
-  const ui = setup('canvas', { current: { id: 'a' }, onSubjects: async () => { throw new Error('save failed'); } });
+  const ui = setup('canvas', { current: { id: 'a' }, onImageOrder: async () => { throw new Error('save failed'); }, onSubjects: async () => { throw new Error('save failed'); } });
   await ui.update({ role: '物品' });
   await ui.reorder(1);
   assert.equal(ui.state.errors.filter(value => value === 'save failed').length, 2);

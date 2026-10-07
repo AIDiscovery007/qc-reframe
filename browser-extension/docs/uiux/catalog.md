@@ -38,6 +38,15 @@
 | popup-narrow | popup 320×740 | /popup.html?state=alignment | UI-LAYOUT-QUICK, UI-IMAGE-PREVIEW |
 | popup-image-failed | popup 400×740 | /popup.html?state=alignment / image-failed | UI-LAYOUT-QUICK, UI-IMAGE-PREVIEW |
 | generation-actions | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200 | generationActionsRegression |
+| image-order-paired | workspace 1440×1000 | /workspace.html?state=projects&mode=style&imageOrderRegression=paired&inputSaveDelay=100 | imageOrderRegression |
+| image-order-multi | workspace 1440×1000 | /workspace.html?state=multi&mode=multi-reenact&imageOrderRegression=multi&inputSaveDelay=100 | imageOrderRegression |
+| image-order-legacy | workspace 1440×1000 | /workspace.html?state=projects&mode=style&imageOrderRegression=legacy&inputSaveDelay=100 | imageOrderRegression |
+| image-order-failed | workspace 1440×1000 | /workspace.html?state=projects&mode=style&imageOrderRegression=failed&inputSaveDelay=100&inputSaveFailures=1 | imageOrderRegression |
+| image-order-popup | popup 400×740 | /popup.html?state=projects&mode=style&imageOrderRegression=popup&inputSaveDelay=100 | imageOrderRegression |
+| image-order-keyboard-new | popup 320×740 | /popup.html?state=projects&mode=style&inputSaveDelay=4000&imageOrderFixture=new | imageOrderKeyboard |
+| image-order-keyboard-history | popup 320×740 | /popup.html?state=projects&mode=style&inputSaveDelay=4000 | imageOrderKeyboard |
+| image-order-keyboard-failure | popup 320×740 | /popup.html?state=projects&mode=style&inputSaveDelay=4000&inputSaveFailures=1 | imageOrderKeyboard |
+| image-order-keyboard-late | popup 320×740 | /popup.html?state=projects&mode=style&inputSaveDelay=4000 | imageOrderKeyboard |
 | auto-style | workspace 1440×1000 | /workspace.html?state=projects&mode=style&autoStyleRegression=1&inputSaveDelay=250 | autoStyleRegression |
 | creation-context | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&inputSaveDelay=1800&creationContextRegression=mode | creationContextRegression |
 | settings-recovery | workspace 1440×1000 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |

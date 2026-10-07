@@ -91,6 +91,11 @@ export function resolveCreation(state: CreationState, selection: Selection | und
   const subjectError = state.subjectDrafts[draftKey] !== undefined || state.multiSubjectDrafts[draftKey] !== undefined
     ? undefined : input ? input.subjectError : reference?.subjectError;
   const subjects = state.multiSubjectDrafts[draftKey] ?? input?.subjects ?? reference?.generationSubjects ?? reference?.reenact?.subjects ?? [];
+  const savedIndex = job?.referenceIndex ?? (mode === "multi-reenact" ? job?.reenact?.subjects?.length || 0 : job?.reenact ? 1 : 0);
+  const legacyDraft = state.subjectDrafts[draftKey] !== undefined || state.multiSubjectDrafts[draftKey] !== undefined;
+  const referenceIndex = input ? input.referenceIndex ?? (mode === "multi-reenact" ? subjects.length : subjectImage ? 1 : 0)
+    : job ? reference?.referenceIndex ?? savedIndex : legacyDraft ? mode === "multi-reenact" ? subjects.length : subjectImage ? 1 : 0 : 0;
+  const orderStale = !!job?.result && referenceIndex !== savedIndex;
   const instruction = state.instructions[draftKey] ?? input?.instruction ?? job?.instruction ?? job?.reenact?.basePrompt ?? defaultInstruction;
   const savedSubjects = reference?.reenact?.subjects || [];
   const instructionStale = !!job?.result && instruction.trim() !== (job.instruction ?? job.reenact?.basePrompt ?? defaultInstruction).trim();
@@ -98,13 +103,13 @@ export function resolveCreation(state: CreationState, selection: Selection | und
     const saved = savedSubjects[index];
     return !saved || item.id !== saved.id || item.subjectImage !== saved.subjectImage || item.role !== saved.role || item.detail !== saved.detail;
   }) || instruction.trim() !== (job.instruction ?? job.reenact?.basePrompt)?.trim());
-  return { key, draftKey, jobs, job, input, subjectImage, subjectError, subjects, instruction, instructionStale, multiStale,
+  return { key, draftKey, jobs, job, input, subjectImage, subjectError, subjects, referenceIndex, instruction, instructionStale, orderStale, multiStale,
     sessions: input?.sessions ?? job?.sessionContext?.sources ?? [], image: job ? reference?.image : selection?.image };
 }
 
 type InputSave = {
   selection: Selection; mode: Mode; referenceJobId?: string; image?: string; instruction: string;
-  subjectImage?: string; subjects?: MultiSubject[]; sessionIds?: string[];
+  subjectImage?: string; subjects?: MultiSubject[]; sessionIds?: string[]; referenceIndex?: number;
 };
 
 /** One writer owns the in-flight input commit. Navigation invalidates delivery, never the durable write. */
@@ -118,9 +123,9 @@ export function createInputWriter(send: (message: Record<string, unknown>) => Pr
       const started = scope();
       pending = true;
       try {
-        const { selection, mode, referenceJobId, image, instruction, subjectImage, subjects, sessionIds } = input;
+        const { selection, mode, referenceJobId, image, instruction, subjectImage, subjects, sessionIds, referenceIndex } = input;
         const next = await send({ type: "alchemy:update-project-input", projectId: selection.projectId,
-          expectedRevision: selection.inputRevision || 0, referenceJobId, image, mode, instruction,
+          expectedRevision: selection.inputRevision || 0, referenceJobId, image, mode, instruction, referenceIndex,
           ...(mode === "session" ? { sessionIds } : mode === "multi-reenact" ? { subjects } : mode !== "recreate" ? { subjectImage } : {}),
         });
         const current = scope();

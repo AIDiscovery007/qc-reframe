@@ -106,10 +106,35 @@ test("root preview serves built entries, gallery images and browser regression s
     assert.equal(response.headers.get("content-type"), type);
     assert.ok((await response.arrayBuffer()).byteLength > 100);
   }
-  for (const name of ["settings-recovery", "generation-actions", "auto-style", "creation-context"]) {
+  for (const name of ["settings-recovery", "generation-actions", "auto-style", "creation-context", "image-order"]) {
     const response = await fetch(`${baseURL}/${name}-regression.js`);
     assert.equal(response.status, 200, name);
     assert.match(response.headers.get("content-type"), /javascript/);
     assert.ok((await response.text()).length > 100);
   }
+});
+
+test("order preview preserves explicit input and task order without rewriting legacy snapshots", async () => {
+  const runtime = preview("?state=projects&mode=style&imageOrderRegression=paired");
+  const send = async message => {
+    const response = await runtime.sendMessage(message);
+    assert.equal(response.error, undefined);
+    return response.value;
+  };
+  const projectId = 'a'.repeat(64);
+  const initial = await send({ type: 'alchemy:project-reference', id: projectId });
+  assert.equal(initial.inputs.style.referenceIndex, 0);
+  const history = (await send({ type: 'alchemy:project', id: projectId })).jobs[0];
+  assert.equal(history.referenceIndex, undefined);
+  assert.equal((await send({ type: 'alchemy:reference', id: history.id })).referenceIndex, 1);
+  const saved = await send({ type: 'alchemy:update-project-input', projectId, mode: 'style', expectedRevision: initial.inputRevision,
+    referenceIndex: 1, instruction: '用户顺序', subjectImage: initial.inputs.style.subjectImage });
+  assert.equal(saved.inputs.style.referenceIndex, 1);
+  assert.equal(saved.inputVersions.style, 'new');
+  const started = await send({ type: 'alchemy:start', projectId, mode: 'style', referenceIndex: 1, instruction: '用户顺序',
+    reenact: { subjectImage: initial.inputs.style.subjectImage } });
+  assert.equal(started.job.referenceIndex, 1);
+  assert.equal(started.currentSelection.inputs.style.referenceIndex, 1);
+  const after = await send({ type: 'alchemy:project', id: projectId });
+  assert.equal(after.jobs.find(item => item.id === history.id).referenceIndex, undefined);
 });

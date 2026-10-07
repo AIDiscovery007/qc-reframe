@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "intent": "用户确认参考图默认图1及自定义顺序；追加复核返修，快捷面板改序保留图片身份，成功采用后恢复图条焦点，失败或切项目后的迟到响应不夺焦。",
+  "createdAt": "2026-10-07T13:04:20.915Z",
+  "reviewStatus": "proposed",
+  "files": [
+    {
+      "path": "browser-extension/entrypoints/popup/App.tsx",
+      "sha256": "4a6e666ac52b7043e9765162891b8ee7aac68b01ae073281b5337ee07a166f0d"
+    },
+    {
+      "path": "browser-extension/entrypoints/workspace/CanvasWorkspace.tsx",
+      "sha256": "a23fa660cd1b1c1be1e93492db96d820869f87563ccd091d4fe8e5d09e652195"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/QuickWorkspace.tsx",
+      "sha256": "dbf39c43c8c4327971951fb17c840bd233b85e9a180fa984f559fec78667f866"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/GenerationPanel.tsx",
+      "sha256": "f40653010e18926c7cb5a18af07e8ce9f138b5f6a9a80aa4acacfd08b026ab7e"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/MultiInputPreview.tsx",
+      "sha256": "6b10ac483c7662c8a4f5677f806608b780b869b536154bdf9b5b32de13cd99e6"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/TaskInstruction.tsx",
+      "sha256": "e850cd8c2b9dea052911e1c3cd0acaf25cb9027a8186894b0dc7f08ceaa2d28b"
+    },
+    {
+      "path": "browser-extension/lib/creation-context.ts",
+      "sha256": "7bfb200be49ce0e2daa0ed4d79b86a911ae46b8c5afb458dbe9046fb9f85c14d"
+    },
+    {
+      "path": "browser-extension/lib/image-order.ts",
+      "sha256": "ac9399f39eb34d606cc7fd2b0093bc9f398e26afeef52c21171719beb7cf35e3"
+    },
+    {
+      "path": "browser-extension/docs/uiux/README.md",
+      "sha256": "471bcbe7dd5be6f757871ce10caaaab839b8cb22b40b8cc12516d09d0690efa5"
+    },
+    {
+      "path": "agent-tool/ui/catalog.mjs",
+      "sha256": "5acc8d3d81f81f495f6767f55e14972317d56a6272804ec04ea00af51d0fa2d2"
+    },
+    {
+      "path": "agent-tool/ui/inventory.mjs",
+      "sha256": "760b649e4bb1d85d4dd36a561c7e26ececd60a6bfa572b56ad56d331cafd0504"
+    },
+    {
+      "path": "agent-tool/ui/runner.mjs",
+      "sha256": "f099680ff1cf82dcde439c39f3b3b905822ea7e80c66be861464c474cff845fe"
+    },
+    {
+      "path": "agent-tool/ui/image-order.mjs",
+      "sha256": "436fa3ad4d88e4e7f64b08f58335a1c3819b253e71b35560d32fd4f170e8aac6"
+    }
+  ],
+  "rules": [
+    "UI-CSS-IMPORT",
+    "UI-TOKEN-DEFINED",
+    "UI-TOKEN-COLOR",
+    "UI-LAYOUT-CANVAS",
+    "UI-LAYOUT-QUICK",
+    "UI-IMAGE-PREVIEW",
+    "UI-EXAMPLE-STATE",
+    "UI-EXAMPLE-KEYBOARD"
+  ],
+  "scenarios": [
+    "workspace-wide",
+    "workspace-prompt",
+    "workspace-narrow",
+    "popup",
+    "popup-narrow",
+    "popup-image-failed",
+    "generation-actions",
+    "image-order-paired",
+    "image-order-multi",
+    "image-order-legacy",
+    "image-order-failed",
+    "image-order-popup",
+    "image-order-keyboard-new",
+    "image-order-keyboard-history",
+    "image-order-keyboard-failure",
+    "image-order-keyboard-late",
+    "auto-style",
+    "creation-context",
+    "settings-recovery",
+    "example-workspace-empty",
+    "example-popup-empty",
+    "example-input-loading",
+    "example-reverse-busy",
+    "example-reverse-failed",
+    "example-no-model",
+    "example-long-instruction",
+    "example-narrow-input",
+    "example-narrow-result",
+    "example-image-viewer",
+    "example-native-controls"
+  ],
+  "scopeReason": "共享/未知依赖没有完整影响图，回退全部登记场景，不静默跳过。",
+  "evidence": [
+    {
+      "type": "browser-gate",
+      "status": "passed",
+      "path": "<OS临时目录>/reframe-ui-gate-P6tkUh/gate.json",
+      "scope": "30个合成预览场景含4个320px原生Enter改序检查，以及静态维护/隔离真实扩展；未验证真实模型、完整Tab顺序或用户profile。"
+    },
+    {
+      "type": "unit-tests",
+      "status": "passed",
+      "path": "<OS临时目录>/reframe-image-order-tests-v2.log",
+      "count": 703
+    },
+    {
+      "type": "tool-contract-tests",
+      "status": "passed",
+      "path": "<OS临时目录>/reframe-image-order-tools-v2.log",
+      "count": 14
+    },
+    {
+      "type": "visual-review",
+      "status": "proposed",
+      "scope": "已查看宽/窄工作区、多图、400px和320px popup截图；未接受视觉基线，无人类像素验收。"
+    }
+  ],
+  "reviewChecklist": [
+    "确认设计意图及合法变体",
+    "复核组件复用与所有受影响表面",
+    "附上静态/交互/截图证据",
+    "设计变化时单独审阅指定视觉基线"
+  ]
+}

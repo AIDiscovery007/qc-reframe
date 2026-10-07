@@ -16,8 +16,10 @@ export type SubjectInput = {
 };
 export type Preferences = { token: string; mode: Mode };
 export type ProjectInput = {
+  referenceIndex?: number;
   sessions?: SessionSummary[]; instruction: string; subjectError?: string; subjectImage?: string; subjects?: MultiSubject[] };
 export type Selection = {
+  referenceIndex?: number;
   id: string;
   projectId?: string;
   inputRevision?: number;
@@ -44,6 +46,7 @@ export type Result = {
   uncertainties: string[];
 };
 export type Job = {
+  referenceIndex?: number;
   sessionContext?: SessionContext;
   id: string;
   projectId?: string;
@@ -89,6 +92,7 @@ export type Project = ProjectSummary & { jobs: Job[] };
 export type ProjectPage = { items: ProjectSummary[]; total: number; page: number; pageSize: number; revision: string };
 export type AspectRatio = { width: number; height: number };
 export type Generation = {
+  referenceIndex?: number;
   id: string;
   subjects?: SavedSubject[];
   imageAsset?: string;

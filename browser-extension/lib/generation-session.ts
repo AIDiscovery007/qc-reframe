@@ -11,7 +11,7 @@ export type GenerationCallbacks = {
   onRequestState?(pending: boolean, error?: string): void;
 };
 type Asset = { key: string; image: string; path?: string; width?: number; height?: number };
-type Reference = { key: string; image: string; subjects?: MultiSubject[] };
+type Reference = { key: string; image: string; subjects?: MultiSubject[]; referenceIndex?: number };
 type Snapshot = {
   busy: boolean; submitting: boolean; error: string;
   asset?: Asset; imageError: string; original?: Reference; comparisonError: string;

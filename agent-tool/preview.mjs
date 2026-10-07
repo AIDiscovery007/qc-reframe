@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 const sharp = createRequire(new URL("../browser-extension/package.json", import.meta.url))("sharp");
 import { uiOperations, operationFor, allowsOperation } from "../browser-extension/lib/operation-policy.ts";
+import { savedReferenceIndex, referencePosition } from "../browser-extension/bridge/image-order.mjs";
 import { galleryAsset, gallerySetup, galleryMessages } from "./gallery-preview.mjs";
 
 const port = Number(process.env.PREVIEW_PORT ?? 43188);
@@ -70,6 +71,11 @@ const server = createServer(async (req, res) => {
     if (path === "/auto-style-regression.js") {
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       res.end(await readFile(new URL("../browser-extension/tests/auto-style.browser.js", import.meta.url)));
+      return;
+    }
+    if (path === "/image-order-regression.js") {
+      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+      res.end(await readFile(new URL("../browser-extension/tests/image-order.browser.js", import.meta.url)));
       return;
     }
     if (path === "/creation-context-regression.js") {
@@ -200,7 +206,7 @@ const server = createServer(async (req, res) => {
         let visibilityFailed=false, scopeFailed=false;
         if(previewOptions.has('hidden')) projects.slice(0,Number(previewOptions.get('hidden'))||1).forEach(p=>p.hidden=true);
         const visibleProjects=()=>projects.filter(p=>showHiddenProjects||!p.hidden);
-        let projectsRevision=1;
+        let projectsRevision=1, inputSaveFailures=Number(previewOptions.get('inputSaveFailures'))||0;
         projects.forEach(project=>{project.revision='preview-1';project.inputRevision=0;project.inputVersions={};project.inputs={};project.jobs.forEach(job=>job.image=project.image||template);});
         const touch=(project)=>{projectsRevision++;if(project){project.revision='preview-'+projectsRevision;project.updatedAt=new Date().toISOString();}};
         const summary=(project)=>{
@@ -245,6 +251,11 @@ const server = createServer(async (req, res) => {
         }
         const handoff = new URLSearchParams(location.search).has('handoff') ? JSON.parse(sessionStorage.getItem('workspace-draft') || 'null') : null;
         if(handoff){projects.splice(0,projects.length,...handoff.projects);Object.assign(data,handoff.data);}
+        if(previewOptions.has('imageOrderRegression')&&previewOptions.get('imageOrderRegression')!=='legacy'||previewOptions.get('imageOrderFixture')==='new') {
+          const mode=data.preferences.mode, seed=projects[0].jobs[0];
+          projects[0].inputs[mode]={referenceIndex:0,instruction:'验证图片顺序',...(mode==='multi-reenact'?{subjects:structuredClone(seed.reenact.subjects)}:{subjectImage:subject})};
+          projects[0].inputVersions[mode]='new';projects[0].inputRevision=1;data.selection=selection(projects[0]);
+        }
         const findJob=(id)=>projects.flatMap(p=>p.jobs).find(j=>j.id===id);
         const models={accountLabel:'ChatGPT · 预览',selected:state==='models-new'?null:'preview-vision',reasoningEffort:state==='models-new'?undefined:'medium',models:[{model:'preview-vision',label:'Vision Model',isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:['low','medium','high','xhigh'].map(reasoningEffort=>({reasoningEffort})),status:state==='models-new'?'unverified':'verified'},{model:'preview-unavailable',label:'Unavailable Model',defaultReasoningEffort:'low',supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],status:'unverified'}]};
         const service={service:'qc-alchemy',version:'0.3.2',managed:previewOptions.get('restart')!=='manual',canRestart:!['old','manual'].includes(previewOptions.get('restart')),instanceId:'preview-first'};
@@ -264,6 +275,7 @@ const server = createServer(async (req, res) => {
         // Embed the same policy in this classic script before built UI modules load.
         const uiOperations=${JSON.stringify(uiOperations)};
         const operationFor=${operationFor.toString()},allowsOperation=${allowsOperation.toString()};
+        const referencePosition=${referencePosition.toString()},savedReferenceIndex=${savedReferenceIndex.toString()};
         const requestSource=['/','/workspace.html','/popup.html'].includes(location.pathname)?'extension':'content';
         globalThis.chrome = {storage:{local:{
           get:async()=>{throw new Error('Access to storage is not allowed from this context.');},
@@ -335,18 +347,18 @@ const server = createServer(async (req, res) => {
           }
           if(message.type==='alchemy:update-project-input') {
             const inputSaveDelay=Math.min(10000,Math.max(0,Number(previewOptions.get('inputSaveDelay'))||0));
-            if(previewOptions.get('swap')==='failed') {
+            if(previewOptions.get('swap')==='failed'||inputSaveFailures-- > 0) {
               if(inputSaveDelay)await new Promise(resolve=>setTimeout(resolve,inputSaveDelay));
               return {error:'保存失败（预览），原输入已保留'};
             }
             const p=projects.find(p=>p.id===message.projectId);
             if(message.expectedRevision!==(p.inputRevision||0))return {error:'项目输入已在其他窗口更新，请重新打开项目'};
-            const before=p.inputs?.[message.mode]||p.jobs.find(j=>j.mode===message.mode)?.reenact;
+            const before=p.inputs?.[message.mode]||p.jobs.find(j=>j.mode===message.mode);
             const changed=message.image && message.image!==(p.image||template);
             p.inputVersions={...p.inputVersions};
             if(changed)['style','recreate','reenact','multi-reenact','session'].forEach(mode=>p.inputVersions[mode]='new');
-            else if(message.mode==='session'||message.mode==='multi-reenact'||before?.instruction!==message.instruction)p.inputVersions[message.mode]='new';
-            p.inputs={...p.inputs,[message.mode]:{instruction:message.instruction,subjectImage:message.subjectImage,subjects:structuredClone(message.subjects),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};
+            else if(message.mode==='session'||message.mode==='multi-reenact'||before?.instruction!==message.instruction||before&&savedReferenceIndex(before)!==message.referenceIndex)p.inputVersions[message.mode]='new';
+            p.inputs={...p.inputs,[message.mode]:{referenceIndex:message.referenceIndex,instruction:message.instruction,subjectImage:message.subjectImage,subjects:structuredClone(message.subjects),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};
             if(message.image)p.image=message.image;
             p.inputRevision=(p.inputRevision||0)+1;touch(p);data.selection=selection(p);
             const snapshot=structuredClone(data.selection);
@@ -416,13 +428,13 @@ const server = createServer(async (req, res) => {
           }
           if(message.type==='alchemy:reference') {
             const saved=findJob(message.id);
-            return {ok:true,value:{...selection(projects.find(p=>p.id===saved.projectId)),image:saved.image||template,jobId:saved.id,reenact:saved.reenact?(saved.mode==='multi-reenact'?{...saved.reenact,subjects:saved.generations?.at(-1)?.subjects||saved.reenact.subjects}:{...saved.reenact,subjectImage:saved.reenact.subjectImage||subject}):undefined,generationSubjectImage:saved.generations?.at(-1)?.subjectImage}};
+            return {ok:true,value:{...selection(projects.find(p=>p.id===saved.projectId)),image:saved.image||template,jobId:saved.id,referenceIndex:savedReferenceIndex(saved),reenact:saved.reenact?(saved.mode==='multi-reenact'?{...saved.reenact,subjects:saved.generations?.at(-1)?.subjects||saved.reenact.subjects}:{...saved.reenact,subjectImage:saved.reenact.subjectImage||subject}):undefined,generationSubjectImage:saved.generations?.at(-1)?.subjectImage}};
           }
           if(message.type==='alchemy:start') {
             await new Promise(resolve=>setTimeout(resolve,Math.min(10000,Math.max(0,Number(previewOptions.get('startDelay'))||0))));
             const project=projects.find(p=>p.id===message.projectId);
-            const next={id:'preview-'+Date.now(),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,instruction:message.instruction,...(message.mode==='session'?{sessionContext:{sources:selectedSessionRows(message.sessionIds),capturedAt:new Date().toISOString(),hash:'preview-snapshot',messageCount:6,attachmentCount:0}}:{}),reenact:message.reenact?structuredClone(message.reenact):undefined};
-            project.jobs.unshift(next);project.inputs={...project.inputs,[message.mode]:{instruction:message.instruction,...structuredClone(message.reenact),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};project.inputVersions={...project.inputVersions,[message.mode]:next.id};project.inputRevision=(project.inputRevision||0)+1;touch(project);data.selection={...selection(project),jobId:next.id,reenact:structuredClone(message.reenact)};
+            const next={id:'preview-'+Date.now(),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,referenceIndex:message.referenceIndex,instruction:message.instruction,...(message.mode==='session'?{sessionContext:{sources:selectedSessionRows(message.sessionIds),capturedAt:new Date().toISOString(),hash:'preview-snapshot',messageCount:6,attachmentCount:0}}:{}),reenact:message.reenact?structuredClone(message.reenact):undefined};
+            project.jobs.unshift(next);project.inputs={...project.inputs,[message.mode]:{referenceIndex:message.referenceIndex,instruction:message.instruction,...structuredClone(message.reenact),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};project.inputVersions={...project.inputVersions,[message.mode]:next.id};project.inputRevision=(project.inputRevision||0)+1;touch(project);data.selection={...selection(project),jobId:next.id,reenact:structuredClone(message.reenact)};
             setTimeout(()=>{if(next.status==='running'){next.status='completed';next.stage='逆向完成';next.result={...${JSON.stringify(result)},title:message.mode+' 新提示词',promptZh:message.mode==='session'?'以海边小城的旅行成片为内容，清晨码头、沿海骑行与夕阳灯塔呼应，天空留白；迁移参考图的配色、光影与笔触。':'当前路径 '+message.mode+' 的独立提示词',promptEn:message.mode==='session'?'Illustrate a quiet coastal journey in the visual style of the reference image.':'Use the supplied subjects and reference template.'};touch(project);}},1500);
             return {ok:true,value:{selection:{...data.selection,image:next.image},currentSelection:selection(project),job:structuredClone(next)}};
           }
@@ -445,7 +457,7 @@ const server = createServer(async (req, res) => {
             await new Promise(resolve=>setTimeout(resolve,Math.min(60000,Math.max(0,Number(previewOptions.get('generationStartDelay'))||0))));
             if(previewOptions.get('generationStart')==='failed')return {error:'示例：生成请求提交失败，请重试'};
             const saved=findJob(message.id);
-            const generation={id:'preview-'+Date.now(),status:'running',stage:'正在生成图片…',language:message.language,extension:'png',createdAt:new Date().toISOString(),prompt:message.language==='zh'?saved.result.promptZh:saved.result.promptEn,negativePrompt:saved.result.negativePrompt,model:models.selected,subjectImage:message.subjectImage,subjects:message.subjects?structuredClone(message.subjects):undefined,aspectRatio:message.aspectRatio};
+            const generation={id:'preview-'+Date.now(),status:'running',stage:'正在生成图片…',language:message.language,extension:'png',createdAt:new Date().toISOString(),prompt:message.language==='zh'?saved.result.promptZh:saved.result.promptEn,negativePrompt:saved.result.negativePrompt,model:models.selected,referenceIndex:savedReferenceIndex(saved),subjectImage:message.subjectImage,subjects:message.subjects?structuredClone(message.subjects):undefined,aspectRatio:message.aspectRatio};
             saved.generations||=[];saved.generations.push(generation);touch(projects.find(p=>p.id===saved.projectId));
             setTimeout(()=>{if(generation.status==='running'){
               generation.status=previewOptions.get('fx')==='failed'?'failed':'completed';
@@ -519,6 +531,8 @@ const server = createServer(async (req, res) => {
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/generation-actions-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('autoStyleRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/auto-style-regression.js"></script></body>'));
+    if (['/workspace.html','/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('imageOrderRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/image-order-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('creationContextRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/creation-context-regression.js"></script></body>'));
     if (path === '/popup.html'  && new URL(req.url, 'http://127.0.0.1').searchParams.has('panelClip'))

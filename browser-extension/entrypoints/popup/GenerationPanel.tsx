@@ -1,3 +1,4 @@
+import { orderedImageIds } from "../../lib/image-order";
 import RecoveryAction from "./RecoveryAction";
 import { showMotionDialog } from "../../lib/motion-dialog";
 import ImageFileActions from "./ImageFileActions";
@@ -105,8 +106,10 @@ export default function GenerationPanel({ targetGeneration, onTargetSelected, jo
   const dimensions = image && asset?.width && asset?.height ? <p className="generation-dimensions">{asset.width} × {asset.height} px · {imageRatio(asset.width, asset.height)}</p> : null;
   const caption = <div className="result-caption"><strong>{generation ? `版本 ${versionNumber} · ${generation.status === "completed" ? "图片" : "记录"} ${generations.indexOf(generation) + 1}` : "图片待生成"}</strong>{dimensions}</div>;
   const comparisonInputs = original?.key === assetKey ? multi ? <div className="multi-comparison-inputs">
-    {original.subjects?.map((subject, index) => <figure key={subject.id}><ImagePreview src={subject.subjectImage} alt={`本次主体 ${index + 1}`} loading="lazy" /><figcaption>主体 {index + 1} · {subject.role}{subject.detail && <small>{subject.detail}</small>}</figcaption></figure>)}
-    <figure><ImagePreview src={original.image} alt="本次参考模板" loading="lazy" /><figcaption>参考模板</figcaption></figure>
+    {orderedImageIds((original.subjects || []).map(item => item.id), original.referenceIndex ?? original.subjects?.length ?? 0).map((id, index) => {
+      const subject = original.subjects?.find(item => item.id === id);
+      return <figure key={id}><ImagePreview src={subject?.subjectImage || original.image} alt={subject ? `本次主体 ${index + 1}` : "本次参考模板"} loading="lazy" /><figcaption>图 {index + 1} · {subject ? subject.role : "参考模板"}{subject?.detail && <small>{subject.detail}</small>}</figcaption></figure>;
+    })}
   </div> : <figure><ImagePreview src={original.image} alt="本次生成的原始输入" /><figcaption>{job.mode === "recreate" ? "逆向参考图（未发送生图）" : job.mode === "session" ? "本次风格参考图" : "本次主体图"}</figcaption></figure>
     : <p role="status">{comparisonError || "正在读取原图…"}</p>;
   const copyNotice = copyError && <div className="error" role="alert">{copyError}{imagePath && <p className="file-path">{imagePath}</p>}</div>;

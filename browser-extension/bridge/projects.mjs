@@ -1,3 +1,4 @@
+import { savedReferenceIndex } from "./image-order.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir, writeFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -6,9 +7,10 @@ export const projectIdFor = (bytes) => createHash("sha256").update(bytes).digest
 const newestFirst = (a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
 const inputFor = (job) => {
   const instruction = job.instruction ?? job.reenact?.basePrompt;
-  const subjectAsset = job.generations?.findLast((generation) => generation.subjectAsset)?.subjectAsset || job.subjectAsset;
-  const subjects = job.generations?.findLast((generation) => generation.subjects)?.subjects || job.reenact?.subjects;
-  return { ...(instruction !== undefined ? { instruction } : {}), ...(subjectAsset ? { subjectAsset } : {}), ...(subjects ? { subjects } : {}), ...(job.sessionContext ? { sessions: job.sessionContext.sources } : {}) };
+  const generation = job.generations?.findLast((generation) => generation.subjectAsset || generation.subjects);
+  const subjectAsset = generation?.subjectAsset || job.subjectAsset;
+  const subjects = generation?.subjects || job.reenact?.subjects;
+  return { referenceIndex: savedReferenceIndex(generation || job), ...(instruction !== undefined ? { instruction } : {}), ...(subjectAsset ? { subjectAsset } : {}), ...(subjects ? { subjects } : {}), ...(job.sessionContext ? { sessions: job.sessionContext.sources } : {}) };
 };
 
 // Finish interrupted deletions before legacy jobs can recreate their projects.
@@ -178,7 +180,9 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
         const job = currentJob(mode);
         if (!Object.hasOwn(inputs, mode) && job) inputs[mode] = inputFor(job);
       }
-      const arrangementChanged = (mode === "multi-reenact" && JSON.stringify(input.subjects || []) !== JSON.stringify(inputs[mode]?.subjects || [])) ||
+      const previousInput = inputs[mode];
+      const orderChanged = previousInput && (input.referenceIndex ?? 0) !== savedReferenceIndex(previousInput);
+      const arrangementChanged = orderChanged || (mode === "multi-reenact" && JSON.stringify(input.subjects || []) !== JSON.stringify(inputs[mode]?.subjects || [])) ||
         (mode === "session" && JSON.stringify(input.sessions || []) !== JSON.stringify(inputs[mode]?.sessions || []));
       const previousJob = currentJob(mode);
       const historical = referenceJobId !== undefined && referenceJobId !== (previous.inputVersions?.[mode] ?? previousJob?.id);
@@ -273,7 +277,7 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
         const inputs = {};
         for (const [mode, input] of Object.entries(project.inputs || {})) {
           const { subjectAsset, subjects, ...rest } = input;
-          const restored = { ...rest };
+          const restored = { ...rest, referenceIndex: savedReferenceIndex(input) };
           const subjectImage = async (asset) => {
             try { return await imageFor(asset); }
             catch { restored.subjectError = "主体图已不存在或损坏，请重新上传主体图。"; return ""; }

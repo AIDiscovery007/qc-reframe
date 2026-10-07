@@ -1,3 +1,4 @@
+import { orderedImageIds } from "../../lib/image-order";
 import { creationContext, emptyCreationState, createInputWriter, resolveCreation, restoredQuickDraft } from "../../lib/creation-context";
 import RecoveryAction, { RecoveryContext } from "./RecoveryAction";
 import type { CliStatus, RecoverySection } from "../../lib/codex-status";
@@ -508,17 +509,20 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     finally { setBusy(false); }
   };
   const saveInput = async (mode: Mode, image: string | undefined, instruction: string,
-    subject: string = subjectImage(mode), subjects: MultiSubject[] = multiSubjects, sessionIds = mode === "session" ? selectedSessions().map(item => item.id) : undefined) => {
+    subject: string = subjectImage(mode), subjects: MultiSubject[] = multiSubjects, sessionIds = mode === "session" ? selectedSessions().map(item => item.id) : undefined,
+    referenceIndex = contextFor(mode).referenceIndex, onSaved?: () => void) => {
     if (blocked || inputWriter.current!.pending || !selection?.projectId) throw new Error("当前无法修改图片，请稍后重试");
     const revision = selectionRevision.current, context = referenceContext.current;
     setBusy(true);
     try {
       await inputWriter.current!.save({ selection, mode, referenceJobId: modeJob(mode)?.id,
-        image, instruction, subjectImage: subject, subjects, sessionIds }, next => {
+        image, instruction, subjectImage: subject, subjects, sessionIds,
+        referenceIndex: Math.min(referenceIndex, mode === "multi-reenact" ? subjects.length : (mode === "style" || mode === "reenact") && subject ? 1 : 0) }, next => {
         selectionRevision.current++;
         dispatchCreation({ type: "adopt", selection: next, savedMode: mode });
         setSelection(next); setError(""); setRefreshNonce(value => value + 1);
         setHistoryOpen(false); setGalleryOpen(false);
+        onSaved?.();
       });
     } catch (error) {
       if (revision === selectionRevision.current && context === referenceContext.current) setError((error as Error).message);
@@ -531,7 +535,10 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     await applyReferenceUpload(image, mode, instruction);
   };
   const changeSubject = (image: string) => saveInput(preferences.mode, displayImage, taskInstruction(preferences.mode), image);
-  const changeSubjects = (subjects: MultiSubject[]) => saveInput("multi-reenact", displayImage, multiPrompt, "", subjects);
+  const changeSubjects = (subjects: MultiSubject[]) => saveInput("multi-reenact", displayImage, multiPrompt, "", subjects, undefined,
+    multiSubjects.slice(0, multiContext.referenceIndex).filter(item => subjects.some(next => next.id === item.id)).length);
+  const changeImageOrder = (referenceIndex: number, subjects = multiSubjects, onSaved?: () => void) => saveInput(preferences.mode,
+    displayImage, taskInstruction(preferences.mode), subjectImage(preferences.mode), subjects, undefined, referenceIndex, onSaved);
   const swapImages = async (mode: "style" | "reenact" | "multi-reenact", instruction: string, subjectId?: string) => {
     const image = mode === "multi-reenact" ? multiSubjects.find(item => item.id === subjectId)?.subjectImage : subjectImage(mode);
     if (blocked || !displayImage || !image) return;
@@ -580,7 +587,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     setError("");
     try {
       const value = await request<{ selection: Selection; currentSelection: Selection; job: Job }>({
-        type: "alchemy:start", id: selection.id, projectId: activeProject.id, mode, reenact, instruction: taskInstruction(mode), ...(mode === "session" ? { sessionIds: selectedSessions().map(item => item.id) } : {}),
+        type: "alchemy:start", referenceIndex: contextFor(mode).referenceIndex, id: selection.id, projectId: activeProject.id, mode, reenact, instruction: taskInstruction(mode), ...(mode === "session" ? { sessionIds: selectedSessions().map(item => item.id) } : {}),
         inputRevision: selection.inputRevision || 0, referenceJobId: modeJob(mode)?.id,
       });
       setReferences(items => ({ ...items, [value.job.id]: value.selection }));
@@ -731,7 +738,10 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const exportResult = () => {
     if (!job?.result) return;
     const r = job.result;
-    const inputs = job.mode === "session" ? "\n使用方法：附图 1（风格参考图），再使用下方提示词；会话中的创作内容已写入提示词。此 Markdown 不包含会话原文或图片文件。\n" : job.mode === "multi-reenact" ? `\n使用方法：依次附图 1–${job.reenact?.subjects?.length || 0}（主体图），最后附参考模板，再使用下方提示词。此 Markdown 不包含图片文件。\n` : job.reenact ? "\n使用方法：生成图片时，先附图 1（用户主体图），再附图 2（原始参考图），然后使用下方提示词。此 Markdown 不包含图片文件。\n" : "";
+    const subjectIds = job.mode === "multi-reenact" ? (job.reenact?.subjects || []).map((_, i) => `主体 ${i + 1}`) : job.reenact ? ["主体图"] : [];
+    const order = orderedImageIds(subjectIds, job.referenceIndex ?? subjectIds.length);
+    const inputs = job.mode === "recreate" ? "\n使用方法：仅使用下方提示词生图，无需附图。\n"
+      : `\n使用方法：按顺序附${order.map((id, i) => `图 ${i + 1}（${id === "reference" ? "参考图" : id}）`).join("、")}，再使用下方提示词。此 Markdown 不包含图片文件或会话原文。\n`;
     const markdown = `# ${r.title}\n\n来源：${job.sourceUrl || "网页图片"}\n模式：${modeName(job.mode)}\n${inputs}\n## 视觉观察\n${r.observations.map((x) => `- ${x}`).join("\n")}\n\n## 中文提示词\n${r.promptZh}\n\n## English prompt\n${r.promptEn}\n\n## 排除项\n${r.negativePrompt || "无"}\n\n## 不确定性\n${r.uncertainties.join("\n") || "无额外说明"}\n`;
     const url = URL.createObjectURL(
       new Blob([markdown], { type: "text/markdown;charset=utf-8" }),
@@ -747,7 +757,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     : restoring ? "正在恢复原图…" : loadingProject ? "正在读取模板项目…" : cliBusy ? "Codex 正在升级…"
     : modelBusy ? "正在验证模型…" : busy ? "正在提交…" : undefined;
 
-  const instructionStale = contextFor(preferences.mode).instructionStale;
+  const instructionStale = contextFor(preferences.mode).instructionStale || contextFor(preferences.mode).orderStale;
   const genericPrompt = !!result && preferences.mode === "style" && !job?.reenact;
   const needsPrompt = !result || instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt;
   const subjectError = contextFor(preferences.mode).subjectError;
@@ -773,7 +783,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
               <option value="new">当前输入</option>
               {modeJobs(preferences.mode).map((item, i, items) => <option key={item.id} value={item.id}>{`版本 ${items.length - i}${i === 0 ? " · 最新" : ""}`}</option>)}
             </SelectField>;
-  const multiPreview = preferences.mode === "multi-reenact" ? <MultiInputPreview image={displayImage} subjects={multiSubjects} /> : undefined;
+  const multiPreview = preferences.mode === "multi-reenact" ? <MultiInputPreview image={displayImage} subjects={multiSubjects} referenceIndex={multiContext.referenceIndex} /> : undefined;
   const drawer = resultDrawerView(drawers, drawerKey, activeJob?.generations);
   const drawerOpen = workspace && !historyOpen && !galleryOpen && drawer.open;
   const closeResults = () => {
@@ -946,6 +956,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         ) : workspace && selection ? <CanvasWorkspace onPromptRevealed={() => setTargetPrompt(undefined)} revealPrompt={targetPrompt?.jobId === activeJob?.id ? targetPrompt?.request : undefined} contextKey={drawerKey} mode={preferences.mode}
           sessionTitle={selectedSessions().length === 1 ? selectedSessions()[0]!.title : selectedSessions().length ? `已选 ${selectedSessions().length} 个会话` : undefined} onSessions={() => setSessionPicker(drawerKey)}
           image={displayImage} subjectImage={subjectImage(preferences.mode)} subjects={multiSubjects}
+          referenceIndex={contextFor(preferences.mode).referenceIndex} onImageOrder={changeImageOrder}
           selected={canvasSelections[subjectKey(preferences.mode)] || "reference"} onSelect={id => setCanvasSelections(items => ({ ...items, [subjectKey(preferences.mode)]: id }))}
           instruction={taskInstruction(preferences.mode)} onInstruction={value => changeInstruction(preferences.mode, value)}
           disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy} reverseDisabled={reverseDisabled} running={!!running} cancelling={cancelling}
@@ -964,6 +975,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
             onLanguage={setLang} onCopy={copy} onEdit={() => setPromptDrafts(items => ({ ...items, [activeJob.id]: { promptZh: result.promptZh, promptEn: result.promptEn, negativePrompt: result.negativePrompt } }))}
             onDraft={draft => setPromptDrafts(items => ({ ...items, [activeJob.id]: draft }))} onSave={savePrompt} onCancel={() => discardPrompt(activeJob.id)} />}
         /> : !workspace ? <QuickWorkspace contextKey={drawerKey} revealPrompt={targetPrompt?.jobId === job?.id ? targetPrompt?.request : undefined} targetGeneration={targetGeneration?.jobId === job?.id ? targetGeneration?.id : undefined} selection={displaySelection} title={activeProject?.title} mode={preferences.mode}
+          referenceIndex={contextFor(preferences.mode).referenceIndex} onImageOrder={(index, onSaved) => changeImageOrder(index, undefined, onSaved)}
           subject={subjectImage(preferences.mode)} instruction={taskInstruction(preferences.mode)} job={job}
           disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy} reverseDisabled={reverseDisabled}
           status={reverseStatus || reverseHint} stale={instructionStale || (preferences.mode === "multi-reenact" && multiStale)} cancelling={cancelling} copied={copied} lang={lang} versions={versionSelector}

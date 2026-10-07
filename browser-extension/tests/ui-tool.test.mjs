@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, writeFile, rename, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rename, rm, stat, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { root, extension, contextFor, fingerprint, fixtureState } from '../../agent-tool/ui/inventory.mjs';
 import { rules, scenarios } from '../../agent-tool/ui/catalog.mjs';
@@ -84,7 +85,7 @@ test('independent components retain targeted geometry and the behavior regressio
     assert.deepEqual(result.rules.filter(rule => rule.kind === 'geometry').map(rule => rule.id), [ruleId], file);
     assert.ok(result.scenarios.some(scenario => scenario.example), file);
     assert.deepEqual(result.scenarios.filter(scenario => !scenario.regression && !scenario.example).map(scenario => scenario.id), expectedGeometry, file);
-    assert.equal(result.scenarios.filter(scenario => scenario.regression).length, 4);
+    assert.deepEqual(result.scenarios.filter(scenario => scenario.regression).map(scenario => scenario.id), scenarios.filter(scenario => scenario.regression).map(scenario => scenario.id));
   }
 });
 
@@ -122,7 +123,7 @@ test('fingerprints are location-independent and detect same-size edits, renames 
 test('fixture fingerprint covers preview dependencies independently of product builds', async t => {
   const directory = await temporary(t);
   const files = ['agent-tool/ui.mjs', 'agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs',
-    'browser-extension/tests/example.browser.js', 'browser-extension/docs/gallery/example/result.png'];
+    'browser-extension/bridge/image-order.mjs', 'browser-extension/tests/example.browser.js', 'browser-extension/docs/gallery/example/result.png'];
   for (const file of files) {
     await mkdir(join(directory, file, '..'), { recursive: true });
     await writeFile(join(directory, file), 'original');
@@ -137,6 +138,27 @@ test('fixture fingerprint covers preview dependencies independently of product b
   await writeFile(join(directory, 'browser-extension/tests/unrelated.test.mjs'), 'unit test');
   assert.deepEqual(await fixtureState(directory), original);
   await writeFile(join(directory, 'browser-extension/tests/another.browser.js'), 'new fixture');
+  assert.notEqual((await fixtureState(directory)).hash, original.hash);
+});
+
+
+test('changing a copied preview image-order dependency changes behavior and fixture hash', async t => {
+  const directory = await temporary(t), original = await fixtureState();
+  const helper = 'browser-extension/bridge/image-order.mjs';
+  assert.ok(original.files.includes(helper));
+  for (const file of original.files) {
+    await mkdir(join(directory, file, '..'), { recursive: true });
+    await copyFile(join(root, file), join(directory, file));
+  }
+  assert.deepEqual(await fixtureState(directory), original);
+  const path = join(directory, helper), url = pathToFileURL(path).href;
+  const before = await import(url);
+  assert.deepEqual(before.orderedImages('reference', ['subject']).paths, ['subject', 'reference']);
+  const source = await readFile(path, 'utf8');
+  assert.ok(source.includes('fallback = subjectCount'));
+  await writeFile(path, source.replace('fallback = subjectCount', 'fallback = 0'));
+  const after = await import(url + '?modified');
+  assert.deepEqual(after.orderedImages('reference', ['subject']).paths, ['reference', 'subject']);
   assert.notEqual((await fixtureState(directory)).hash, original.hash);
 });
 
