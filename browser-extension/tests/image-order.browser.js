@@ -31,6 +31,12 @@ const version = () => find('[aria-label="提示词版本"]');
 const mode = () => find('[aria-label="逆向模式"]');
 const reverse = () => find('.canvas-generate') || find('.quick-reverse');
 const input = async () => (await send({ type: 'alchemy:project-reference', id: 'a'.repeat(64) })).value;
+const openProject = async title => {
+  const button = () => find(`[aria-label="打开项目：${title}"]`);
+  await waitFor(() => button() && !button().disabled, '项目入口应可用');
+  button().click();
+  await waitFor(() => button()?.getAttribute('aria-current') === 'page' && !button().disabled, '项目应切换完成');
+};
 const assertNumberedDefault = () => {
   if (!instructionFixture || mode().value !== instructionMode) return;
   const value = instruction(), referenceNumber = ids().indexOf('reference') + 1;
@@ -126,9 +132,9 @@ try {
         await move('reference', '前', ['reference', 'subject']);
         setValue(mode(), 'style');
         await waitFor(() => mode().value === 'style' && order(['subject', 'reference']), '切回应恢复原模式顺序');
-        find('[aria-label="打开项目：另一个空白项目"]').click();
+        await openProject('另一个空白项目');
         await waitFor(() => ids().length === 1, '空白项目应不继承主体');
-        find('[aria-label="打开项目：暖纸底几何模板"]').click();
+        await openProject('暖纸底几何模板');
         await waitFor(() => order(['subject', 'reference']), '重开项目应恢复保存顺序');
       }
     }

@@ -46,7 +46,9 @@ console.log(JSON.stringify({report,sent:[...sent]}));`;
   const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
   assert.equal(code, 0, errors);
   const { report, sent } = JSON.parse(output);
-  assert.deepEqual(sent, ['candidate.json', 'gate.json']);
+  assert.deepEqual(sent, ['candidate.json', 'gate.json'], JSON.stringify({ reportPath: report.reportPath,
+    failedSteps: report.steps.filter(step => step.status !== 'passed').map(step => ({ id: step.id, status: step.status,
+      scenarios: step.scenarios?.filter(item => item.status !== 'passed') })) }));
   assert.equal(report.status, 'failed');
   assert.match(report.error, /取消/);
   assert.ok(report.steps.every(step => step.status === 'passed'), 'Cancellation alone must fail the gate');

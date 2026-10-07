@@ -34,12 +34,12 @@ after(async () => {
 });
 
 for (const scenario of exampleScenarios) test(`production example: ${scenario.id}`, async t => {
-  const page = await browser.newPage({ viewport: scenario.viewport });
+  const page = await browser.newPage({ viewport: scenario.viewport, reducedMotion: 'reduce' });
   t.after(() => page.close()); page.setDefaultTimeout(10000);
   await page.goto(baseURL + scenario.path);
   await prepareExample(page, scenario);
   const checks = await checkExample(page, scenario);
-  assert.ok(checks.some(check => check.status === 'passed'));
+  assert.ok(checks.some(check => check.status === 'passed'), JSON.stringify(checks));
   assert.deepEqual(checks.filter(check => check.status === 'failed'), []);
   assert.ok(checks.every(check => check.ruleId && check.target && check.sourceFiles.length));
   for (const check of checks.filter(check => check.status === 'skipped')) t.diagnostic(`Explicit limitation: ${check.target}: ${check.message}`);
