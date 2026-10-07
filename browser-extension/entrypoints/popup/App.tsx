@@ -55,6 +55,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const [projectSearchTarget, setProjectSearchTarget] = useState<HTMLDivElement | null>(null);
   const [resultPane, setResultPane] = useState<HTMLElement | null>(null);
   const [generationActions, setGenerationActions] = useState<HTMLDivElement | null>(null);
+  const [reverseActions, setReverseActions] = useState<HTMLDivElement | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [drawers, dispatchDrawer] = useReducer(resultDrawers, {});
@@ -846,15 +847,15 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     const closed = wasDrawerOpen.current && !drawerOpen;
     wasDrawerOpen.current = drawerOpen;
     if (!workspace || !closed || !(resultPane?.contains(document.activeElement) || document.activeElement === document.body)) return;
-    (resultReturn.current || editor.current?.querySelector<HTMLButtonElement>(".generate-button"))?.focus({ preventScroll: true });
-  }, [workspace, drawerOpen, resultPane]);
+    (resultReturn.current || generationActions?.querySelector<HTMLButtonElement>(".generate-button"))?.focus({ preventScroll: true });
+  }, [workspace, drawerOpen, resultPane, generationActions]);
   useEffect(() => {
     if (!workspace || !narrow || !drawerOpen) return;
     if (editor.current?.contains(document.activeElement) || document.activeElement === document.body) resultReturn.current?.focus({ preventScroll: true });
   }, [workspace, narrow, drawerOpen, resultPane]);
   const generationPanel = activeJob?.result ? <GenerationPanel key={activeJob.id} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace}
                   drawerOpen={drawerOpen} requestError={drawer.error} requestPending={drawer.pending}
-                  onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabled={blocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
+                  onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabledReason={workspace ? promptDraft ? "编辑未保存，请保存或取消提示词修改。" : needsPrompt ? reverseHint || genericHint || "输入已修改，请更新提示词。" : "" : ""} disabled={blocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
                   subjectImage={(activeJob.mode === "recreate" || activeJob.mode === "session") ? undefined : subjectImage(activeJob.mode)}
                   inputPreview={multiPreview}
                   subjects={activeJob.mode === "multi-reenact" ? multiSubjects : undefined}
@@ -1005,7 +1006,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy} reverseDisabled={reverseDisabled} running={!!running} cancelling={cancelling}
           status={reverseStatus || (promptDraft ? "编辑未保存" : reverseHint || genericHint || (preferences.mode === "session" && job?.sessionContext?.attachmentCount ? `会话含 ${job.sessionContext.attachmentCount} 个附件，未读取附件内容` : "") || (job?.status === "cancelled" ? "已取消" : ""))}
           error={referenceError || currentInput(preferences.mode)?.subjectError || selection.error || job?.error} errorTaskId={!referenceError && !selection.error && job?.status === "failed" ? job.id : undefined} stale={instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt}
-          hasPrompt={!!result} promptEditing={!!promptDraft} reduced={reduced} versions={versionSelector} generationActions={setGenerationActions}
+          hasPrompt={!!result} promptEditing={!!promptDraft} reduced={reduced} versions={versionSelector} actionsTarget={reverseActions}
           onMode={mode => void saveMode(mode)} onSubject={changeSubject}
           onAvailability={available => setSubjectUnavailable(items => ({ ...items, [subjectKey(preferences.mode)]: !available }))}
           onSubjects={changeSubjects}
@@ -1035,6 +1036,12 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       {workspace && !historyOpen && !galleryOpen && resultPane && generationPanel && createPortal(generationPanel, resultPane)}
       </div>
       {workspace && !historyOpen && !galleryOpen && <div className="result-drawer-slot"><aside id="workspace-results" className="workspace-results" ref={setResultPane} aria-label="生成结果抽屉" aria-hidden={!drawerOpen} inert={!drawerOpen} /></div>}
+      </div>}
+      {workspace && !historyOpen && !galleryOpen && selection && <div className="canvas-primary-actions" role="group" aria-label="生成操作">
+        <div className="canvas-reverse-actions" ref={setReverseActions} />
+        <div className="canvas-generation-actions" ref={setGenerationActions} role="group" aria-label="图片生成操作">
+          {!result && <><button className="primary generate-button" disabled aria-describedby="generation-prerequisite"><Icon name="image" />生成图片</button><p id="generation-prerequisite" className="hint">{running ? "提示词生成后即可生图。" : "先生成提示词，再生成图片。"}</p></>}
+        </div>
       </div>}
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import RecoveryAction from "../popup/RecoveryAction";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Mode, MultiSubject } from "../../lib/types";
@@ -11,12 +12,12 @@ import PromptSheet from "./PromptSheet";
 import useEditorExpansion from "./useEditorExpansion";
 
 const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
-export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contextKey, mode, image, subjectImage, subjects, selected, onSelect, instruction, disabled, modeDisabled, reverseDisabled, running, cancelling, status, error, errorTaskId, stale, hasPrompt, promptEditing, reduced, versions, prompt, generationActions, onMode, onInstruction, onSubject, onAvailability, onSubjects, onReference, onReferenceRotate, onSwap, onReverse, onExtract, onCancel, onRetryReference, sessionTitle, onSessions }: {
+export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contextKey, mode, image, subjectImage, subjects, selected, onSelect, instruction, disabled, modeDisabled, reverseDisabled, running, cancelling, status, error, errorTaskId, stale, hasPrompt, promptEditing, reduced, versions, prompt, actionsTarget, onMode, onInstruction, onSubject, onAvailability, onSubjects, onReference, onReferenceRotate, onSwap, onReverse, onExtract, onCancel, onRetryReference, sessionTitle, onSessions }: {
   revealPrompt?: number; onPromptRevealed?(): void; contextKey: string; mode: Mode; image?: string; subjectImage: string; subjects: MultiSubject[]; selected: string; onSelect(id: string): void;
   instruction: string; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; running: boolean; cancelling: boolean;
   status?: string; error?: string; errorTaskId?: string; stale: boolean; hasPrompt: boolean; promptEditing: boolean; reduced: boolean;
   sessionTitle?: string; onSessions?(): void;
-  versions: ReactNode; prompt: ReactNode; generationActions(element: HTMLDivElement | null): void;
+  versions: ReactNode; prompt: ReactNode; actionsTarget?: HTMLElement | null;
   onMode(mode: Mode): void; onInstruction(value: string): void; onSubject(image: string): void | Promise<void>; onAvailability(available: boolean): void;
   onSubjects(subjects: MultiSubject[]): void | Promise<void>; onReference(image: string): Promise<void>; onReferenceRotate(image: string): Promise<void>; onSwap(id?: string): void;
   onReverse(): void; onExtract(): void; onCancel(): void; onRetryReference?: () => void;
@@ -24,6 +25,7 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
   const [open, setOpen] = useState(false);
   const composer = useRef<HTMLDivElement>(null);
   const composerSlot = useRef<HTMLDivElement>(null);
+  const expandButton = useRef<HTMLButtonElement>(null);
   const editorExpansion = useEditorExpansion(composer, reduced, contextKey, composerSlot);
   useEffect(() => { if (open) editorExpansion.change(false, true); }, [open]);
   const [settings, setSettings] = useState(false);
@@ -35,7 +37,7 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
   const pendingInput = useRef(false);
   const scope = useRef(contextKey);
   scope.current = contextKey;
-  const previous = useRef({ contextKey, running, hasPrompt });
+  const previous = useRef(contextKey);
   const trigger = useRef<HTMLButtonElement>(null);
   const generate = useRef<HTMLButtonElement>(null);
   const modeControl = useRef<HTMLDivElement>(null);
@@ -49,12 +51,10 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
   const label = isSubject ? current ? `主体 ${index + 1}` : "主体图" : mode === "style" || mode === "recreate" || mode === "session" ? "参考图" : "参考模板";
   const locked = disabled || uploading || open;
   useEffect(() => {
-    const before = previous.current;
-    if (before.contextKey !== contextKey) { setOpen(false); setSettings(false); setUploadError(""); setUploading(false); pendingInput.current = false; revision.current++; }
-    if (hasPrompt && before.contextKey === contextKey && before.running && !running) setOpen(true);
+    if (previous.current !== contextKey) { setOpen(false); setSettings(false); setUploadError(""); setUploading(false); pendingInput.current = false; revision.current++; }
     if (!hasPrompt) setOpen(false);
-    previous.current = { contextKey, running, hasPrompt };
-  }, [contextKey, running, hasPrompt]);
+    previous.current = contextKey;
+  }, [contextKey, hasPrompt]);
   useEffect(() => { if (revealPrompt && hasPrompt) { setOpen(true); onPromptRevealed?.(); } }, [revealPrompt, contextKey, hasPrompt, onPromptRevealed]);
   useEffect(() => () => { revision.current++; pendingInput.current = false; onAvailability(true); }, [contextKey]);
   useEffect(() => {
@@ -127,6 +127,7 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
     return destination?.disabled ? modeControl.current?.querySelector('select') || null : destination;
   };
   const sheetOpen = open && hasPrompt;
+  const reverseButton = <button ref={generate} className="primary canvas-generate" data-ready={hasPrompt && !stale && !running} disabled={running ? cancelling : reverseDisabled || uploading} aria-busy={running} onClick={running ? onCancel : onReverse}><Icon name={running ? "close" : hasPrompt ? "retry" : "edit"} />{running ? cancelling ? "正在取消…" : "取消提示词" : hasPrompt ? "更新提示词" : "生成提示词"}</button>;
   return <section className="canvas-workspace" data-prompt-open={sheetOpen} aria-label={`${modes[mode]}工作区`}>
     <div className="canvas-input" ref={inputArea}>
       <div className="canvas-stage" inert={sheetOpen}>
@@ -162,24 +163,24 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
         </div>}
       </div>
       <div className="canvas-composer-slot" ref={composerSlot}>
-      <div ref={composer} className="canvas-composer" inert={sheetOpen} onKeyDown={event => { if (event.key === "Escape" && editorExpansion.expanded) { event.preventDefault(); editorExpansion.change(false, true); } }}>
+      <div ref={composer} className="canvas-composer" inert={sheetOpen} onKeyDown={event => { if (event.key === "Escape" && editorExpansion.expanded) { event.preventDefault(); editorExpansion.change(false, true); expandButton.current?.focus({ preventScroll: true }); } }}>
+        <button ref={expandButton} type="button" className="quiet-button canvas-editor-expand canvas-instruction-expand" aria-label={editorExpansion.expanded ? "收起指令" : "放大指令"} title={editorExpansion.expanded ? "收起指令" : "放大指令"} aria-expanded={editorExpansion.expanded} onClick={event => editorExpansion.toggle(event.detail === 0)}><Icon name={editorExpansion.expanded ? "minimize" : "maximize"} /></button>
         <TaskInstruction value={instruction} disabled={disabled || uploading || promptEditing} onChange={onInstruction} />
         <div className="canvas-composer-bar">
         {hasPrompt && <button ref={trigger} className="quiet-button canvas-prompt-link" aria-label={sheetOpen ? "收起提示词" : "展开提示词"} aria-expanded={sheetOpen} aria-controls="workspace-prompt-sheet" onClick={() => { setSettings(false); setOpen(true); }}><Icon name={sheetOpen ? "chevronDown" : "edit"} /><span>{sheetOpen ? "收起" : "提示词"}</span><i className={stale ? "canvas-stale-dot" : "canvas-ready-dot"} /></button>}
           <span data-reminder-task={!uploadError && error ? errorTaskId : undefined} className={uploadError || error ? "canvas-error" : ""} role={uploadError || error ? "alert" : "status"} title={uploadError || error || status}>{uploadError || error || (uploading ? "正在读取图片…" : status || (stale ? "提示词待更新" : ""))}<RecoveryAction error={uploadError || error} />{onRetryReference && <button className="text-button" onClick={onRetryReference}>重试</button>}</span>
           {mode === "style" && subjectImage && <button className="quiet-button canvas-generic" disabled={locked || promptEditing || !instruction.trim()} title="不使用主体图，仅提取通用风格" onClick={onExtract}>仅提取风格</button>}
-          <button className="quiet-button canvas-editor-expand" aria-expanded={editorExpansion.expanded} onClick={event => editorExpansion.toggle(event.detail === 0)}>{editorExpansion.expanded ? "收起编辑" : "放大指令"}</button>
-          <button ref={generate} className="primary canvas-generate" disabled={running ? cancelling : reverseDisabled || uploading} aria-busy={running} onClick={running ? onCancel : onReverse}><Icon name={running ? "close" : hasPrompt ? "retry" : "edit"} />{running ? cancelling ? "正在取消…" : "取消" : hasPrompt ? stale ? "更新提示词" : "重新生成" : "生成提示词"}{!running && <Icon name="arrow" />}</button>
+
         </div>
       </div>
       </div>
     <PromptSheet contextKey={contextKey} open={sheetOpen} onOpenChange={setOpen} returnFocus={returnFocus} reduced={reduced}>
       {stale && <div className="canvas-prompt-notice"><span role="status">{status || "提示词待更新"}</span><button className="text-button" onClick={() => setOpen(false)}>返回输入</button></div>}
       <div className="canvas-prompt-content">{prompt}</div>
-      <div className="canvas-generation-actions" ref={generationActions} />
     </PromptSheet>
       </div>
     </div>
+    {actionsTarget && createPortal(reverseButton, actionsTarget)}
     <input hidden ref={upload} type="file" accept="image/png,image/jpeg,image/webp" multiple={mode === "multi-reenact"} aria-label="上传画布图片" onChange={event => { void readFiles([...event.target.files || []]); event.target.value = ""; }} />
   </section>;
 }

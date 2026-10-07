@@ -16,10 +16,10 @@ const ratios = ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"];
 
 export const GenerationEffectContext = createContext<ComponentType<{ running: boolean; image: string; failed: boolean }> | null>(null);
 
-export default function GenerationPanel({ targetGeneration, onTargetSelected, job, lang, disabled, subjectImage, subjects, inputPreview, onUpdate, workspace = false, actionsTarget, hideActions = false, versionNumber = 1, drawerOpen = true, onRequestState, requestError = "", requestPending = false }: {
+export default function GenerationPanel({ targetGeneration, onTargetSelected, job, lang, disabled, disabledReason = "", subjectImage, subjects, inputPreview, onUpdate, workspace = false, actionsTarget, hideActions = false, versionNumber = 1, drawerOpen = true, onRequestState, requestError = "", requestPending = false }: {
   targetGeneration?: string; onTargetSelected?(): void; requestPending?: boolean; requestError?: string; drawerOpen?: boolean; onRequestState?(pending: boolean, error?: string): void;
   inputPreview?: ReactNode; workspace?: boolean; hideActions?: boolean; actionsTarget?: HTMLElement | null; versionNumber?: number;
-  job: Job; lang: "zh" | "en"; disabled: boolean; subjectImage?: string; subjects?: MultiSubject[]; onUpdate(job: Job, subjectImage?: string, subjects?: MultiSubject[]): void;
+  job: Job; lang: "zh" | "en"; disabled: boolean; disabledReason?: string; subjectImage?: string; subjects?: MultiSubject[]; onUpdate(job: Job, subjectImage?: string, subjects?: MultiSubject[]): void;
 }) {
   const GenerationEffect = useContext(GenerationEffectContext);
   const [compare, setCompare] = useState(false);
@@ -138,9 +138,9 @@ export default function GenerationPanel({ targetGeneration, onTargetSelected, jo
   </div>;
   const generateButton = <button className="primary generate-button" disabled={disabled || busy || !!running || !validRatio || generic || incomplete || !inputsReady} aria-busy={busy || !!running}
     title={`使用${job.mode === "recreate" ? "" : job.mode === "session" ? "参考风格与" : "当前主体图、参考模板与"}${lang === "zh" ? "中文" : "英文"}提示词生成，包含排除项。使用 Codex 生图额度。`} onClick={() => act()}>
-    {!running && !busy && <Icon name="image" />}{running ? "生成中，完成后提醒" : busy ? "正在提交…" : generations.length ? "再生成一张" : "生成图片"}<Icon name="arrow" />
+    {!running && !busy && <Icon name="image" />}{running ? workspace ? "图片生成中…" : "生成中，完成后提醒" : busy ? "正在提交…" : generations.length ? workspace ? "再生成图片" : "再生成一张" : "生成图片"}{!workspace && <Icon name="arrow" />}
   </button>;
-  const warning = (generic || incomplete) ? "请先上传主体图，生成专属提示词。" : !inputsReady ? multi ? "请添加至少 2 张可用的主体图。" : "请先上传可用的主体图。" : "";
+  const warning = disabledReason || ((generic || incomplete) ? "请先上传主体图，生成专属提示词。" : !inputsReady ? multi ? "请添加至少 2 张可用的主体图。" : "请先上传可用的主体图。" : "");
   const generationControls = <>{ratioControls}{generateButton}{workspace && warning && <p className="hint">{warning}</p>}{workspace && error && <p className="error" role="alert">{error} <RecoveryAction error={error} /></p>}</>;
   const action = hideActions ? null : actionsTarget ? createPortal(generationControls, actionsTarget) : workspace ? generationControls : <>{ratioControls}<AsyncAction status={running?.stage || (busy ? "正在提交…" : undefined)} onCancel={running ? () => act(true) : undefined} cancelling={busy}>{generateButton}</AsyncAction></>;
   const dimensions = image && asset?.width && asset?.height ? <p className="generation-dimensions">{asset.width} × {asset.height} px · {imageRatio(asset.width, asset.height)}</p> : null;

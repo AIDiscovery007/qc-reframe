@@ -57,6 +57,11 @@ createServer(async (req, res) => {
       res.end(await readFile(new URL("../tests/settings-recovery.browser.js", import.meta.url)));
       return;
     }
+    if (path === "/generation-actions-regression.js") {
+      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+      res.end(await readFile(new URL("../tests/generation-actions.browser.js", import.meta.url)));
+      return;
+    }
     if (path === "/hover-preview") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.end('<html><head><meta charset="UTF-8"><title>QC-Reframe · 动态避让预览</title></head><body style="margin:0"><iframe title="悬浮避让示例" src="/hover-fixture" style="display:block;width:100%;height:100vh;border:0"></iframe></body></html>');
@@ -476,6 +481,8 @@ createServer(async (req, res) => {
       );
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('settingsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/settings-recovery-regression.js"></script></body>'));
+    if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('generationActionsRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/generation-actions-regression.js"></script></body>'));
     if (path === '/popup.html'  && new URL(req.url, 'http://127.0.0.1').searchParams.has('panelClip'))
       content = Buffer.from(content.toString().replace('</head>', '<style>#root{position:fixed;top:12px;right:12px;width:400px;height:620px;overflow:auto;border-radius:20px;background:#fffefa;box-shadow:0 4px 24px #0002}</style></head>'));
     res.writeHead(200, { "Content-Type": type });

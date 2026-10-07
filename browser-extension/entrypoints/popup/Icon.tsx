@@ -10,6 +10,7 @@ const paths = {
   clock: "M12 8v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
   edit: "m16 3 5 5-12 12-6 1 1-6L16 3Zm-2 2 5 5",
   maximize: "M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5",
+  minimize: "M3 8h5V3M16 3v5h5M21 16h-5v5M8 21v-5H3",
   expand: "M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M3 3l6 6m12-6-6 6M3 21l6-6m12 6-6-6",
   plus: "M12 4v16M4 12h16",
   minus: "M4 12h16",
