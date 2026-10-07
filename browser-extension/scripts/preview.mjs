@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import sharp from "sharp";
+import { uiOperations, operationFor, allowsOperation } from "../lib/operation-policy.ts";
 import { galleryAsset, gallerySetup, galleryMessages } from "./gallery-preview.mjs";
 
 const port = Number(process.env.PREVIEW_PORT || 43188);
@@ -42,9 +43,9 @@ const job = {
   result,
 };
 
-createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   try {
-    if (req.headers.host !== `127.0.0.1:${port}`) {
+    if (req.headers.host !== `127.0.0.1:${server.address().port}`) {
       res.writeHead(403);
       res.end();
       return;
@@ -60,6 +61,11 @@ createServer(async (req, res) => {
     if (path === "/generation-actions-regression.js") {
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       res.end(await readFile(new URL("../tests/generation-actions.browser.js", import.meta.url)));
+      return;
+    }
+    if (path === "/creation-context-regression.js") {
+      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+      res.end(await readFile(new URL("../tests/creation-context.browser.js", import.meta.url)));
       return;
     }
     if (path === "/hover-preview") {
@@ -164,6 +170,13 @@ createServer(async (req, res) => {
         const older={...structuredClone(job),id:'older-style',createdAt:'2026-09-01T00:00:00Z',result:{...job.result,title:'早期风格版本',promptZh:'早期版本：保留原始构图，迁移平涂质感。'},generations:[]};
         const projects=[{id:projectId,title:state.startsWith('multi')?'水彩里的日常':state==='gallery'?'午后，一杯水彩':'暖纸底几何模板',createdAt:job.createdAt,updatedAt:job.createdAt,sourceUrl:job.sourceUrl,capture:'original',jobs:state.endsWith('-new')?[]:state==='projects'?[job,reenact,older]:state==='alignment'?[job,older]:[job]},
           {id:secondId,title:'另一个空白项目',createdAt:job.createdAt,updatedAt:job.createdAt,sourceUrl:'https://example.com/second',capture:'original',jobs:[]}];
+        if(previewOptions.has('creationContextRegression')) {
+          job.id='11111111-1111-4111-8111-111111111111';
+          older.id='22222222-2222-4222-8222-222222222222';
+          reenact.id='33333333-3333-4333-8333-333333333333';
+          projects[0].jobs=[job,reenact,older];
+          projects[1].jobs=[{...structuredClone(older),id:'44444444-4444-4444-8444-444444444444',projectId:secondId,instruction:'另一个项目的原始指令'}];
+        }
         if(state==='library') {
           const count=Math.min(1000,Math.max(0,Number(previewOptions.get('count')??61)||0));
           projects.splice(0,projects.length,...Array.from({length:count},(_,index)=>{
@@ -239,14 +252,20 @@ createServer(async (req, res) => {
         const notifyMotion = () => listeners.forEach(fn=>fn({type:'alchemy:motion-changed'},{id:'preview'},()=>{}));
         addEventListener('storage',event=>{if(event.key==='preview-motion-preference')notifyMotion();});
         // Match real content-script restrictions: all motion access goes through runtime messages.
+        // Embed the same policy in this classic script before built UI modules load.
+        const uiOperations=${JSON.stringify(uiOperations)};
+        const operationFor=${operationFor.toString()},allowsOperation=${allowsOperation.toString()};
+        const requestSource=['/','/workspace.html','/popup.html'].includes(location.pathname)?'extension':'content';
         globalThis.chrome = {storage:{local:{
           get:async()=>{throw new Error('Access to storage is not allowed from this context.');},
           set:async()=>{throw new Error('Access to storage is not allowed from this context.');}
         }},runtime:{connect:()=>{
           const messages=new Set(),disconnects=new Set();let closed=false;
           return {onMessage:{addListener:fn=>messages.add(fn),removeListener:fn=>messages.delete(fn)},onDisconnect:{addListener:fn=>disconnects.add(fn),removeListener:fn=>disconnects.delete(fn)},
-            disconnect:()=>{closed=true;},postMessage:message=>{void chrome.runtime.sendMessage(message).then(value=>{if(!closed)messages.forEach(fn=>fn(value));},error=>{if(!closed)messages.forEach(fn=>fn({error:error.message}));});}};
+            disconnect:()=>{closed=true;},postMessage:message=>{if(!allowsOperation(operationFor(message?.type),requestSource,'port')){messages.forEach(fn=>fn({error:'无效请求'}));return;}void chrome.runtime.sendMessage(message).then(value=>{if(!closed)messages.forEach(fn=>fn(value));},error=>{if(!closed)messages.forEach(fn=>fn({error:error.message}));});}};
         },id:'preview',getManifest:()=>({name:'QC-Reframe preview',version:'0.1.18'}),onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)},sendMessage:async(message)=>{
+          const operation=operationFor(message?.type);
+          if(operation&&!allowsOperation(operation,requestSource))return {error:'无效请求'};
           if(message.type.startsWith('alchemy:reminder-')) {
             const preferences=JSON.parse(localStorage.getItem('preview-reminders')||'{"sound":false,"tone":"calm","volume":30}');
             if(preferences.tone==='soft')preferences.tone='calm';
@@ -286,9 +305,9 @@ createServer(async (req, res) => {
           if(message.type==='alchemy:sessions-list') {
             if(state==='session-error')return {error:'示例：本机会话读取失败，请重试'};
             await new Promise(resolve=>setTimeout(resolve,100));
-            if(indexFailure)return {error:'示例：本地正文索引初始化失败，请清除后重新建立'};
+            if(indexFailure&&message.scope==='content')return {error:'示例：本地正文索引初始化失败，请清除后重新建立'};
             if(message.scope==='content'&&sessionIndex.state==='stale')refreshSessionIndex();
-            const index=readSessionIndex(),query=(message.searchTerm||'').toLocaleLowerCase();
+            const index=indexFailure?{...readSessionIndex(),state:'partial',error:'本地正文索引不可用，请清除索引后重新建立；标题搜索仍可使用。'}:readSessionIndex(),query=(message.searchTerm||'').toLocaleLowerCase();
             const rows=(message.archived?sessionRows.slice(2):sessionRows).flatMap(row=>{
               if(message.scope==='content'&&sessionRows.indexOf(row)>=index.indexed)return [];
               if(!query)return [row];
@@ -306,7 +325,11 @@ createServer(async (req, res) => {
             return {ok:true,value:readSessionIndex()};
           }
           if(message.type==='alchemy:update-project-input') {
-            if(previewOptions.get('swap')==='failed')return {error:'保存失败（预览），原输入已保留'};
+            const inputSaveDelay=Math.min(10000,Math.max(0,Number(previewOptions.get('inputSaveDelay'))||0));
+            if(previewOptions.get('swap')==='failed') {
+              if(inputSaveDelay)await new Promise(resolve=>setTimeout(resolve,inputSaveDelay));
+              return {error:'保存失败（预览），原输入已保留'};
+            }
             const p=projects.find(p=>p.id===message.projectId);
             if(message.expectedRevision!==(p.inputRevision||0))return {error:'项目输入已在其他窗口更新，请重新打开项目'};
             const before=p.inputs?.[message.mode]||p.jobs.find(j=>j.mode===message.mode)?.reenact;
@@ -317,7 +340,9 @@ createServer(async (req, res) => {
             p.inputs={...p.inputs,[message.mode]:{instruction:message.instruction,subjectImage:message.subjectImage,subjects:structuredClone(message.subjects),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};
             if(message.image)p.image=message.image;
             p.inputRevision=(p.inputRevision||0)+1;touch(p);data.selection=selection(p);
-            return {ok:true,value:structuredClone(data.selection)};
+            const snapshot=structuredClone(data.selection);
+            if(inputSaveDelay)await new Promise(resolve=>setTimeout(resolve,inputSaveDelay));
+            return {ok:true,value:snapshot};
           }
           if(message.type==='alchemy:upload-reference'){if(new URLSearchParams(location.search).get('swap')==='failed')return {error:'互换失败（预览），请重试'};let p=projects.find(p=>(p.image||template)===message.image);if(!p){p={id:crypto.randomUUID(),title:'上传的参考图',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),sourceUrl:'',capture:'original',jobs:[],image:message.image};projects.unshift(p);touch(p);}data.selection={...selection(p),image:message.image};return {ok:true,value:data.selection};}
           if(message.type==='alchemy:service-restart'){if(previewOptions.get('restart')==='failed')return {error:'重启准备失败，原服务仍在运行。请查看本机服务日志后重试。'};const ticket={previousInstanceId:service.instanceId,restartId:crypto.randomUUID()};restartingUntil=Date.now()+1800;setTimeout(()=>Object.assign(service,{instanceId:crypto.randomUUID(),restartId:ticket.restartId}),1800);return {ok:true,value:ticket};}
@@ -483,6 +508,8 @@ createServer(async (req, res) => {
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/settings-recovery-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('generationActionsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/generation-actions-regression.js"></script></body>'));
+    if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('creationContextRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/creation-context-regression.js"></script></body>'));
     if (path === '/popup.html'  && new URL(req.url, 'http://127.0.0.1').searchParams.has('panelClip'))
       content = Buffer.from(content.toString().replace('</head>', '<style>#root{position:fixed;top:12px;right:12px;width:400px;height:620px;overflow:auto;border-radius:20px;background:#fffefa;box-shadow:0 4px 24px #0002}</style></head>'));
     res.writeHead(200, { "Content-Type": type });
@@ -491,8 +518,8 @@ createServer(async (req, res) => {
     res.writeHead(404);
     res.end("请先运行 npm run build");
   }
-}).listen(Number(process.env.PREVIEW_PORT || 43188), "127.0.0.1", () =>
+}).listen(port, "127.0.0.1", () =>
   console.log(
-    `UI preview: http://127.0.0.1:${process.env.PREVIEW_PORT || 43188}/?state=result (empty / running / failed / models-new)`,
+    `UI preview: http://127.0.0.1:${server.address().port}/?state=result (empty / running / failed / models-new)`,
   ),
 );

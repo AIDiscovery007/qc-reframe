@@ -1,3 +1,4 @@
+import { creationContext, emptyCreationState, createInputWriter, resolveCreation, restoredQuickDraft } from "../../lib/creation-context";
 import RecoveryAction, { RecoveryContext } from "./RecoveryAction";
 import type { CliStatus, RecoverySection } from "../../lib/codex-status";
 import ProjectVisibilityToast from "./ProjectVisibilityToast";
@@ -69,13 +70,13 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const [draftReady, setDraftReady] = useState(false);
   const [draftError, setDraftError] = useState("");
   const handoffPending = useRef(false);
-  const [instructions, setInstructions] = useState<Record<string, string>>({});
+  const [creation, dispatchCreation] = useReducer(creationContext, emptyCreationState);
+  const { instructions, inputRevisions, versions, multiSubjectDrafts, subjectDrafts } = creation;
   const referenceInput = useRef<HTMLInputElement>(null);
   const [activeCount, setActiveCount] = useState(0);
   const [cliBusy, setCliBusy] = useState(false);
   const [basePreferences, setPreferences] = useState(defaults);
   const [projectModes, setProjectModes] = useState<Record<string, Mode>>({});
-  const [inputRevisions, setInputRevisions] = useState<Record<string, number>>({});
   const [inputReload, setInputReload] = useState(0);
   const [viewsReady, setViewsReady] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
@@ -99,13 +100,10 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   projectSnapshot.current = project;
   const [dataRevision, setDataRevision] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const [versions, setVersions] = useState<Record<string, string>>({});
   const [references, setReferences] = useState<Record<string, Selection>>({});
-  const [multiSubjectDrafts, setMultiSubjectDrafts] = useState<Record<string, MultiSubject[]>>({});
   const [canvasSelections, setCanvasSelections] = useState<Record<string, string>>({});
   const [swappedSubjectId, setSwappedSubjectId] = useState("");
   const [subjectUnavailable, setSubjectUnavailable] = useState<Record<string, boolean>>({});
-  const [subjectDrafts, setSubjectDrafts] = useState<Record<string, string>>({});
   const [promptDrafts, setPromptDrafts] = useState<Record<string, PromptDraft>>({});
   const [savingPrompt, setSavingPrompt] = useState("");
   const [referenceErrors, setReferenceErrors] = useState<Record<string, string>>({});
@@ -129,58 +127,41 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const inputSaving = useRef(false);
   const pendingCancellations = useRef(new Set<string>());
   const [cancellingJobs, setCancellingJobs] = useState<string[]>([]);
   const [lang, setLang] = useState<"zh" | "en">("zh");
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeProject = project?.id === selection?.projectId ? project : undefined;
-  const modeJobs = (mode: Mode) => activeProject?.jobs.filter((item) => item.mode === mode) || [];
-  const modeJob = (mode: Mode) => {
-    const jobs = modeJobs(mode);
-    if (versions[`${activeProject?.id}:${mode}`] === "new") return undefined;
-    return jobs.find((item) => item.id === versions[`${activeProject?.id}:${mode}`]) || jobs[0];
-  };
-  const subjectKey = (mode: Mode) => `${selection?.projectId || selection?.id}:${mode}`;
-  const subjectDraftKey = (mode: Mode) => `${subjectKey(mode)}:${modeJob(mode)?.id || "new"}`;
-  const currentInput = (mode: Mode) => {
-    const saved = modeJob(mode);
-    return !saved || saved.id === selection?.inputVersions?.[mode] ? selection?.inputs?.[mode] : undefined;
-  };
-  const subjectImage = (mode: Mode) => {
-    const savedJob = modeJob(mode);
-    const saved = savedJob && references[savedJob.id];
-    return subjectDrafts[subjectDraftKey(mode)] ?? (currentInput(mode) ? currentInput(mode)?.subjectImage || "" : undefined) ?? saved?.generationSubjectImage ?? saved?.reenact?.subjectImage ?? "";
-  };
-  const instructionKey = (mode: Mode) => `${subjectKey(mode)}:${modeJob(mode)?.id || "new"}`;
-  const selectedSessions = () => currentInput("session")?.sessions ?? modeJob("session")?.sessionContext?.sources ?? [];
-  const taskInstruction = (mode: Mode) => {
-    const saved = modeJob(mode);
-    return instructions[instructionKey(mode)] ?? currentInput(mode)?.instruction ?? saved?.instruction ?? saved?.reenact?.basePrompt ?? defaultInstructions[mode];
-  };
-  const changeInstruction = (mode: Mode, value: string) => {
-    const key = subjectKey(mode), version = modeJob(mode)?.id || "new";
-    setVersions(items => ({ ...items, [key]: version }));
-    setInstructions(items => ({ ...items, [`${key}:${version}`]: value }));
-  };
-  const multiJob = modeJob("multi-reenact");
-  const multiKey = `${subjectKey("multi-reenact")}:${multiJob?.id || "new"}`;
-  const multiReference = multiJob && references[multiJob.id];
-  const multiSubjects = multiSubjectDrafts[multiKey] ?? currentInput("multi-reenact")?.subjects ?? multiReference?.generationSubjects ?? multiReference?.reenact?.subjects ?? [];
-  const multiPrompt = taskInstruction("multi-reenact");
-  const savedMulti = multiReference?.reenact?.subjects || [];
-  const multiStale = !!multiJob?.result && (multiSubjects.length !== savedMulti.length || multiSubjects.some((item, index) => {
-    const saved = savedMulti[index];
-    return !saved || item.id !== saved.id || item.subjectImage !== saved.subjectImage || item.role !== saved.role || item.detail !== saved.detail;
-  }) || multiPrompt.trim() !== (multiJob.instruction ?? multiJob.reenact?.basePrompt)?.trim());
+  const contextFor = (mode: Mode) => resolveCreation(creation, selection, activeProject, references, mode, defaultInstructions[mode]);
+  const modeJobs = (mode: Mode) => contextFor(mode).jobs;
+  const modeJob = (mode: Mode) => contextFor(mode).job;
+  const subjectKey = (mode: Mode) => contextFor(mode).key;
+  const currentInput = (mode: Mode) => contextFor(mode).input;
+  const subjectImage = (mode: Mode) => contextFor(mode).subjectImage;
+  const selectedSessions = () => contextFor("session").sessions;
+  const taskInstruction = (mode: Mode) => contextFor(mode).instruction;
+  const changeInstruction = (mode: Mode, value: string) => dispatchCreation({ type: "edit",
+    key: subjectKey(mode), version: modeJob(mode)?.id || "new", instruction: value });
+  const multiContext = contextFor("multi-reenact");
+  const multiSubjects = multiContext.subjects;
+  const multiPrompt = multiContext.instruction;
+  const multiStale = multiContext.multiStale;
   const job = modeJob(preferences.mode);
   const activeJob = job;
-  const displayImage = job ? references[job.id]?.image : selection?.image;
+  const displayImage = contextFor(preferences.mode).image;
   const displaySelection = selection && { ...selection, image: displayImage };
   const drawerKey = `${selection?.projectId || selection?.id}:${preferences.mode}:${activeJob?.id || "new"}`;
   const referenceContext = useRef({ key: drawerKey });
   if (referenceContext.current.key !== drawerKey) referenceContext.current = { key: drawerKey };
+  const generationView = { context: referenceContext.current, revision: selectionRevision.current };
+  const revealGeneratedImage = () => {
+    if (generationView.context === referenceContext.current && generationView.revision === selectionRevision.current)
+      setTargetGeneration(undefined);
+  };
+  const inputWriter = useRef<ReturnType<typeof createInputWriter> | undefined>(undefined);
+  inputWriter.current ??= createInputWriter(message => request<Selection>(message),
+    () => ({ context: referenceContext.current, revision: selectionRevision.current }));
   const running = job?.status === "running";
   const loadingProject = !!selection && !activeProject;
   const result = job?.result;
@@ -208,11 +189,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     let savedQuick: WorkspaceHandoff | undefined;
     const restoreDraft = (draft?: WorkspaceDraft, merge = false) => {
       if (!draft) return;
-      setSubjectDrafts(merge ? value => ({ ...value, ...draft.subjectDrafts }) : draft.subjectDrafts || {});
-      setMultiSubjectDrafts(merge ? value => ({ ...value, ...draft.multiSubjectDrafts }) : draft.multiSubjectDrafts || {});
+      dispatchCreation({ type: "restore", draft, merge });
       setPromptDrafts(merge ? value => ({ ...value, ...draft.promptDrafts }) : draft.promptDrafts || {});
-      setInstructions(merge ? value => ({ ...value, ...draft.instructions }) : draft.instructions || {});
-      setVersions(items => ({ ...items, ...draft.versions }));
       setLang(draft.lang || "zh");
     };
     const refresh = async () => {
@@ -268,10 +246,10 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         const reference = await request<Selection>({ type: "alchemy:project-reference", id: target.projectId });
         if (cancelled || revision !== selectionRevision.current) return;
         previous = reference; setSelection(reference);
-        setInputRevisions(items => ({ ...items, [reference.projectId!]: reference.inputRevision || 0 }));
+        dispatchCreation({ type: "revision", projectId: reference.projectId!, revision: reference.inputRevision || 0 });
         setHistoryOpen(false); setGalleryOpen(false); setTasksOpen(false); setError("");
         setProjectMode(target.projectId, target.mode);
-        setVersions(value => ({ ...value, [`${target.projectId}:${target.mode}`]: target.id }));
+        dispatchCreation({ type: "select", key: `${target.projectId}:${target.mode}`, version: target.id });
         const generationId = params.get("generation");
         const image = !!generationId && !!target.generations?.some(item => item.id === generationId);
         setTargetGeneration(image ? { jobId: target.id, id: generationId! } : undefined);
@@ -301,9 +279,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
               const stale = (source.inputRevision || 0) !== (reference.inputRevision || 0);
               if (!stale) {
                 restoreDraft(handoff.draft, merge);
-                setInputRevisions(items => ({ ...items, [source.projectId!]: reference.inputRevision || 0 }));
+                dispatchCreation({ type: "revision", projectId: source.projectId!, revision: reference.inputRevision || 0 });
               } else {
-                setInputRevisions(items => ({ ...items, [source.projectId!]: -1 }));
+                dispatchCreation({ type: "revision", projectId: source.projectId!, revision: -1 });
                 setError("项目输入已更新，已打开最新输入；旧窗口草稿未覆盖当前项目。");
               }
               previous = { ...reference, inputs: stale ? undefined : reference.inputs };
@@ -334,9 +312,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         views = await request<typeof views>({ type: "alchemy:project-views" }) || {};
         if (cancelled) return;
         setProjectModes(Object.fromEntries(Object.entries(views || {}).map(([id, view]) => [id, view.mode])));
-        setInputRevisions(Object.fromEntries(Object.entries(views || {}).map(([id, view]) => [id, view.inputRevision || 0])));
-        setVersions(Object.fromEntries(Object.entries(views || {}).flatMap(([id, view]) =>
-          Object.entries(view.versions).map(([mode, version]) => [`${id}:${mode}`, version]))));
+        dispatchCreation({ type: "views", views });
         setViewsReady(true);
       } catch (error) { if (!cancelled) setError(`项目选择恢复失败：${(error as Error).message}`); }
       const params = new URLSearchParams(location.search);
@@ -358,15 +334,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           const current = projectId ? await request<Selection>({ type: "alchemy:project-reference", id: projectId }) : undefined;
           if (cancelled) return;
           const stale = !!projectId && (savedQuick?.selection?.inputRevision || 0) !== (current?.inputRevision || 0);
-          if (projectId && !stale) setInputRevisions(items => ({ ...items, [projectId]: current?.inputRevision || 0 }));
-          const keepInput = ([key]: [string, unknown]) => !stale || !key.startsWith(`${projectId}:`);
-          restoreDraft(savedQuick?.draft && { ...savedQuick.draft,
-            instructions: Object.fromEntries(Object.entries(savedQuick.draft.instructions || {}).filter(keepInput)),
-            subjectDrafts: Object.fromEntries(Object.entries(savedQuick.draft.subjectDrafts || {}).filter(keepInput)),
-            multiSubjectDrafts: Object.fromEntries(Object.entries(savedQuick.draft.multiSubjectDrafts || {}).filter(keepInput)),
-            versions: Object.fromEntries(Object.entries(savedQuick.draft.versions || {}).filter(([key]) =>
-              keepInput([key, undefined]) && !views[key.slice(0, key.indexOf(":"))])),
-          });
+          if (projectId && !stale) dispatchCreation({ type: "revision", projectId, revision: current?.inputRevision || 0 });
+          if (savedQuick?.draft) restoreDraft(restoredQuickDraft(savedQuick.draft, projectId, stale, views));
           if (savedQuick && !views[savedQuick.selection?.projectId || ""]) setProjectMode(savedQuick.selection?.projectId, savedQuick.mode);
           quickRestored = true;
         } catch (error) {
@@ -456,14 +425,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     const snapshot = selectionRevision.current;
     void request<Selection>({ type: "alchemy:project-reference", id }).then(next => {
       if (cancelled || snapshot !== selectionRevision.current) return;
-      if ((next.inputRevision || 0) > (inputRevisions[id] ?? 0)) {
-        setVersions(items => ({ ...items, ...Object.fromEntries(Object.entries(next.inputVersions || {}).map(([mode, version]) => [`${id}:${mode}`, version])) }));
-        // A newer durable input supersedes only working drafts, never historical snapshots.
-        setSubjectDrafts(items => Object.fromEntries(Object.entries(items).filter(([key]) => !key.startsWith(`${id}:`))));
-        setMultiSubjectDrafts(items => Object.fromEntries(Object.entries(items).filter(([key]) => !key.startsWith(`${id}:`))));
-        setInstructions(items => Object.fromEntries(Object.entries(items).filter(([key]) => !key.startsWith(`${id}:`))));
-      }
-      setInputRevisions(items => ({ ...items, [id]: next.inputRevision || 0 }));
+      dispatchCreation({ type: "adopt", selection: next });
       setSelection({ ...next, inputs: next.inputs || {} });
     }).catch(error => { if (!cancelled) setError(error.message); });
     return () => { cancelled = true; };
@@ -537,9 +499,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       if (context !== referenceContext.current || revision !== selectionRevision.current) throw new Error("当前输入已切换，请重新选择图片");
       if (!workspace && next.projectId && selection) {
         const key = `${next.projectId}:${preferences.mode}`;
-        setVersions(items => ({ ...items, [key]: "new" }));
-        setInstructions(items => ({ ...items, [`${key}:new`]: taskInstruction(preferences.mode) }));
-        if (preferences.mode !== "recreate" && preferences.mode !== "session") setSubjectDrafts(items => ({ ...items, [`${key}:new`]: subjectImage(preferences.mode) }));
+        dispatchCreation({ type: "edit", key, version: "new", instruction: taskInstruction(preferences.mode),
+          subjectImage: preferences.mode !== "recreate" && preferences.mode !== "session" ? subjectImage(preferences.mode) : undefined });
       }
       selectionRevision.current++;
       setProjectMode(next.projectId, preferences.mode);
@@ -549,29 +510,21 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   };
   const saveInput = async (mode: Mode, image: string | undefined, instruction: string,
     subject: string = subjectImage(mode), subjects: MultiSubject[] = multiSubjects, sessionIds = mode === "session" ? selectedSessions().map(item => item.id) : undefined) => {
-    if (blocked || inputSaving.current || !selection?.projectId) throw new Error("当前无法修改图片，请稍后重试");
-    const revision = selectionRevision.current, context = referenceContext.current, id = selection.projectId;
-    inputSaving.current = true; setBusy(true);
+    if (blocked || inputWriter.current!.pending || !selection?.projectId) throw new Error("当前无法修改图片，请稍后重试");
+    const revision = selectionRevision.current, context = referenceContext.current;
+    setBusy(true);
     try {
-      const next = await request<Selection>({ type: "alchemy:update-project-input", projectId: id,
-        expectedRevision: selection.inputRevision || 0, referenceJobId: modeJob(mode)?.id, image, mode, instruction,
-        ...(mode === "session" ? { sessionIds } : mode === "multi-reenact" ? { subjects } : mode !== "recreate" ? { subjectImage: subject } : {}),
+      await inputWriter.current!.save({ selection, mode, referenceJobId: modeJob(mode)?.id,
+        image, instruction, subjectImage: subject, subjects, sessionIds }, next => {
+        selectionRevision.current++;
+        dispatchCreation({ type: "adopt", selection: next, savedMode: mode });
+        setSelection(next); setError(""); setRefreshNonce(value => value + 1);
+        setHistoryOpen(false); setGalleryOpen(false);
       });
-      if (revision !== selectionRevision.current || context !== referenceContext.current) return;
-      selectionRevision.current++;
-      setInputRevisions(items => ({ ...items, [id]: next.inputRevision || 0 }));
-      setVersions(items => ({ ...items, ...Object.fromEntries(Object.entries(next.inputVersions || {}).map(([lane, version]) => [`${id}:${lane}`, version])) }));
-      const key = `${id}:${mode}:${next.inputVersions?.[mode] || "new"}`;
-      // Persisted images are restored from the project, not duplicated in session storage.
-      setMultiSubjectDrafts(items => Object.fromEntries(Object.entries(items).filter(([name]) => name !== key)));
-      setSubjectDrafts(items => Object.fromEntries(Object.entries(items).filter(([name]) => name !== key)));
-      setInstructions(items => Object.fromEntries(Object.entries(items).filter(([name]) => name !== key)));
-      setSelection(next); setError(""); setRefreshNonce(value => value + 1);
-      setHistoryOpen(false); setGalleryOpen(false);
     } catch (error) {
-      if (revision === selectionRevision.current) setError((error as Error).message);
+      if (revision === selectionRevision.current && context === referenceContext.current) setError((error as Error).message);
       throw error;
-    } finally { inputSaving.current = false; setBusy(false); }
+    } finally { setBusy(false); }
   };
   const applyReferenceUpload = (image: string, mode: Mode, instruction = taskInstruction(mode)) => saveInput(mode, image, instruction);
   const applyReferenceRotation = async (image: string, mode: Mode, instruction?: string) => {
@@ -636,8 +589,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       if (revision !== selectionRevision.current) return;
       selectionRevision.current++;
       setSelection((current) => current?.id === selection.id ? value.currentSelection : current);
-      setInputRevisions(items => ({ ...items, [activeProject.id]: value.currentSelection.inputRevision || 0 }));
-      setVersions((items) => ({ ...items, [`${activeProject.id}:${mode}`]: value.job.id }));
+      dispatchCreation({ type: "revision", projectId: activeProject.id, revision: value.currentSelection.inputRevision || 0 });
+      dispatchCreation({ type: "select", key: `${activeProject.id}:${mode}`, version: value.job.id });
       setCopied(false);
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -674,10 +627,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       setRefreshNonce(value => value + 1);
       if (selection?.projectId && deletedIds.includes(selection.projectId)) { setSelection(undefined); setProject(undefined); }
       setProjectModes(items => Object.fromEntries(Object.entries(items).filter(([id]) => !deletedIds.includes(id))));
-      setVersions((items) => Object.fromEntries(Object.entries(items).filter(([key]) => !deletedIds.some((id) => key.startsWith(`${id}:`)))));
+      dispatchCreation({ type: "delete", projectIds: deletedIds });
       setPromptDrafts((items) => Object.fromEntries(Object.entries(items).filter(([id]) => !removedJobs.includes(id))));
-      setMultiSubjectDrafts((items) => Object.fromEntries(Object.entries(items).filter(([key]) => !deletedIds.some((id) => key.startsWith(`${id}:`)))));
-      setSubjectDrafts((items) => Object.fromEntries(Object.entries(items).filter(([key]) => !deletedIds.some((id) => key.startsWith(`${id}:`)))));
       setReferences((items) => Object.fromEntries(Object.entries(items).filter(([id, value]) => !removedJobs.includes(id) && !deletedIds.includes(value.projectId || ""))));
       setReferenceErrors((items) => Object.fromEntries(Object.entries(items).filter(([id]) => !removedJobs.includes(id))));
     } finally { deletingProjects.current = false; selectionRevision.current++; projectRevision.current++; setBusy(false); }
@@ -797,7 +748,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     : restoring ? "正在恢复原图…" : loadingProject ? "正在读取模板项目…" : cliBusy ? "Codex 正在升级…"
     : modelBusy ? "正在验证模型…" : busy ? "正在提交…" : undefined;
 
-  const instructionStale = !!result && taskInstruction(preferences.mode).trim() !== (job?.instruction ?? job?.reenact?.basePrompt ?? defaultInstructions[preferences.mode]).trim();
+  const instructionStale = contextFor(preferences.mode).instructionStale;
   const genericPrompt = !!result && preferences.mode === "style" && !job?.reenact;
   const needsPrompt = !result || instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt;
   const genericHint = genericPrompt && !subjectImage("style") ? "添加主体图后可生成专属提示词" : "";
@@ -818,13 +769,13 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const extractStyle = () => {
     if (blocked || !selection?.image || promptDraft || !taskInstruction("style").trim()) return;
     const image = subjectImage("style");
-    if (image) setSubjectDrafts(items => ({ ...items, [subjectDraftKey("style")]: image }));
+    if (image) dispatchCreation({ type: "edit", key: subjectKey("style"), version: modeJob("style")?.id || "new", subjectImage: image });
     void start("style");
   };
 
 
   const versionSelector = modeJobs(preferences.mode).length > 0 && <SelectField className="version-select" label="" aria-label="提示词版本" value={job?.id || "new"} disabled={busy}
-              onChange={(e) => { setCopied(false); setVersions((items) => ({ ...items, [`${activeProject!.id}:${preferences.mode}`]: e.target.value })); }}>
+              onChange={(e) => { setCopied(false); dispatchCreation({ type: "select", key: `${activeProject!.id}:${preferences.mode}`, version: e.target.value }); }}>
               <option value="new">当前输入</option>
               {modeJobs(preferences.mode).map((item, i, items) => <option key={item.id} value={item.id}>{`版本 ${items.length - i}${i === 0 ? " · 最新" : ""}`}</option>)}
             </SelectField>;
@@ -984,10 +935,10 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           try {
             const next = await request<Selection>({ type: "alchemy:open-project", id: work.projectId });
             if (revision !== selectionRevision.current) return;
-            setInputRevisions(items => ({ ...items, [work.projectId]: next.inputRevision || 0 }));
+            dispatchCreation({ type: "revision", projectId: work.projectId, revision: next.inputRevision || 0 });
             setSelection(next); setHistoryOpen(false);
             setProjectMode(work.projectId, work.mode);
-            setVersions(items => ({ ...items, [`${work.projectId}:${work.mode}`]: work.jobId }));
+            dispatchCreation({ type: "select", key: `${work.projectId}:${work.mode}`, version: work.jobId });
             setTargetGeneration({ jobId: work.jobId, id: work.generationId });
             dispatchDrawer({ type: "toggle", key: `${work.projectId}:${work.mode}:${work.jobId}`, open: true, seen: "" });
             setGalleryOpen(false);
@@ -1027,7 +978,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           onInstruction={value => changeInstruction(preferences.mode, value)} onReference={file => void uploadReference(file, false)}
           onRotateReference={image => applyReferenceRotation(image, preferences.mode, taskInstruction(preferences.mode))}
           onSwap={() => { if (preferences.mode !== "recreate" && preferences.mode !== "session") void swapImages(preferences.mode, taskInstruction(preferences.mode)); }}
-          onReverse={reverse} onCancel={cancel} onCopy={copy} onLanguage={setLang} onWorkspace={() => void openWorkspace()} onUpdate={value => { setTargetGeneration(undefined); updateJob(value); }}
+          onReverse={reverse} onCancel={cancel} onCopy={copy} onLanguage={setLang} onWorkspace={() => void openWorkspace()} onUpdate={updateJob} onGenerationViewUpdate={revealGeneratedImage}
           generationHint={promptDraft ? "未保存的提示词请在工作台继续编辑" : instructionStale ? "输入已修改，请重新生成提示词" : reverseStatus || (!connected ? "请先连接服务" : !selectedModel ? "请在工作台选择模型" : "")}
           generationDisabled={!connected || !selectedModel || blocked || !!promptDraft || needsPrompt || !!subjectUnavailable[subjectKey(preferences.mode)]}
         /> : <section className="empty"><span className="empty-mark"><Icon name="image" /></span><h1>选择一张参考图</h1></section>}

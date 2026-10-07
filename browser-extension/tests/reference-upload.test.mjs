@@ -1,173 +1,103 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
-import ts from 'typescript';
+import { creationContext, emptyCreationState, createInputWriter } from '../lib/creation-context.ts';
 
-const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
-const tree = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ['drawerKey', 'referenceContext', 'saveInput', 'applyReferenceUpload', 'applyReferenceRotation'];
-const declarations = new Map();
-let contextUpdate;
-function visit(node) {
-  if (ts.isVariableDeclaration(node) && names.includes(node.name.getText(tree))) declarations.set(node.name.getText(tree), node.initializer.getText(tree));
-  if (ts.isIfStatement(node) && node.expression.getText(tree) === 'referenceContext.current.key !== drawerKey') contextUpdate = node.getText(tree);
-  ts.forEachChild(node, visit);
-}
-visit(tree);
-assert.ok(contextUpdate);
-const declaration = name => `const ${name} = ${declarations.get(name)};`;
-const compiled = ts.transpileModule(`
-  ${declaration('saveInput')}
-  ${declaration('applyReferenceUpload')}
-  ${declaration('applyReferenceRotation')}
-  const renderContext = (selection, preferences, activeJob) => {
-    ${declaration('drawerKey')}
-    ${declaration('referenceContext')}
-    ${contextUpdate}
-  };
-  Object.assign(exports, { saveInput, applyReferenceUpload, applyReferenceRotation, renderContext });
-`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-
-function fixture(overrides = {}) {
-  const state = { modes: {}, versions: {}, subjects: {}, multi: {}, instructions: {}, selections: [], busy: [], inputRevisions: {}, refreshNonce: 0 };
-  const selectionRevision = { current: 0 }, referenceContext = { current: { key: 'old:style:v1' } };
-  const requests = [], exports = {};
-  const next = { id: 'next', projectId: 'old', image: 'new-image', inputRevision: 8, inputVersions: { style: 'new', recreate: 'new', reenact: 'new', 'multi-reenact': 'new', session: 'new' } };
-  runInNewContext(compiled, {
-    exports, blocked: false, selection: { projectId: 'old', inputRevision: 7, error: '读取失败' }, displayImage: undefined, inputSaving: { current: false }, taskInstruction: () => 'default-instruction', selectionRevision, referenceContext,
-    useRef: () => referenceContext, modeJob: () => ({ id: 'v1' }),
-    request: async message => { requests.push(message); return next; },
-    selectedSessions: () => [{id: '11111111-1111-4111-8111-111111111111', title: '小说', updatedAt: 1}],
-    subjectImage: () => 'retained-subject', multiSubjects: [{ id: 'a', subjectImage: 'a', role: '人物', detail: '帽子' }, { id: 'b', subjectImage: 'b', role: '物品', detail: '' }],
-    setBusy: value => state.busy.push(value), setError: value => { state.error = value; }, setHistoryOpen: value => { state.historyOpen = value; }, setGalleryOpen: value => { state.galleryOpen = value; },
-    setSelection: value => state.selections.push(value),
-    setInputRevisions: update => { state.inputRevisions = update(state.inputRevisions); },
-    setRefreshNonce: update => { state.refreshNonce = update(state.refreshNonce); },
-    setVersions: update => { state.versions = update(state.versions); },
-    setSubjectDrafts: update => { state.subjects = update(state.subjects); },
-    setMultiSubjectDrafts: update => { state.multi = update(state.multi); },
-    setInstructions: update => { state.instructions = update(state.instructions); },
-    ...overrides,
-  });
-  return { ...exports, state, requests, next, selectionRevision };
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+const subjects = [{ id: 'a', subjectImage: 'a', role: '人物', detail: '帽子' }, { id: 'b', subjectImage: 'b', role: '物品', detail: '' }];
+const input = mode => ({ selection: { projectId: 'A', inputRevision: 7 }, mode, referenceJobId: 'v1', image: 'new-reference',
+  instruction: 'retained instruction', subjectImage: 'retained subject', subjects, sessionIds: ['session-1'] });
+const selection = { id: 'next', projectId: 'A', inputRevision: 8, inputVersions: { style: 'new', recreate: 'new', reenact: 'new', 'multi-reenact': 'new', session: 'new' } };
+function fixture(send) {
+  const calls = [], scope = { context: {}, revision: 0 };
+  const writer = createInputWriter(async message => { calls.push(message); return send ? send(message) : selection; }, () => ({ ...scope }));
+  return { writer, calls, scope };
 }
 
-test('reference replacement uses CAS and keeps project identity across every mode', async () => {
+test('input writer sends CAS, immutable version identity and only the inputs for each mode', async () => {
   for (const mode of ['style', 'reenact', 'recreate', 'multi-reenact', 'session']) {
-    const ui = fixture();
-    await ui.applyReferenceUpload('new-image', mode, 'retained-instruction');
-    assert.equal(ui.requests[0].type, 'alchemy:update-project-input');
-    assert.equal(ui.requests[0].projectId, 'old');
-    assert.equal(ui.requests[0].expectedRevision, 7);
-    assert.equal(ui.requests[0].image, 'new-image');
-    assert.equal(ui.state.selections[0], ui.next);
-    assert.equal(ui.state.inputRevisions.old, 8);
-    assert.equal(ui.state.versions[`old:${mode}`], 'new');
-    assert.equal(ui.requests[0].referenceJobId, 'v1');
-    assert.equal(ui.requests[0].instruction, 'retained-instruction');
-    if (mode === 'multi-reenact') assert.deepEqual(Array.from(ui.requests[0].subjects, item => `${item.id}:${item.role}:${item.detail}`), ['a:人物:帽子', 'b:物品:']);
-    else assert.equal(ui.requests[0].subjectImage, ['recreate', 'session'].includes(mode) ? undefined : 'retained-subject');
-    if (mode === 'session') assert.deepEqual(Array.from(ui.requests[0].sessionIds), ['11111111-1111-4111-8111-111111111111']);
-    for (const key of ['subjects', 'multi', 'instructions']) assert.equal(Object.keys(ui.state[key]).length, 0, 'durable input must not be duplicated in session drafts');
-    assert.deepEqual(ui.state.busy, [true, false]);
-    assert.equal(ui.state.error, '');
-    assert.equal(ui.state.historyOpen, false);
+    const { writer, calls } = fixture();
+    const next = await writer.save(input(mode), () => {});
+    assert.equal(next, selection);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].type, 'alchemy:update-project-input');
+    assert.equal(calls[0].projectId, 'A');
+    assert.equal(calls[0].expectedRevision, 7);
+    assert.equal(calls[0].referenceJobId, 'v1');
+    assert.equal(calls[0].instruction, 'retained instruction');
+    assert.equal(calls[0].image, 'new-reference');
+    assert.equal(calls[0].subjectImage, ['style', 'reenact'].includes(mode) ? 'retained subject' : undefined);
+    assert.equal(calls[0].subjects, mode === 'multi-reenact' ? subjects : undefined);
+    assert.deepEqual(calls[0].sessionIds, mode === 'session' ? ['session-1'] : undefined);
+    const committed = creationContext(emptyCreationState, { type: 'adopt', selection: next, savedMode: mode });
+    assert.equal(committed.inputRevisions.A, 8);
+    assert.equal(committed.versions[`A:${mode}`], 'new');
+    assert.equal(writer.pending, false);
   }
 });
 
-test('rotation still requires an existing image and both entries respect busy protection', async () => {
-  const missing = fixture();
-  await assert.rejects(missing.applyReferenceRotation('rotated', 'style'), /当前无法修改图片/);
-  assert.equal(missing.requests.length, 0);
-  for (const entry of ['applyReferenceUpload', 'applyReferenceRotation']) {
-    const busy = fixture({ blocked: true, displayImage: 'old' });
-    await assert.rejects(busy[entry]('new', 'style'), /当前无法修改图片/);
-    assert.equal(busy.requests.length, 0);
-  }
-  const valid = fixture({ displayImage: 'old' });
-  await valid.applyReferenceRotation('rotated', 'style', 'instruction');
-  assert.equal(valid.requests[0].image, 'rotated');
-  assert.equal(valid.state.versions['old:style'], 'new');
-});
-
-test('project, mode, version and away/back changes invalidate an outstanding upload', async () => {
+test('navigation invalidates delivery while leaving the submitted durable write independent', async () => {
   for (const change of ['project', 'mode', 'version', 'away-back', 'selection']) {
-    let resolve;
-    const ui = fixture({ request: () => new Promise(done => { resolve = done; }) });
-    ui.renderContext({ projectId: 'old' }, { mode: 'style' }, { id: 'v1' });
-    const pending = ui.applyReferenceUpload('new-image', 'style', 'instruction');
-    if (change === 'selection') ui.selectionRevision.current++;
-    else {
-      ui.renderContext({ projectId: change === 'project' ? 'other' : 'old' }, { mode: change === 'mode' ? 'reenact' : 'style' }, { id: ['version', 'away-back'].includes(change) ? 'v2' : 'v1' });
-      if (change === 'away-back') ui.renderContext({ projectId: 'old' }, { mode: 'style' }, { id: 'v1' });
-    }
-    resolve(ui.next);
-    await pending;
-    assert.equal(ui.state.selections.length, 0, change);
-    for (const key of ['versions', 'subjects', 'multi', 'instructions']) assert.deepEqual(ui.state[key], {}, change);
-    assert.deepEqual(ui.state.busy, [true, false]);
+    const response = deferred(), { writer, calls, scope } = fixture(() => response.promise);
+    const pending = writer.save(input('style'), () => {});
+    if (change === 'selection') scope.revision++;
+    else scope.context = {};
+    response.resolve(selection);
+    assert.equal(await pending, undefined, change);
+    assert.equal(calls.length, 1);
+    assert.equal(writer.pending, false);
   }
 });
 
-test('ordinary rerenders preserve pending uploads; request failures preserve all inputs', async () => {
-  let resolve;
-  const ui = fixture({ request: () => new Promise(done => { resolve = done; }) });
-  const pending = ui.applyReferenceUpload('new-image', 'style');
-  ui.renderContext({ projectId: 'old' }, { mode: 'style' }, { id: 'v1' });
-  resolve(ui.next);
-  await pending;
-  assert.equal(ui.state.selections[0], ui.next);
-  const failed = fixture({ request: async () => { throw new Error('上传失败'); } });
-  await assert.rejects(failed.applyReferenceUpload('new-image', 'style'), /上传失败/);
-  assert.equal(failed.state.selections.length, 0);
-  for (const key of ['versions', 'subjects', 'multi', 'instructions']) assert.deepEqual(failed.state[key], {});
-  assert.deepEqual(failed.state.busy, [true, false]);
-});
-
-test('subject-only saves retain the server version and never write another historical draft', async () => {
-  const ui = fixture();
-  ui.next.inputVersions = { style: 'v1' };
-  ui.next.inputs = { style: { subjectImage: 'replacement', instruction: 'same instruction' } };
-  ui.state.subjects = { 'old:style:v1': 'previous draft', 'old:style:v0': 'historical draft' };
-  ui.state.instructions = { 'old:style:v1': 'previous instruction', 'other:style:v1': 'other project instruction' };
-  await ui.saveInput('style', undefined, 'same instruction', 'replacement');
-  assert.equal(ui.requests[0].image, undefined);
-  assert.equal(ui.requests[0].subjectImage, 'replacement');
-  assert.equal(ui.requests[0].projectId, 'old');
-  assert.equal(ui.state.versions['old:style'], 'v1');
-  assert.equal(ui.state.selections[0].inputs.style.subjectImage, 'replacement');
-  assert.equal(ui.state.subjects['old:style:v1'], undefined);
-  assert.equal(ui.state.subjects['old:style:v0'], 'historical draft');
-  assert.equal(ui.state.instructions['old:style:v1'], undefined);
-  assert.equal(ui.state.instructions['other:style:v1'], 'other project instruction');
-  assert.equal(ui.state.subjects['old:style:new'], undefined);
-  assert.equal(ui.state.subjects['old:style'], undefined);
-});
-
-test('CAS rejection preserves input and releases the transaction for retry', async () => {
+test('ordinary renders keep the input lease, failed writes release it for retry', async () => {
+  const response = deferred(), ui = fixture(() => response.promise);
+  const pending = ui.writer.save(input('style'), () => {});
+  assert.equal(ui.writer.pending, true);
+  response.resolve(selection);
+  assert.equal(await pending, selection);
   let fail = true;
-  const sent = [];
-  const ui = fixture({ request: async message => {
-    sent.push(message);
-    if (fail) throw new Error('项目输入已变化，请刷新后重试');
-    return ui.next;
-  } });
-  await assert.rejects(ui.saveInput('reenact', 'new', 'instruction'), /项目输入已变化/);
-  assert.equal(sent[0].expectedRevision, 7);
-  assert.equal(ui.state.selections.length, 0);
-  assert.deepEqual(ui.state.subjects, {});
+  const retry = fixture(() => { if (fail) throw new Error('项目输入已变化'); return selection; });
+  await assert.rejects(retry.writer.save(input('style'), () => {}), /项目输入已变化/);
+  assert.equal(retry.writer.pending, false);
   fail = false;
-  await ui.saveInput('reenact', 'new', 'instruction');
-  assert.equal(ui.state.selections.length, 1);
+  assert.equal(await retry.writer.save(input('style'), () => {}), selection);
 });
 
-test('input transaction excludes duplicate writes before React rerenders', async () => {
-  let finish;
-  const sent = [];
-  const ui = fixture({ request: message => { sent.push(message); return new Promise(resolve => { finish = resolve; }); } });
-  const pending = ui.saveInput('style', 'first', 'instruction');
-  await assert.rejects(ui.saveInput('style', 'second', 'instruction'), /当前无法修改图片/);
-  assert.equal(sent.length, 1);
-  finish(ui.next); await pending;
+test('synchronous duplicate writes are rejected before a render and cannot unlock the first write', async () => {
+  const response = deferred(), { writer, calls } = fixture(() => response.promise);
+  const pending = writer.save(input('style'), () => {});
+  await assert.rejects(writer.save(input('style'), () => {}), /当前无法修改图片/);
+  assert.equal(writer.pending, true);
+  assert.equal(calls.length, 1);
+  response.resolve(selection); await pending;
+  assert.equal(writer.pending, false);
+});
+
+test('a successful subject-only save removes its working draft and preserves historical drafts', async () => {
+  const next = { ...selection, inputVersions: { style: 'v1' }, inputs: { style: { subjectImage: 'replacement' } } };
+  const { writer, calls } = fixture(() => next);
+  const committed = await writer.save({ ...input('style'), image: undefined, subjectImage: 'replacement' }, () => {});
+  assert.equal(calls[0].image, undefined);
+  const before = { ...emptyCreationState, subjectDrafts: { 'A:style:v1': 'old draft', 'A:style:v0': 'historical' },
+    instructions: { 'A:style:v1': 'old instruction', 'B:style:new': 'other project' } };
+  const after = creationContext(before, { type: 'adopt', selection: committed, savedMode: 'style' });
+  assert.deepEqual(after.subjectDrafts, { 'A:style:v0': 'historical' });
+  assert.deepEqual(after.instructions, { 'B:style:new': 'other project' });
+  assert.equal(after.versions['A:style'], 'v1');
+  assert.equal(before.subjectDrafts['A:style:v1'], 'old draft', 'previous state is immutable');
+});
+
+
+test('accepted input commits in the same continuation as its lease check', async () => {
+  let resolve;
+  const response = new Promise(done => { resolve = done; });
+  const scope = { context: {}, revision: 0 }, oldContext = scope.context;
+  const writer = createInputWriter(() => response, () => ({ ...scope }));
+  const commits = [];
+  const pending = writer.save(input('style'), next => commits.push({ context: scope.context, next }));
+  resolve(selection);
+  queueMicrotask(() => { scope.context = {}; });
+  await pending;
+  assert.equal(commits.length, 1);
+  assert.equal(commits[0].context, oldContext, 'no unguarded consumer continuation can overwrite the next context');
+  assert.notEqual(scope.context, oldContext);
 });

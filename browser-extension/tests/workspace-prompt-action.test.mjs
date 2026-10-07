@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { creationContext, emptyCreationState, resolveCreation } from '../lib/creation-context.ts';
 
 // Exercise the actual workspace action derivation and submitted input for each path.
 const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
@@ -22,6 +23,10 @@ function fixture(mode, overrides = {}) {
     selection: { image: 'reference' }, referenceError: undefined, displayImage: 'reference', subjectDraftKey: mode => `project:${mode}:new`, subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
     taskInstruction: () => 'instruction', defaultInstructions: { [mode]: 'instruction' }, subjectImage: () => 'subject',
     multiSubjects: [{ id: 'one', subjectImage: 'one' }, { id: 'two', subjectImage: 'two' }], multiPrompt: 'instruction', multiStale: false,
+    contextFor: mode => resolveCreation({ ...emptyCreationState, instructions: { [`project:${mode}:v1`]: (overrides.taskInstruction || (() => 'instruction'))() } },
+      { projectId: 'project' }, { id: 'project', jobs: [{ ...overrides.job, id: 'v1', mode, result: overrides.result }] }, {}, mode, 'instruction'),
+    modeJob: () => overrides.job,
+    dispatchCreation: action => Object.assign(drafts, creationContext(emptyCreationState, action).subjectDrafts),
     start: (mode, input) => calls.push({ mode, input }), ...overrides,
     setSubjectDrafts: update => Object.assign(drafts, update(drafts)),
   });

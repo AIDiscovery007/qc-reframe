@@ -1,5 +1,6 @@
 import { browser } from "wxt/browser";
 import type { Mode, Selection } from "./types";
+import { operationFor, UI_RESPONSE_TIMEOUT } from "./operation-policy";
 
 export type UiState = {
   preferences: { paired: boolean; mode: Mode; showHiddenProjects?: boolean };
@@ -32,11 +33,11 @@ function connectedRequest(message: Record<string, unknown>, signal?: AbortSignal
 export async function request<T>(message: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   try {
-    const response = ["alchemy:sessions-list", "alchemy:sessions-index", "alchemy:update-project-input", "alchemy:start"].includes(String(message.type))
+    const response = operationFor(message.type)?.transport === "port"
       ? await connectedRequest(message, signal) : await Promise.race([
       browser.runtime.sendMessage(message),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("扩展响应超时，请重新加载扩展并刷新网页。")), 35_000);
+        timer = setTimeout(() => reject(new Error("扩展响应超时，请重新加载扩展并刷新网页。")), UI_RESPONSE_TIMEOUT);
       }),
     ]);
     if (!response) throw new Error("扩展未响应，请重新加载扩展并刷新网页。");

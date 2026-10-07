@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import * as operationPolicy from "../lib/operation-policy.ts";
 
 const build = new URL("../.output/chrome-mv3/", import.meta.url);
 
@@ -1360,7 +1361,7 @@ function portClient(bg, clock, sender = { id: 'test', url: 'chrome-extension://t
     },
   };
   const exports = {};
-  runInNewContext(clientCode, { exports, require: () => ({ browser: { runtime } }), DOMException, ...clock });
+  runInNewContext(clientCode, { exports, require: name => name === "./operation-policy" ? operationPolicy : ({ browser: { runtime } }), DOMException, ...clock });
   return { request: exports.request, ports };
 }
 const flushRequest = () => new Promise(resolve => setImmediate(resolve));
@@ -1368,6 +1369,7 @@ const transportProject = 'a'.repeat(64);
 const transportReference = { id: 'input-1', projectId: transportProject, image: 'reference', inputRevision: 1 };
 const transportMessages = [
   { type: 'alchemy:sessions-list' },
+  { type: 'alchemy:sessions-index', action: 'status' },
   { type: 'alchemy:update-project-input', projectId: transportProject, expectedRevision: 1, mode: 'session', sessionIds: ['00000000-0000-0000-0000-000000000001'], instruction: '封面' },
   { type: 'alchemy:start', projectId: transportProject, id: 'input-1', inputRevision: 1, mode: 'session', sessionIds: ['00000000-0000-0000-0000-000000000001'], instruction: '封面' },
 ];
@@ -1381,9 +1383,10 @@ async function slowTransport() {
       pending.push({ signal: options.signal, complete() {
         if (options.signal.aborted) return;
         const value = url.endsWith('/sessions/list') ? { data: [{ id: 'chosen', title: '小说', updatedAt: 1 }], nextCursor: null }
+          : url.endsWith('/sessions/index') ? { state: 'building', indexed: 1, total: 2 }
           : url.endsWith('/jobs') ? { id: 'job', mode: 'session', projectId: transportProject, stage: 'started' }
           : { ...transportReference, inputRevision: 2 };
-        if (!url.endsWith('/sessions/list')) writes++;
+        if (!url.includes('/sessions/')) writes++;
         resolve({ ok: true, json: async () => value });
       } });
     });
@@ -1408,7 +1411,7 @@ for (const message of transportMessages) {
     flow.pending[0].complete();
     const value = await result;
     assert.ok(value);
-    assert.equal(flow.writes, message.type === 'alchemy:sessions-list' ? 0 : 1);
+    assert.equal(flow.writes, message.type.startsWith('alchemy:sessions-') ? 0 : 1);
   });
   test(`${message.type} HTTP deadline reaches UI and prevents the delayed read from writing`, async () => {
     const flow = await slowTransport();

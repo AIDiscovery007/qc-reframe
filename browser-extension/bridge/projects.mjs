@@ -24,7 +24,7 @@ export async function recoverProjectDeletion(dataDir, legacyDir = dataDir) {
   await rm(path);
 }
 
-export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, readReference, images }) {
+export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, readReference, images, saveJob }) {
   const records = new Map();
   const pending = new Map();
   const indexedJobs = new Map();
@@ -121,7 +121,12 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
     }
     if (job.projectId !== project.id) {
       job.projectId = project.id;
-      await writeFile(join(dataDir, `${job.id}.json`), JSON.stringify(job), { mode: 0o600 });
+      if (saveJob) await saveJob(job, { touch: false });
+      else {
+        const path = join(dataDir, `${job.id}.json`), temporary = `${path}.${randomUUID()}.tmp`;
+        await writeFile(temporary, JSON.stringify(job), { mode: 0o600 });
+        await rename(temporary, path);
+      }
     }
     updateJob(job);
   }
@@ -137,7 +142,7 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
       if (["style", "recreate", "reenact", "multi-reenact", "session"].includes(job.mode) && !modes[job.mode]) {
         modes[job.mode] = { status: job.status, hasImage: Boolean(job.generations?.some((generation) => generation.status === "completed")) };
       }
-      if (job.createdAt > updatedAt) updatedAt = job.createdAt;
+      if ((job.updatedAt || job.createdAt) > updatedAt) updatedAt = job.updatedAt || job.createdAt;
       for (const generation of job.generations || []) {
         if (generation.createdAt > updatedAt) updatedAt = generation.createdAt;
         if (generation.status === "completed" && (!cover || generation.createdAt > coverDate ||
@@ -159,8 +164,11 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
   };
   return {
     register,
-    saveInput(id, { image, mode, input, referenceJobId }) { return edit(async () => {
+    saveInput(id, { image, mode, input, referenceJobId, expectedRevision }) { return edit(async () => {
       const previous = records.get(id);
+      if (!previous) throw Object.assign(new Error("项目不存在"), { status: 404 });
+      if (expectedRevision !== undefined && expectedRevision !== (previous.inputRevision || 0))
+        throw Object.assign(new Error("项目输入已在其他窗口更新，请重新打开项目"), { status: 409 });
       const imageAsset = image ? await images.put(image) : previous.imageAsset;
       const referenceChanged = imageAsset !== previous.imageAsset;
       const history = projectJobs(id);
@@ -278,13 +286,5 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
           inputRevision: project.inputRevision || 0, inputVersions: project.inputVersions || {}, ...(project.inputs ? { inputs } : {}) };
       } catch (error) { if (error.code !== "ENOENT") throw error; }
     },
-    touch(id) { return edit(async () => {
-      const previous = records.get(id);
-      if (!previous) return;
-      const project = { ...previous, updatedAt: new Date().toISOString() };
-      await save(project);
-      records.set(id, project);
-      invalidate(id);
-    }); },
   };
 }

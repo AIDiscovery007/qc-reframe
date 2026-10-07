@@ -60,8 +60,12 @@
 | `entrypoints/content.ts`、`lib/image-action-placement.ts` | 网页选图、悬浮按钮避让、closed Shadow DOM 浮层及焦点行为。 |
 | `entrypoints/background.ts`、`lib/bridge.ts`、`lib/client.ts` | 扩展消息、配对、受限后台请求；令牌留在扩展后台。 |
 | `entrypoints/popup/`、`entrypoints/workspace/` | 共用 React 业务界面；轻量浮层/弹窗保留，独立扩展工作台提供分栏、任务中心及宽版设置。 |
+| `lib/creation-context.ts` | 创作上下文的草稿、版本与历史优先级，输入写入防重入及迟到响应隔离；导航与界面效果留在 App。 |
+| `lib/generation-session.ts`、`lib/use-generation.ts` | 工作台与快捷界面共用的生图资格、提交、取消和资源读取，以及 React adapter。 |
+| `lib/operation-policy.ts` | UI 请求来源、通信方式及超时的共同目录；不能替代发送方、参数与 HTTP 鉴权。 |
 | `bridge/cli.mjs` | 实际 CLI 来源、版本、每日检查及受限独立版/npm/Homebrew 升级；与模型和任务互斥。 |
 | `bridge/server.mjs`、`bridge/projects.mjs`、`bridge/images.mjs`、`bridge/storage.mjs` | 本机 HTTP 服务、任务与项目持久化、共享图片存储、迁移与回收。 |
+| `bridge/task-runtime.mjs`、`bridge/task-records.mjs` | 独立任务占用/取消/收尾，任务快照有序原子保存、提交发布及重启恢复。 |
 | `bridge/codex-rpc.mjs`、`bridge/agent.mjs` | Codex CLI app-server stdio JSON-RPC、图片与 skill 输入、逆向结果校验。 |
 | `bridge/sessions.mjs`、`entrypoints/workspace/SessionPicker.tsx` | 本机会话列表与整会话选择、正文过滤及私有快照；通过既有后台与 bridge 鉴权链路访问。 |
 | `bridge/inspection.mjs` | 逆向专用只读图像工具；仅按当次输入编号裁切、放大和取样，内存返回图像与元信息。 |
@@ -71,6 +75,8 @@
 | `scripts/manage.mjs`、`scripts/preview.mjs`、`tests/` | 安装及服务管理、明确标记的 UI 示例、隔离的自动测试。 |
 
 ## 连接、模型和图片边界
+
+模块职责与提交时序见 [架构与维护边界](docs/architecture.md)。输入响应的上下文核对与界面 commit 必须同步完成；取消不能提前释放仍在执行或保存的任务占用；任务 feed 只发布已提交快照，未提交记录阻止图片回收。新增业务规则先落到拥有该规则的 module，并通过其真实 interface 验证，避免两端 UI 或预览各自复制规则。
 
 - 逆向、生图与模型验证的 `thread/start` 默认设置 `ephemeral: true`；结果从实时事件获取并保存到 Reframe，不依赖 Codex 会话日志。仅显式设置 `ALCHEMY_PERSIST_CODEX_SESSIONS=1` 时为逆向/生图保留会话，模型验证始终临时；开关只作用于当前服务进程，不写入运行配置。失败或取消不回退持久会话。旧会话仅按已保存的 thread ID 核对并归档，不按提示词标题清理。
 

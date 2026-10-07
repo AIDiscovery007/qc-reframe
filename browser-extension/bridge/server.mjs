@@ -1,9 +1,11 @@
 import { createSessionStore, sessionIds } from "./sessions.mjs";
 import { prepareRestart } from "./restart.mjs";
 import { createTaskFeed } from "./task-feed.mjs";
+import { createTaskRecords } from "./task-records.mjs";
+import { createTaskRuntime } from "./task-runtime.mjs";
 import { createServer } from "node:http";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFile, writeFile, readdir, rename, lstat } from "node:fs/promises";
+import { readFile, writeFile, lstat } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAgent } from "./agent.mjs";
@@ -117,7 +119,6 @@ export async function createBridge({
   const instanceId = randomUUID();
   const paths = await migrateStorage(dataDir);
   sessions ||= createSessionStore({ cwd: root, dataDir: paths.records });
-  let sessionReaders = 0, compatibilityReaders = 0;
   models ||= await createModelStore({ dataDir: paths.config, cwd: root });
   cli ||= createCliManager({ onUpdated: async () => {
     try {
@@ -145,24 +146,13 @@ export async function createBridge({
     token = randomBytes(32).toString("hex");
     await writeFile(tokenPath, token, { mode: 0o600 });
   }
-  const jobs = new Map();
   const taskFeed = createTaskFeed();
-  const controllers = new Map();
   let projects;
-  let saveTail = Promise.resolve();
-  const save = (job) => {
-    // Serialize metadata writes, not inference; cancellation and completion can overlap.
-    saveTail = saveTail.catch(() => {}).then(async () => {
-      const path = join(paths.records, `${job.id}.json`);
-      const committed = JSON.stringify(job);
-      await writeFile(`${path}.tmp`, committed, { mode: 0o600 });
-      await rename(`${path}.tmp`, path);
-      projects?.updateJob(job);
-      await projects?.touch(job.projectId);
-      taskFeed.update(JSON.parse(committed));
-    });
-    return saveTail;
-  };
+  const records = await createTaskRecords({ dataDir: paths.records, onCommit: (job, committed) => {
+    projects?.updateJob(job);
+    taskFeed.update(committed);
+  } });
+  const { jobs, save } = records;
   const storedImage = async (record, subject = false, asPath = false) => {
     const asset = record[subject ? "subjectAsset" : "imageAsset"];
     if (asset !== undefined) {
@@ -191,33 +181,14 @@ export async function createBridge({
   const saveSubjects = (subjects) => Promise.all(subjects.map(async ({ id, role, detail, bytes, extension }) => ({
     id, role, detail, subjectAsset: await images.put({ bytes, extension }),
   })));
-  for (const file of await readdir(paths.records)) {
-    if (!/^[\da-f-]{36}\.json$/.test(file)) continue;
-    try {
-      const job = JSON.parse(await readFile(join(paths.records, file), "utf8"));
-      if (`${job.id}.json` !== file || typeof job.createdAt !== "string") continue;
-      if (job.status === "running") {
-        job.status = "failed";
-        job.error = "本机服务已重启，请重新逆向";
-        await save(job);
-      }
-      for (const generation of job.generations || []) {
-        if (generation.status === "running") {
-          Object.assign(generation, { status: "failed", stage: "生图中断", error: "本机服务已重启，请重新生成图片" });
-          await save(job);
-        }
-      }
-      jobs.set(job.id, job);
-      taskFeed.update(job);
-    } catch {
-      /* A damaged history record must not prevent startup. */
-    }
-  }
-  projects = await createProjectStore({ dataDir: paths.records, legacyDir: dataDir, jobs, images, readReference: async (id) => decodeImage(await storedImage(jobs.get(id))) });
+  projects = await createProjectStore({ dataDir: paths.records, legacyDir: dataDir, jobs, images, saveJob: save, readReference: async (id) => decodeImage(await storedImage(jobs.get(id))) });
   for (const job of jobs.values()) taskFeed.update(job);
   await images.collect();
   await thumbnails.collect();
   const gallery = createGalleryStore({ projects, images });
+  const runtime = createTaskRuntime({ save, onProgress: job => projects.updateJob(job),
+    onIdle: () => collectIdleImages(), onFailure: (settings, error) => models.invalidate(settings, error) });
+  const codexBusy = () => runtime.busy || models.busy || sessions.busy;
   let mutationTail = Promise.resolve();
   let collectionPending = false;
   const acquireMutation = async () => {
@@ -231,7 +202,7 @@ export async function createBridge({
     if (!collectionPending) return;
     const release = await acquireMutation();
     try {
-      if (!controllers.size) { await images.collect(); await thumbnails.collect(); collectionPending = false; }
+      if (!runtime.count && records.canCollect) { await images.collect(); await thumbnails.collect(); collectionPending = false; }
     }
     catch (error) { console.error("回收图片失败:", error.message); }
     finally { release(); }
@@ -304,7 +275,7 @@ export async function createBridge({
         const controller = new AbortController();
         const abort = () => controller.abort(bad("请求已取消", 499));
         res.once("close", abort);
-        compatibilityReaders++;
+        const releaseReader = runtime.read();
         try {
           if (res.destroyed || req.aborted) abort();
           controller.signal.throwIfAborted();
@@ -314,7 +285,7 @@ export async function createBridge({
         } finally {
           res.removeListener("close", abort);
           releaseMutation = await acquireMutation();
-          compatibilityReaders--;
+          releaseReader();
         }
         controller.signal.throwIfAborted();
         if (res.destroyed || req.aborted) throw bad("请求已取消", 499);
@@ -329,7 +300,7 @@ export async function createBridge({
         const controller = sessionReadController = new AbortController();
         res.once("close", abortSessionRead);
         sessionReadTimer = setTimeout(() => controller.abort(bad("读取会话超时，请重试", 504)), sessionReadTimeoutMs);
-        sessionReaders++;
+        const releaseReader = runtime.read();
         releaseMutation?.(); releaseMutation = undefined;
         let result, abortCompatibility;
         try {
@@ -345,7 +316,7 @@ export async function createBridge({
         finally {
           if (abortCompatibility) controller.signal.removeEventListener("abort", abortCompatibility);
           releaseMutation = await acquireMutation();
-          sessionReaders--;
+          releaseReader();
         }
         assertSessionRequestActive();
         if (shuttingDown || deletionFailed) throw bad("服务状态已变化，请重新打开项目后重试", 503);
@@ -375,8 +346,8 @@ export async function createBridge({
           ready: Boolean(skill),
           serviceReady: true, skillReady: Boolean(skill), cli: cliSummary,
           compatibility: compatibility.snapshot(),
-          active: controllers.size + Number(models.busy) + Number(cliBusy()),
-          visibleActive: [...controllers.values()].filter((controller) => showHidden || !projects.isHidden(controller.projectId)).length + Number(models.busy) + Number(cliBusy()),
+          active: runtime.count + Number(models.busy) + Number(cliBusy()),
+          visibleActive: runtime.visibleCount(id => showHidden || !projects.isHidden(id)) + Number(models.busy) + Number(cliBusy()),
           hiddenProjectIds: projects.hiddenProjectIds,
           cliBusy: cliBusy(),
           modelBusy: models.busy,
@@ -413,7 +384,7 @@ export async function createBridge({
       if (req.method === "POST" && ["/cli/check", "/cli/update"].includes(path)) {
         const body = await readBody(req);
         if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) throw bad("Codex 管理操作不接受命令或路径参数。");
-        if (path.endsWith("/update") && (controllers.size || models.busy || sessionReaders || compatibilityReaders || sessions.busy)) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
+        if (path.endsWith("/update") && codexBusy()) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
         if (path.endsWith("/update")) {
           cliStarting = true;
           try { json(202, await cli.update()); }
@@ -421,14 +392,14 @@ export async function createBridge({
         } else {
           const status = await cli.check();
           const report = cliBusy() ? compatibility.snapshot() : await compatibility.getCompatibility({ force: true });
-          if (!cliBusy() && !sessionReaders && !compatibilityReaders && !sessions.busy) sessions.resetReader?.();
+          if (!cliBusy() && !runtime.reading && !sessions.busy) sessions.resetReader?.();
           json(200, { ...status, compatibility: report });
         }
         return;
       }
       if (req.method === "POST" && ["/models/refresh", "/models/verify"].includes(path)) {
         if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-        if (controllers.size || models.busy || sessionReaders || compatibilityReaders || sessions.busy) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
+        if (codexBusy()) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
         const body = await readBody(req);
         if (path.endsWith("/verify") && (typeof body.model !== "string" || body.model.length > 200)) throw bad("请选择有效模型");
         try { json(path.endsWith("/verify") ? 202 : 200, path.endsWith("/verify") ? await models.start(body.model, body.reasoningEffort) : await models.refresh()); }
@@ -437,7 +408,7 @@ export async function createBridge({
       }
       if (req.method === "POST" && path === "/restart") {
         if (!allowShutdown || !restart) throw bad("此服务不支持插件内重启。请在原终端停止，再在插件目录运行 npm start。", 409);
-        if (controllers.size || models.busy || cliBusy() || sessionReaders || compatibilityReaders || sessions.busy) throw bad("任务、模型验证或 Codex 操作执行中，请等待完成后再重启。", 409);
+        if (codexBusy() || cliBusy()) throw bad("任务、模型验证或 Codex 操作执行中，请等待完成后再重启。", 409);
         const nextRestartId = randomUUID();
         let commit;
         try { commit = await restart({ root, dataDir, port: server.address().port, instanceId, restartId: nextRestartId, skillPath, generationSkillPath }); }
@@ -459,7 +430,7 @@ export async function createBridge({
         return;
       }
       if (req.method === "POST" && path === "/shutdown" && allowShutdown) {
-        if (controllers.size || models.busy || cliBusy() || sessionReaders || compatibilityReaders || sessions.busy) throw bad("任务或 Codex 升级执行中，请等待完成后再停止服务。", 409);
+        if (codexBusy() || cliBusy()) throw bad("任务或 Codex 升级执行中，请等待完成后再停止服务。", 409);
         shuttingDown = true;
         json(200, { stopped: true });
         server.close();
@@ -516,12 +487,12 @@ export async function createBridge({
           throw bad("请选择有效项目");
         const unique = [...new Set(ids)];
         const history = unique.flatMap((id) => projects.get(id)?.jobs || []);
-        if (history.some((job) => job.status === "running" || controllers.has(job.id) || job.generations?.some((item) => item.status === "running" || controllers.has(item.id))))
+        if (history.some((job) => job.status === "running" || runtime.has(job.id) || job.generations?.some((item) => item.status === "running" || runtime.has(item.id))))
           throw bad("所选项目仍在逆向或生图，请完成或取消任务后再删除", 409);
         try {
           const deletedIds = await projects.remove(unique);
           taskFeed.touch();
-          if (!controllers.size) { await images.collect(); await thumbnails.collect(); }
+          if (!runtime.count && records.canCollect) { await images.collect(); await thumbnails.collect(); }
           else collectionPending = true;
           json(200, { deletedIds });
         }
@@ -569,9 +540,9 @@ export async function createBridge({
         }
         if (projects.summary(project.id)?.inputRevision !== body.expectedRevision) throw bad("项目输入已在其他窗口更新，请重新打开项目", 409);
         if (body.mode === "session") assertSessionRequestActive();
-        await projects.saveInput(project.id, { image, mode: body.mode, input, referenceJobId: body.referenceJobId });
+        await projects.saveInput(project.id, { image, mode: body.mode, input, referenceJobId: body.referenceJobId, expectedRevision: body.expectedRevision });
         collectionPending = true;
-        if (!controllers.size) {
+        if (!runtime.count && records.canCollect) {
           try { await images.collect(); await thumbnails.collect(); collectionPending = false; }
           catch (error) { console.error("回收图片失败:", error.message); }
         }
@@ -688,11 +659,7 @@ export async function createBridge({
           return;
         }
         if (req.method === "POST" && generationMatch[3] === "cancel") {
-          if (generation.status === "running") {
-            Object.assign(generation, { status: "cancelled", stage: "已取消" });
-            controllers.get(generation.id)?.abort();
-            await save(job);
-          }
+          await runtime.cancel(job, generation);
           json(200, job);
           return;
         }
@@ -701,7 +668,7 @@ export async function createBridge({
         if (job.mode === "style" && !job.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
         if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
         if (models.busy) throw bad("正在验证模型，请稍候", 409);
-        if (job.generations?.some((item) => item.status === "running" || controllers.has(item.id)))
+        if (job.generations?.some((item) => item.status === "running" || runtime.has(item.id)))
           throw bad("这条提示词仍在生图，请等待完成或取消", 409);
         const body = await readBody(req);
         if (!["zh", "en"].includes(body.language)) throw bad("无效提示词语言");
@@ -734,40 +701,28 @@ export async function createBridge({
         const subjectImagePath = subjectAsset ? images.path(subjectAsset) : undefined;
         const subjects = multi ? await saveSubjects(decodedSubjects) : undefined;
         const subjectImagePaths = subjects?.map((item) => images.path(item.subjectAsset));
-        const controller = new AbortController();
-        controller.projectId = job.projectId;
-        controllers.set(id, controller);
+        runtime.reserve(id, job.projectId);
         const next = { id, model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
         job.generations ||= [];
         job.generations.push(next);
         try {
           await save(job);
         } catch (error) {
-          controllers.delete(id);
+          runtime.release(id);
           job.generations.pop();
           throw error;
         }
         json(202, job);
-        void (async () => {
-          try {
+        void runtime.run(job, next, { modelSettings, completedStage: "图片已生成", failedStage: "生图失败",
+          execute: async ({ signal, progress }) => {
             const output = await generator({ mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, prompt, negativePrompt: next.negativePrompt,
-              skillPath: generationSkillPath, cwd: root, signal: controller.signal, modelSettings,
-              onProgress: (update) => { if (next.status === "running") { Object.assign(next, update); projects.updateJob(job); } },
-            });
-            if (next.status === "running") {
-              if (!["png", "jpeg", "webp"].includes(output.extension)) throw new Error("生图返回了不支持的文件格式");
-              const imageAsset = await images.put(output);
-              if (next.status === "running") Object.assign(next, { status: "completed", stage: "图片已生成", extension: output.extension, imageAsset, revisedPrompt: output.revisedPrompt });
-            }
-          } catch (error) {
-            if (next.status === "running") Object.assign(next, { status: "failed", stage: "生图失败", error: error.message, recovery: error.recovery, code: error.code });
-            await models.invalidate(modelSettings, error).catch((failure) => console.error("保存模型状态失败:", failure.message));
-          } finally {
-            await save(job).catch((error) => console.error("保存生图任务失败:", error.message));
-            controllers.delete(id);
-            await collectIdleImages();
-          }
-        })();
+              skillPath: generationSkillPath, cwd: root, signal, modelSettings, onProgress: progress });
+            signal.throwIfAborted();
+            if (!["png", "jpeg", "webp"].includes(output.extension)) throw new Error("生图返回了不支持的文件格式");
+            const imageAsset = await images.put(output);
+            return { extension: output.extension, imageAsset, revisedPrompt: output.revisedPrompt };
+          },
+        });
         return;
       }
       const idMatch = /^\/jobs\/([\da-f-]{36})(\/(?:cancel|reference))?$/.exec(path);
@@ -807,12 +762,7 @@ export async function createBridge({
           return;
         }
         if (req.method === "POST" && idMatch[2] === "/cancel") {
-          if (job.status === "running") {
-            job.status = "cancelled";
-            job.stage = "已取消";
-            controllers.get(job.id)?.abort();
-            await save(job);
-          }
+          await runtime.cancel(job);
           json(200, job);
           return;
         }
@@ -892,9 +842,7 @@ export async function createBridge({
       if (multi) reenact.subjects = await saveSubjects(decodedSubjects);
       if (selectedSessions) assertSessionRequestActive();
       const id = randomUUID();
-      const controller = new AbortController();
-      controller.projectId = project.id;
-      controllers.set(id, controller);
+      runtime.reserve(id, project.id);
       const imagePath = images.path(imageAsset);
       const subjectImagePath = subjectAsset ? images.path(subjectAsset) : undefined;
       const job = {
@@ -922,65 +870,29 @@ export async function createBridge({
         Object.assign(job, { status: "failed", stage: "任务保存失败", error: "任务未启动，请重试" });
         await save(job).catch((failure) => console.error("保存失败任务状态失败:", failure.message));
         projects.updateJob(job);
-        taskFeed.update(job);
-        controllers.delete(id);
+        runtime.release(id);
         throw error;
       }
-      jobs.set(id, job);
-      taskFeed.touch();
       json(202, job);
-      void (async () => {
-        try {
+      void runtime.run(job, job, { modelSettings, completedStage: "逆向完成", failedStage: "逆向失败",
+        execute: async ({ signal, progress }) => {
           let sessionContext;
           if (selectedSessions) {
-            job.stage = "正在读取所选会话…";
-            projects.updateJob(job);
-            sessionContext = await sessions.capture(selectedSessions, { jobId: id, signal: controller.signal });
-            controller.signal.throwIfAborted();
+            progress({ stage: "正在读取所选会话…" });
+            sessionContext = await sessions.capture(selectedSessions, { jobId: id, signal });
+            signal.throwIfAborted();
             const { sources, hash, capturedAt, messageCount, attachmentCount } = sessionContext;
             job.sessionContext = { sources, snapshotId: id, hash, capturedAt, messageCount, attachmentCount };
             await save(job);
           }
-          controller.signal.throwIfAborted();
-          const result = await agent({
-            sessionContext,
-            imagePath,
-            subjectImagePath,
+          signal.throwIfAborted();
+          const result = await agent({ sessionContext, imagePath, subjectImagePath,
             subjectImagePaths: reenact?.subjects?.map((item) => images.path(item.subjectAsset)),
-            subjects: reenact?.subjects,
-            basePrompt: reenact?.basePrompt,
-            instruction: job.instruction,
-            mode: job.mode,
-            skillPath,
-            cwd: root,
-            signal: controller.signal,
-            modelSettings,
-            onProgress: (update) => {
-              if (job.status === "running") { Object.assign(job, update); projects.updateJob(job); }
-            },
-          });
-          if (job.status === "running")
-            Object.assign(job, {
-              result,
-              status: "completed",
-              stage: "逆向完成",
-            });
-        } catch (error) {
-          if (job.status === "running")
-            Object.assign(job, {
-              status: "failed",
-              error: error.message, recovery: error.recovery, code: error.code,
-              stage: "逆向失败",
-            });
-          await models.invalidate(modelSettings, error).catch((failure) => console.error("保存模型状态失败:", failure.message));
-        } finally {
-          await save(job).catch((error) =>
-            console.error("保存任务失败:", error.message),
-          );
-          controllers.delete(id);
-          await collectIdleImages();
-        }
-      })();
+            subjects: reenact?.subjects, basePrompt: reenact?.basePrompt, instruction: job.instruction,
+            mode: job.mode, skillPath, cwd: root, signal, modelSettings, onProgress: progress });
+          return { result };
+        },
+      });
     } catch (error) {
       if (!res.headersSent && !res.destroyed)
         json(error.status || 500, {
@@ -999,7 +911,7 @@ export async function createBridge({
     taskFeed.close();
     cli.close();
     models.close();
-    for (const controller of controllers.values()) controller.abort();
+    runtime.close();
   });
   return { server, token, tokenPath };
 }

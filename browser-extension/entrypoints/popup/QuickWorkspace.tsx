@@ -1,7 +1,7 @@
 import RecoveryAction from "./RecoveryAction";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { normalizeImage } from "../../lib/image";
-import { request } from "../../lib/client";
+import { useGeneration } from "../../lib/use-generation";
 import type { Job, Mode, Selection } from "../../lib/types";
 import ImagePreview from "./ImagePreview";
 import LoadingPlaceholder from "./LoadingPlaceholder";
@@ -10,12 +10,12 @@ import Icon from "./Icon";
 
 const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
 
-export default function QuickWorkspace({ revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, instruction, job, disabled, modeDisabled, reverseDisabled, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, generationDisabled, generationHint }: {
+export default function QuickWorkspace({ revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, instruction, job, disabled, modeDisabled, reverseDisabled, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, onGenerationViewUpdate, generationDisabled, generationHint }: {
   revealPrompt?: number; targetGeneration?: string; contextKey: string; selection?: Selection; title?: string; mode: Mode; subject: string; instruction: string; job?: Job;
   generationHint?: string; generationDisabled: boolean; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; status?: string; stale: boolean; cancelling: boolean; copied: boolean; lang: "zh" | "en"; versions: ReactNode;
   onMode(mode: Mode): void; onSubject(image: string): void | Promise<void>; onAvailability(available: boolean): void;
   onInstruction(value: string): void; onReference(file?: File): void; onRotateReference(image: string): Promise<void>; onSwap(): void;
-  onReverse(): void; onCancel(): void; onCopy(): void; onLanguage(lang: "zh" | "en"): void; onWorkspace(): void; onUpdate(job: Job): void;
+  onReverse(): void; onCancel(): void; onCopy(): void; onLanguage(lang: "zh" | "en"): void; onWorkspace(): void; onUpdate(job: Job): void; onGenerationViewUpdate(): void;
 }) {
   const [selected, select] = useState<"reference" | "subject">("reference");
   const [promptOpen, setPromptOpen] = useState(false);
@@ -103,42 +103,23 @@ export default function QuickWorkspace({ revealPrompt, targetGeneration, context
       <p className="quick-prompt-text" data-reminder-task={job.id}>{lang === "zh" ? job.result.promptZh : job.result.promptEn}</p>
       <button className="text-button" onClick={onWorkspace}>完整编辑<Icon name="arrow" /></button>
     </section>}
-    {job && <QuickResult key={job.id} targetGeneration={targetGeneration} job={job} lang={lang} subject={subject} disabled={generationDisabled || uploading} hint={generationHint} onSubject={() => subjectFile.current?.click()} onReverse={onReverse} onUpdate={onUpdate} onWorkspace={onWorkspace} />}
+    {job && <QuickResult key={job.id} targetGeneration={targetGeneration} job={job} lang={lang} subject={subject} disabled={generationDisabled || uploading} hint={generationHint} onSubject={() => subjectFile.current?.click()} onReverse={onReverse} onUpdate={onUpdate} onGenerationViewUpdate={onGenerationViewUpdate} onWorkspace={onWorkspace} />}
   </section>;
 }
 
-function QuickResult({ targetGeneration, job, lang, subject, disabled, hint, onSubject, onReverse, onUpdate, onWorkspace }: { targetGeneration?: string; hint?: string; onSubject(): void; onReverse(): void; job: Job; lang: "zh" | "en"; subject: string; disabled: boolean; onUpdate(job: Job): void; onWorkspace(): void }) {
+function QuickResult({ targetGeneration, job, lang, subject, disabled, hint, onSubject, onReverse, onUpdate, onGenerationViewUpdate, onWorkspace }: { targetGeneration?: string; hint?: string; onSubject(): void; onReverse(): void; job: Job; lang: "zh" | "en"; subject: string; disabled: boolean; onUpdate(job: Job): void; onGenerationViewUpdate(): void; onWorkspace(): void }) {
   const running = job.generations?.find(item => item.status === "running");
   const generation = job.generations?.find(item => item.id === targetGeneration) || running || job.generations?.at(-1);
-  const generic = job.mode === "style" && !job.reenact;
-  const incomplete = /\[SUBJECT\]/i.test(lang === "zh" ? job.result?.promptZh || "" : job.result?.promptEn || "");
-  const inputsReady = (job.mode === "recreate" || job.mode === "session") || !!subject;
-  const pending = useRef(false);
-  const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const [asset, setAsset] = useState<{ key: string; image: string }>();
-  const [error, setError] = useState("");
-  const [cancelling, setCancelling] = useState(false);
+  const controls = useGeneration({ job, lang, disabled, subjectImage: subject, generation, allowMulti: false,
+    aspectRatio: generation?.aspectRatio, onUpdate, onViewUpdate: onGenerationViewUpdate });
+  const { generic, incomplete, inputsReady, asset, busy: cancelling } = controls;
+  const error = controls.error || controls.imageError;
   const key = `${job.id}:${generation?.id}`;
-  useEffect(() => {
-    let cancelled = false; setError("");
-    if (generation?.status === "completed") void request<{ image: string }>({ type: "alchemy:generation-image", id: job.id, generationId: generation.id }).then(value => { if (!cancelled) setAsset({ key, image: value.image }); }, error => { if (!cancelled) setError(error.message); });
-    return () => { cancelled = true; };
-  }, [key, generation?.status]);
   if (!job.result) return null;
-  const act = async (cancel: boolean) => {
-    if (pending.current || (!cancel && (disabled || running || generic || incomplete || !inputsReady || job.mode === "multi-reenact")) || (cancel && !running)) return;
-    pending.current = true;
-    setCancelling(true); setError("");
-    try { const updated = await request<Job>({ type: cancel ? "alchemy:generation-cancel" : "alchemy:generate", id: job.id, generationId: cancel ? running?.id : undefined,
-      ...(!cancel ? { language: lang, aspectRatio: generation?.aspectRatio, ...(job.mode !== "recreate" && job.mode !== "session" ? { subjectImage: subject } : {}) } : {}) }); if (mounted.current) onUpdate(updated); }
-    catch (error) { if (mounted.current) setError((error as Error).message); }
-    finally { pending.current = false; if (mounted.current) setCancelling(false); }
-  };
   return <section className="quick-result" aria-label="当前生图结果"><div className="quick-result-head"><strong>生成结果</strong><button className="text-button" onClick={onWorkspace}>工作台查看<Icon name="arrow" /></button></div>
     {asset?.key === key && generation?.status === "completed" ? <ImagePreview data-reminder-task={generation.id} src={asset.image} alt="当前生成结果" /> : generation ? <p data-reminder-task={generation.status === "failed" ? generation.id : undefined} role="status">{generation?.status === "running" ? generation?.stage || "正在生成图片…" : generation?.status === "failed" ? "图片生成失败" : generation?.status === "cancelled" ? "图片生成已取消" : "正在读取结果…"}</p> : null}
     {(error || generation?.error) && <p className="error" role="alert">{error || generation?.error} <RecoveryAction error={error || generation?.error} /></p>}
     {!running && job.mode !== "multi-reenact" && (generic || incomplete || !inputsReady || hint) && <p className="quick-generation-hint" role="status">{!inputsReady ? <>先添加主体图 <button className="text-button" onClick={onSubject}>上传主体</button></> : generic || incomplete ? <>需要专属提示词 <button className="text-button" onClick={onReverse}>重新逆向</button></> : hint}</p>}
-    {generation?.status === "running" ? <button className="text-button" disabled={cancelling} onClick={() => void act(true)}>{cancelling ? "正在取消…" : "取消生图"}</button> : job.mode !== "multi-reenact" && <button className="primary" disabled={disabled || cancelling || generic || incomplete || !inputsReady} onClick={() => void act(false)}>{cancelling ? "正在提交…" : "生成图片"}<Icon name="arrow" /></button>}
+    {generation?.status === "running" ? <button className="text-button" disabled={cancelling} onClick={() => void controls.act(true)}>{cancelling ? "正在取消…" : "取消生图"}</button> : job.mode !== "multi-reenact" && <button className="primary" disabled={cancelling || !controls.canGenerate} onClick={() => void controls.act(false)}>{cancelling ? "正在提交…" : "生成图片"}<Icon name="arrow" /></button>}
   </section>;
 }

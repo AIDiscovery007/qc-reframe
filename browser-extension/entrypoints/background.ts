@@ -2,6 +2,7 @@ import { openWorkspace } from "../lib/workspace-navigation";
 import { startReminderService } from "../lib/reminder-background";
 import { browser } from "wxt/browser";
 import { bridge } from "../lib/bridge";
+import { operationFor, allowsOperation, messageSource, PORT_KEEP_ALIVE } from "../lib/operation-policy";
 import { captureImage } from "../lib/capture";
 import type {
   ImageTarget,
@@ -535,9 +536,8 @@ export default defineBackground(() => {
   browser.runtime.onConnect.addListener(port => {
     if (port.name !== "alchemy:request") return;
     const sender = port.sender;
-    const extensionSender = sender?.id === browser.runtime.id && sender.url?.startsWith(browser.runtime.getURL("/"));
-    const contentSender = sender?.id === browser.runtime.id && sender.tab?.id != null && sender.frameId === 0 && /^https?:/.test(sender.url || sender.tab.url || "");
-    if (!extensionSender && !contentSender) { port.disconnect(); return; }
+    const source = messageSource(sender, browser.runtime.id, browser.runtime.getURL("/"));
+    if (!source) { port.disconnect(); return; }
     const controller = new AbortController();
     let started = false;
     let keepAlive: ReturnType<typeof setInterval>;
@@ -545,34 +545,28 @@ export default defineBackground(() => {
     port.onMessage.addListener(message => {
       if (started) return;
       started = true;
-      if (!["alchemy:update-project-input", "alchemy:start", ...(extensionSender ? ["alchemy:sessions-list", "alchemy:sessions-index"] : [])].includes(message?.type)) {
+      if (!allowsOperation(operationFor(message?.type), source, "port")) {
         port.postMessage({ error: "无效请求" }); return;
       }
       const reply = (value: unknown) => { if (!controller.signal.aborted) port.postMessage(value); };
       // Port traffic keeps the MV3 worker alive only while this bounded read runs.
-      keepAlive = setInterval(() => reply({ pending: true }), 20_000);
-      void uiMessage(message, contentSender ? `tab:${sender!.tab!.id}` : "popup", sender?.tab?.id, controller.signal)
+      keepAlive = setInterval(() => reply({ pending: true }), PORT_KEEP_ALIVE);
+      void uiMessage(message, source === "content" ? `tab:${sender!.tab!.id}` : "popup", sender?.tab?.id, controller.signal)
         .then(value => reply({ ok: true, value }), error => reply({ error: error.message }))
         .finally(() => clearInterval(keepAlive));
     });
   });
   browser.runtime.onMessage.addListener((message, sender, reply) => {
-    // Only extension pages and this extension's top-frame content scripts.
-    if (sender.id !== browser.runtime.id) return;
-    const contentSender = sender.tab?.id != null && sender.frameId === 0 && /^https?:/.test(sender.url || sender.tab.url || "");
-    const extensionSender = sender.url?.startsWith(browser.runtime.getURL("/"));
-    if (extensionSender && ["alchemy:workspace-handoff", "alchemy:sessions-list", "alchemy:sessions-index"].includes(message?.type)) {
-      uiMessage(message).then(value => reply({ ok: true, value }), error => reply({ error: error.message }));
-      return true;
-    }
-    if ((contentSender || extensionSender) && ["alchemy:get-motion-preference", "alchemy:set-motion-preference", "alchemy:show-hidden-projects", "alchemy:set-project-hidden", "alchemy:gallery", "alchemy:projects", "alchemy:project", "alchemy:project-thumbnail", "alchemy:generation-thumbnail", "alchemy:quick-draft", "alchemy:open-workspace", "alchemy:upload-reference", "alchemy:update-project-input", "alchemy:service-restart", "alchemy:cli-check", "alchemy:cli-update", "alchemy:models-refresh", "alchemy:model-verify", "alchemy:project-views", "alchemy:save-project-view", "alchemy:state", "alchemy:connect", "alchemy:mode", "alchemy:query", "alchemy:cancel", "alchemy:reference", "alchemy:project-reference", "alchemy:open-project", "alchemy:ensure-project", "alchemy:delete-projects", "alchemy:start", "alchemy:save-prompt", "alchemy:generate", "alchemy:generation-cancel", "alchemy:generation-reference", "alchemy:generation-image", "alchemy:generation-file-action"].includes(message?.type)) {
-      uiMessage(message, contentSender ? `tab:${sender.tab!.id}` : "popup", sender.tab?.id).then(
+    const source = messageSource(sender, browser.runtime.id, browser.runtime.getURL("/"));
+    const operation = operationFor(message?.type);
+    if (!allowsOperation(operation, source)) return;
+    if (message.type !== "alchemy:select" && message.type !== "alchemy:collect") {
+      uiMessage(message, source === "content" ? `tab:${sender.tab!.id}` : "popup", sender.tab?.id).then(
         (value) => reply({ ok: true, value }),
         (error) => reply({ error: error.message }),
       );
       return true;
     }
-    if (!["alchemy:select", "alchemy:collect"].includes(message?.type) || !contentSender) return;
     const tab = sender.tab;
     void (async () => {
       try {

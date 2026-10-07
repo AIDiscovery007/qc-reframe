@@ -4,7 +4,7 @@
 
 本版变化见 [v0.4.0 更新说明](docs/releases/v0.4.0.md)。从 v0.3.x 或更早版本升级需要同步更新完整仓库并重启本机服务，重新加载原扩展并刷新工作台与网页；仅替换 Chrome ZIP 不够。历史项目、提示词、图片、配置和配对保留，不修改 Codex 全局配置；本地正文索引可清除后重建，不影响源会话和创作快照。Chrome ZIP 仅含浏览器端，首次安装仍需完整仓库；具体步骤见 [升级说明](docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)。
 
-开发与后续维护请先阅读 [贡献指南](../Contribution.md) 和 [AGENTS.md](AGENTS.md)。
+开发与后续维护请先阅读 [贡献指南](../Contribution.md)、[AGENTS.md](AGENTS.md) 和 [架构与维护边界](docs/architecture.md)。领域名称见 [GLOSSARY.md](../GLOSSARY.md)。
 
 <img src="assets/brand/reframe.svg" width="72" height="72" alt="QC-Reframe logo" />
 

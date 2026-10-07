@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { creationContext, emptyCreationState, restoredQuickDraft } from '../lib/creation-context.ts';
+import { createGenerationSession } from '../lib/generation-session.ts';
 
 const app = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
 const quick = await readFile(new URL('../entrypoints/popup/QuickWorkspace.tsx', import.meta.url), 'utf8');
@@ -17,7 +19,17 @@ function extract(source, names) {
 }
 function evaluate(source, globals, names) {
   const original = globals;
-  globals = { noticeNavigation: { current: undefined }, setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, setInputRevisions() {}, ...globals,
+  let creation = { ...emptyCreationState, ...Object.fromEntries(Object.keys(emptyCreationState).filter(key => globals[key]).map(key => [key, globals[key]])) };
+  const dispatchCreation = action => {
+    const before = creation;
+    creation = creationContext(creation, action);
+    for (const [key, setter] of Object.entries({ versions: 'setVersions', inputRevisions: 'setInputRevisions', instructions: 'setInstructions', subjectDrafts: 'setSubjectDrafts', multiSubjectDrafts: 'setMultiSubjectDrafts' })) {
+      if (creation[key] === before[key] || !original[setter]) continue;
+      const replaceDraft = action.type === 'restore' && !action.merge && !['versions', 'inputRevisions'].includes(key);
+      original[setter](replaceDraft ? creation[key] : () => creation[key]);
+    }
+  };
+  globals = { dispatchCreation, restoredQuickDraft, noticeNavigation: { current: undefined }, setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, setInputRevisions() {}, ...globals,
     setProjectMode: original.setProjectMode || ((_id, mode) => original.setPreferences(value => ({ ...value, mode }))),
     request: async message => message.type === 'alchemy:project-views' ? original.projectViews || {} : original.request(message),
   };
@@ -55,32 +67,6 @@ test('quick handoff captures the displayed version, keeps draft edits and blocks
     assert.equal(errors.at(-1), 'tab failed');
     assert.equal(pending.current, false);
   }
-});
-
-test('quick generation cannot bypass dedicated prompts and ignores late responses after context change', async () => {
-  const names = ['generic', 'incomplete', 'inputsReady', 'act'];
-  const script = extract(quick, names);
-  const job = { id: 'old', mode: 'style', result: { promptZh: 'manually removed placeholder', promptEn: 'valid' }, reenact: {} };
-  for (const block of [{ job: { ...job, reenact: undefined } }, { job: { ...job, result: { promptZh: '[SUBJECT]' } } }, { subject: '' }, { disabled: true }, { running: { id: 'running' } }, { pending: { current: true } }]) {
-    const ui = evaluate(script, { job, lang: 'zh', subject: 'image', disabled: false, running: undefined, pending: { current: false }, ...block,
-      request: () => assert.fail('blocked input must not submit'), setCancelling: () => assert.fail('blocked input must not enter pending'),
-    }, ['act']);
-    await ui.act(false);
-  }
-  const sent = [], updated = [], errors = [], mounted = { current: true }, pending = { current: false };
-  let finish;
-  const ui = evaluate(script, { job, lang: 'en', subject: 'subject', disabled: false, running: undefined, generation: { aspectRatio: { width: 1536, height: 1024 } }, mounted, pending,
-    setCancelling() {}, setError: value => errors.push(value), onUpdate: value => updated.push(value), request: message => { sent.push(message); return new Promise(resolve => { finish = resolve; }); },
-  }, ['act']);
-  const operation = ui.act(false);
-  await ui.act(false);
-  assert.equal(sent.length, 1, 'rapid repeat must not duplicate a request');
-  assert.equal(sent[0].aspectRatio.width, 1536);
-  assert.equal(sent[0].subjectImage, 'subject');
-  mounted.current = false;
-  finish({ id: 'old' }); await operation;
-  assert.equal(updated.length, 0);
-  assert.equal(pending.current, false);
 });
 
 const tree = ts.createSourceFile('App.tsx', app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -252,7 +238,7 @@ test('live workspace handoff merges drafts, routes settings/tasks, and ignores s
   const setter = key => value => { state[key] = typeof value === 'function' ? value(state[key] || {}) : value; };
   const handoff = { selection: { id: 'source', projectId: 'project' }, mode: 'reenact', draft: { instructions: { 'project:reenact:new': 'incoming' }, versions: { 'project:reenact': 'new' } } };
   const ui = evaluate(`let cancelled = false, ownContext = false, previous;\n${extract(app, ['restoreDraft', 'navigateHandoff', 'navigateReminder'])}`, {
-    selectionRevision: revision, workspace: true, URLSearchParams,
+    ...state, subjectDrafts: state.subjects, selectionRevision: revision, workspace: true, URLSearchParams,
     request: message => {
       if (message.id === 'slow-handoff' || message.id === 'slow-project') return new Promise(resolve => pending.set(message.id, resolve));
       return Promise.resolve(message.type === 'alchemy:workspace-handoff' ? handoff : { id: 'reference', projectId: message.id, image: 'reference-image' });
@@ -428,3 +414,75 @@ test('quick result honors a reminded historical generation before running/latest
   assert.equal(evaluate(script, { job, targetGeneration: 'old' }, ['generation']).generation.id, 'old');
   assert.equal(evaluate(script, { job, targetGeneration: undefined }, ['generation']).generation.id, 'running');
 });
+
+// Follow the actual JSX callback path, rather than recreating the intended wiring in the test.
+function callbackProps(source, component, names) {
+  const ast = ts.createSourceFile('callbacks.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let attributes;
+  const visit = node => {
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(ast) === component) attributes = node.attributes.properties;
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  assert.ok(attributes, `${component} must be rendered`);
+  return `{${names.map(name => {
+    const attribute = attributes.find(item => ts.isJsxAttribute(item) && item.name.getText(ast) === name);
+    assert.ok(attribute && ts.isJsxExpression(attribute.initializer), `${component}.${name} must be wired`);
+    return `${name}: ${attribute.initializer.expression.getText(ast)}`;
+  }).join(',')}}`;
+}
+
+function quickGenerationCallbacks(globals, job) {
+  const names = ['onUpdate', 'onGenerationViewUpdate'];
+  const workspace = evaluate(`${extract(app, ['generationView', 'revealGeneratedImage'])}\nconst props = ${callbackProps(app, 'QuickWorkspace', names)};`, globals, ['props']).props;
+  const result = evaluate(`const props = ${callbackProps(quick, 'QuickResult', names)};`, workspace, ['props']).props;
+  const ast = ts.createSourceFile('QuickWorkspace.tsx', quick, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let options;
+  const visit = node => {
+    if (ts.isCallExpression(node) && node.expression.getText(ast) === 'useGeneration') options = node.arguments[0].getText(ast);
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  assert.ok(options, 'QuickResult must use the shared generation session');
+  return evaluate(`const options = ${options};`, { ...result, job, lang: 'zh', subject: '', disabled: false, generation: job.generations?.at(-1) }, ['options']).options;
+}
+
+for (const cancel of [false, true]) for (const navigation of ['unchanged', 'A-to-B', 'A-to-B-to-A', 'same-job-new-navigation', 'changed-context']) {
+  test(`quick ${cancel ? 'cancellation' : 'submission'} keeps durable updates separate from view delivery: ${navigation}`, async () => {
+    const referenceContext = { current: { key: 'A:recreate:job-A' } }, selectionRevision = { current: 7 };
+    const updates = [], requests = [];
+    let targetGeneration = { jobId: 'job-A', id: 'historical-A' }, finish;
+    const job = { id: 'job-A', projectId: 'A', mode: 'recreate', result: { promptZh: '完整提示词' },
+      generations: cancel ? [{ id: 'running-A', status: 'running' }] : [] };
+    const input = quickGenerationCallbacks({ referenceContext, selectionRevision,
+      updateJob: value => updates.push(value), setTargetGeneration: value => { targetGeneration = value; } }, job);
+    const session = createGenerationSession(job.id, message => {
+      requests.push(message);
+      return new Promise(resolve => { finish = resolve; });
+    });
+    const dispose = session.activate();
+    const pending = session.act(input, cancel, input);
+    assert.equal(requests.length, 1, 'the real quick options must allow the action');
+    assert.equal(requests[0].type, cancel ? 'alchemy:generation-cancel' : 'alchemy:generate');
+    if (cancel) assert.equal(requests[0].generationId, 'running-A');
+    if (navigation === 'A-to-B' || navigation === 'A-to-B-to-A') {
+      dispose();
+      referenceContext.current = { key: 'B:recreate:job-B' };
+      selectionRevision.current++;
+      if (navigation === 'A-to-B-to-A') {
+        referenceContext.current = { key: 'A:recreate:job-A' };
+        selectionRevision.current++;
+      }
+    } else if (navigation === 'same-job-new-navigation') selectionRevision.current++;
+    else if (navigation === 'changed-context') referenceContext.current = { key: 'A:recreate:job-A' };
+    if (navigation !== 'unchanged') targetGeneration = { jobId: navigation === 'A-to-B' ? 'job-B' : 'job-A', id: 'newly-selected-history' };
+    const selected = targetGeneration;
+    const updated = { ...job, generations: [{ id: 'submitted-A', status: cancel ? 'cancelled' : 'running' }] };
+    finish(updated);
+    await pending;
+    assert.deepEqual(updates, [updated], 'the originating job update must survive navigation and unmount');
+    assert.equal(targetGeneration, navigation === 'unchanged' ? undefined : selected,
+      'only the originating live view may clear the user-selected historical generation');
+    dispose();
+  });
+}

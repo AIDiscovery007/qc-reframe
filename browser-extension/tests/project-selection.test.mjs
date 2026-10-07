@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { creationContext, emptyCreationState, resolveCreation, restoredQuickDraft } from '../lib/creation-context.ts';
 
 const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
 const tree = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -21,62 +22,78 @@ const evaluate = (names, globals) => {
   return exports;
 };
 
-test('returning to projects and paths restores their choices, including an older version and empty lane', async () => {
-  let projectModes = {}, versions = { 'A:recreate': 'A-old', 'A:style': 'A-style', 'B:reenact': 'B-third', 'B:style': 'new' };
-  const basePreferences = { mode: 'multi-reenact', paired: true };
-  const change = (id, mode) => evaluate(['setProjectMode'], {
-    setProjectModes: fn => { projectModes = fn(projectModes); }, setPreferences: () => assert.fail('must not change global preference'),
-  }).setProjectMode(id, mode);
-  change('A', 'recreate'); change('B', 'reenact');
-  const jobs = [
-    { id: 'A-new', mode: 'recreate' }, { id: 'A-old', mode: 'recreate' }, { id: 'A-style', mode: 'style' },
-  ];
-  const view = (id, projectJobs) => {
-    const preferences = evaluate(['preferences'], { storedSelection: { projectId: id }, projectModes, basePreferences }).preferences;
-    const { modeJobs, modeJob } = evaluate(['modeJobs', 'modeJob'], { activeProject: { id, jobs: projectJobs }, versions });
-    return { mode: preferences.mode, job: modeJob(preferences.mode) };
-  };
-  assert.equal(view('A', jobs).mode, 'recreate'); assert.equal(view('A', jobs).job.id, 'A-old');
-  assert.equal(view('B', [{ id: 'B-third', mode: 'reenact' }]).job.id, 'B-third');
-  change('A', 'style'); assert.equal(view('A', jobs).job.id, 'A-style');
-  change('A', 'recreate'); assert.equal(view('A', jobs).job.id, 'A-old');
-  change('B', 'style'); assert.equal(view('B', [{ id: 'B-style', mode: 'style' }]).job, undefined);
-  assert.equal(view('A', jobs).job.id, 'A-old');
-  assert.equal(view('unvisited', []).mode, 'style', 'an unvisited project cannot inherit the last global/project mode');
-  versions['A:recreate'] = 'removed'; assert.equal(view('A', jobs).job.id, 'A-new', 'missing version falls back within the same lane');
+test('project, mode and version choices resolve through the public context interface', () => {
+  let state = creationContext(emptyCreationState, { type: 'views', views: {
+    A: { versions: { recreate: 'A-old', style: 'A-style' } }, B: { versions: { reenact: 'B-third', style: 'new' } },
+  } });
+  const jobs = [{ id: 'A-new', mode: 'recreate' }, { id: 'A-old', mode: 'recreate' }, { id: 'A-style', mode: 'style' }];
+  const resolve = (id, mode, records = jobs) => resolveCreation(state, { projectId: id }, { id, jobs: records }, {}, mode, 'default');
+  assert.equal(resolve('A', 'recreate').job.id, 'A-old');
+  assert.equal(resolve('B', 'reenact', [{ id: 'B-third', mode: 'reenact' }]).job.id, 'B-third');
+  assert.equal(resolve('A', 'style').job.id, 'A-style');
+  assert.equal(resolve('B', 'style', [{ id: 'B-style', mode: 'style' }]).job, undefined);
+  state = creationContext(state, { type: 'select', key: 'A:recreate', version: 'removed' });
+  assert.equal(resolve('A', 'recreate').job.id, 'A-new');
+  assert.equal(resolveCreation(state, { projectId: 'B' }, { id: 'A', jobs }, {}, 'style', 'default').job, undefined);
 });
 
-test('subject drafts and durable current input are isolated from other historical versions', () => {
-  let selected = { id: 'v1', instruction: 'old instruction' };
+test('durable empty input, historical snapshots and version drafts have explicit precedence', () => {
+  let state = creationContext(emptyCreationState, { type: 'restore', draft: {
+    versions: { 'A:style': 'v1' }, subjectDrafts: { 'A:style:v2': 'edited latest subject', 'A:style': 'legacy unscoped subject' },
+  } });
   const selection = { projectId: 'A', image: 'current reference', inputVersions: { style: 'v2' }, inputs: { style: { subjectImage: 'current subject', instruction: 'current instruction' } } };
-  const drafts = { 'A:style:v2': 'edited latest subject', 'A:style': 'legacy unscoped subject' };
-  const ui = evaluate(['subjectKey', 'subjectDraftKey', 'currentInput', 'subjectImage', 'instructionKey', 'taskInstruction'], {
-    selection, modeJob: () => selected, subjectDrafts: drafts, instructions: {}, defaultInstructions: { style: 'default' },
-    references: { v1: { reenact: { subjectImage: 'historical subject' } }, v2: { reenact: { subjectImage: 'old latest subject' } } },
-  });
-  assert.equal(ui.subjectImage('style'), 'historical subject');
-  assert.equal(ui.taskInstruction('style'), 'old instruction');
-  selected = { id: 'v2' };
-  assert.equal(ui.subjectImage('style'), 'edited latest subject');
-  delete drafts['A:style:v2'];
-  assert.equal(ui.subjectImage('style'), 'current subject');
-  assert.equal(ui.taskInstruction('style'), 'current instruction');
+  const project = { id: 'A', jobs: [{ id: 'v2', mode: 'style' }, { id: 'v1', mode: 'style', instruction: 'old instruction' }] };
+  const references = { v1: { image: 'historical reference', reenact: { subjectImage: 'historical subject' } } };
+  const view = () => resolveCreation(state, selection, project, references, 'style', 'default');
+  assert.equal(view().subjectImage, 'historical subject');
+  assert.equal(view().instruction, 'old instruction');
+  assert.equal(view().image, 'historical reference');
+  assert.equal(selection.image, 'current reference');
+  state = creationContext(state, { type: 'select', key: 'A:style', version: 'v2' });
+  assert.equal(view().subjectImage, 'edited latest subject');
+  assert.equal(view().image, undefined, 'missing historical snapshot must not use current reference');
+  state = creationContext(state, { type: 'adopt', selection, savedMode: 'style' });
+  assert.equal(view().subjectImage, 'current subject');
+  assert.equal(view().instruction, 'current instruction');
   selection.inputs.style.subjectImage = '';
-  assert.equal(ui.subjectImage('style'), '', 'removal cannot resurrect a historical subject');
-  selected = undefined;
-  assert.equal(ui.subjectDraftKey('style'), 'A:style:new');
-  assert.equal(ui.taskInstruction('style'), 'current instruction');
+  assert.equal(view().subjectImage, '', 'removal cannot resurrect history');
+  state = creationContext(state, { type: 'select', key: 'A:style', version: 'new' });
+  assert.equal(view().draftKey, 'A:style:new');
+  assert.equal(view().image, 'current reference');
 });
 
-test('historical display never substitutes the latest project reference', () => {
-  const selection = { projectId: 'A', image: 'new reference' };
-  const display = (job, references) => evaluate(['displayImage', 'displaySelection'], { selection, job, references });
-  assert.equal(display(undefined, {}).displayImage, 'new reference');
-  assert.equal(display({ id: 'v1' }, {}).displayImage, undefined, 'wait for the historical snapshot instead of showing a wrong reference');
-  const saved = display({ id: 'v1' }, { v1: { image: 'old reference' } });
-  assert.equal(saved.displayImage, 'old reference');
-  assert.equal(saved.displaySelection.image, 'old reference');
-  assert.equal(selection.image, 'new reference', 'displaying history must not change durable current input');
+test('multi input order, roles, details and instruction changes invalidate only that prompt', () => {
+  const subjects = [{ id: 'a', subjectImage: 'image-a', role: '人物', detail: '帽子' }, { id: 'b', subjectImage: 'image-b', role: '场景', detail: '' }];
+  const selection = { projectId: 'A', inputVersions: { 'multi-reenact': 'v1' }, inputs: { 'multi-reenact': { subjects, instruction: 'task' } } };
+  const project = { id: 'A', jobs: [{ id: 'v1', mode: 'multi-reenact', instruction: 'task', result: {} }] };
+  const references = { v1: { reenact: { subjects } } };
+  const view = state => resolveCreation(state, selection, project, references, 'multi-reenact', 'default');
+  assert.equal(view(emptyCreationState).multiStale, false);
+  for (const changed of [[...subjects].reverse(), [{ ...subjects[0], role: '物品' }, subjects[1]], [{ ...subjects[0], detail: '鞋' }, subjects[1]]]) {
+    const state = creationContext(emptyCreationState, { type: 'restore', draft: { multiSubjectDrafts: { 'A:multi-reenact:v1': changed } } });
+    assert.equal(view(state).multiStale, true);
+  }
+  const edited = creationContext(emptyCreationState, { type: 'edit', key: 'A:multi-reenact', version: 'v1', instruction: 'new task' });
+  assert.equal(view(edited).instructionStale, true);
+  assert.equal(view(edited).multiStale, true);
+  assert.equal(view(emptyCreationState).instruction, 'task');
+});
+
+test('stale quick drafts cannot replace durable inputs or saved views; prompt edits survive', () => {
+  const draft = { instructions: { 'A:style:v1': 'stale', 'B:style:new': 'keep' }, subjectDrafts: { 'A:style:new': 'stale' },
+    multiSubjectDrafts: {}, promptDrafts: { v1: { promptZh: 'edited' } }, versions: { 'A:style': 'v1', 'B:style': 'new' } };
+  const restored = restoredQuickDraft(draft, 'A', true, { B: { versions: { style: 'v2' } } });
+  assert.deepEqual(restored.instructions, { 'B:style:new': 'keep' });
+  assert.deepEqual(restored.subjectDrafts, {});
+  assert.deepEqual(restored.versions, {});
+  assert.deepEqual(restored.promptDrafts, draft.promptDrafts);
+  assert.equal(draft.instructions['A:style:v1'], 'stale');
+});
+
+test('deleting a project clears its drafts and revisions without touching another project', () => {
+  const state = creationContext({ ...emptyCreationState, inputRevisions: { A: 2, B: 1 }, instructions: { 'A:style:new': 'gone', 'B:style:new': 'keep' } }, { type: 'delete', projectIds: ['A'] });
+  assert.deepEqual(state.inputRevisions, { B: 1 });
+  assert.deepEqual(state.instructions, { 'B:style:new': 'keep' });
 });
 
 test('complete recreation loads its historical reference and ignores a late snapshot after navigation', async () => {
@@ -109,6 +126,11 @@ function hydrationFixture(overrides = {}) {
     setSelection: value => state.selections.push(value), setError: value => { state.error = value; },
     setVersions: fn => { state.versions = fn(state.versions); }, setInputRevisions: fn => { state.inputRevisions = fn(state.inputRevisions); },
     setSubjectDrafts: fn => { state.subjects = fn(state.subjects); }, setMultiSubjectDrafts: fn => { state.multi = fn(state.multi); }, setInstructions: fn => { state.instructions = fn(state.instructions); },
+    dispatchCreation: action => {
+      const next = creationContext({ ...emptyCreationState, ...state, subjectDrafts: state.subjects, multiSubjectDrafts: state.multi,
+        inputRevisions: overrides.inputRevisions || state.inputRevisions }, action);
+      Object.assign(state, next, { subjects: next.subjectDrafts, multi: next.multiSubjectDrafts });
+    },
     ...overrides,
   });
   return { ...ui, state, next, selectionRevision };
@@ -178,6 +200,7 @@ for (const entry of ['project list', 'sidebar', 'sidebar during hydration']) tes
     setSelection: value => { state.selection = value; }, setInputReload: fn => { state.inputReload = fn(state.inputReload); },
     setInputRevisions: fn => { state.inputRevisions = fn(state.inputRevisions); }, setVersions: fn => { state.versions = fn(state.versions); },
     setSubjectDrafts: () => assert.fail('same revision must preserve historical drafts'), setMultiSubjectDrafts: () => assert.fail('same revision must preserve historical drafts'), setInstructions: () => assert.fail('same revision must preserve historical drafts'),
+    dispatchCreation: action => Object.assign(state, creationContext({ ...emptyCreationState, ...state }, action)),
     setHistoryOpen: value => { state.historyOpen = value; }, setGalleryOpen() {}, setBusy() {}, setError: value => { assert.equal(value, ''); },
   });
   let previous = render();

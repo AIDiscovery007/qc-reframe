@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import * as operationPolicy from "../lib/operation-policy.ts";
 
 const compiled = ts.transpileModule(await readFile(new URL("../entrypoints/background.ts", import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -43,6 +44,7 @@ function background(local = { preferences: { token: "private-token" } }) {
     require: name => ({
       "../lib/reminder-background": { startReminderService: () => ({ wake: async () => {}, projectsChanged: async () => {} }) },
       "wxt/browser": { browser }, "../lib/bridge": { bridge },
+      "../lib/operation-policy": operationPolicy,
       "../lib/capture": { captureImage: async () => ({ image, capture: "original" }) },
     })[name],
   });

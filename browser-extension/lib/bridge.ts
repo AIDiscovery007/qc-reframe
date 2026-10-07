@@ -1,3 +1,5 @@
+import { bridgeTimeout } from "./operation-policy";
+
 export const BRIDGE_URL = "http://127.0.0.1:43187";
 
 export async function bridge<T>(
@@ -8,7 +10,7 @@ export async function bridge<T>(
 ): Promise<T> {
   if (!token) throw new Error("请先在设置中粘贴本机服务的配对码");
   let response: Response;
-  const timeout = AbortSignal.timeout((path.startsWith("/sessions") || path.endsWith("/input") || path === "/jobs") ? 120_000 : (path.startsWith("/models") || path.startsWith("/cli")) ? 30_000 : 15_000);
+  const timeout = AbortSignal.timeout(bridgeTimeout(path));
   try {
     response = await fetch(`${BRIDGE_URL}${path}`, {
       method: body === undefined ? "GET" : "POST",

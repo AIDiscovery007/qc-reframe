@@ -184,9 +184,8 @@ test("failure selecting a new task leaves a persisted failed task and no running
   const { request, dir, restart } = await setup(t);
   const project = await (await request("/projects", post({ image }))).json();
   const rename = fs.promises.rename;
-  let writes = 0;
   fs.promises.rename = async (source, target) => {
-    if (target === join(dir, "records", `project-${project.id}.json`) && ++writes === 2)
+    if (target === join(dir, "records", `project-${project.id}.json`))
       throw Object.assign(new Error("simulated input selection failure"), { code: "EIO" });
     return rename(source, target);
   };
@@ -426,4 +425,81 @@ test("session history keeps immutable sources while input edits and reference ch
   assert.deepEqual(restored.inputs.session.sessions, sources([nextId]));
   assert.deepEqual((await (await request(`/jobs/${first.id}/reference`)).json()).sessions, sources([firstId]));
   assert.deepEqual((await (await request(`/jobs/${latest.id}/reference`)).json()).sessions, sources([nextId]));
+});
+
+test("task completion publishes its committed record even when project metadata cannot be written", async t => {
+  const { default: fs } = await import("node:fs");
+  const { syncBuiltinESMExports } = await import("node:module");
+  let finish;
+  const { request, dir, restart } = await setup(t, { agent: () => new Promise(resolve => { finish = resolve; }) });
+  const job = await (await request("/jobs", post({ image, mode: "recreate" }))).json();
+  const rename = fs.promises.rename;
+  fs.promises.rename = async (source, target) => {
+    if (target === join(dir, "records", `project-${job.projectId}.json`))
+      throw Object.assign(new Error("simulated project metadata failure"), { code: "EIO" });
+    return rename(source, target);
+  };
+  syncBuiltinESMExports();
+  try {
+    finish(result);
+    await settled(request, job.id);
+    const committed = JSON.parse(await readFile(join(dir, "records", `${job.id}.json`)));
+    assert.equal(committed.status, "completed");
+    const feed = await (await request("/task-feed")).json();
+    assert.equal(feed.tasks.find(task => task.id === job.id).status, committed.status);
+  } finally {
+    fs.promises.rename = rename;
+    syncBuiltinESMExports();
+  }
+  await restart();
+  assert.equal((await (await request(`/jobs/${job.id}`)).json()).status, "completed");
+});
+
+test("project input revision is checked inside its edit queue without an HTTP lock", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "reframe-input-cas-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const images = await createImageStore(dir);
+  const store = await createProjectStore({ dataDir: dir, jobs: new Map(), images });
+  const project = await store.register(decodeImage(image));
+  const results = await Promise.allSettled(["first", "stale"].map(instruction => store.saveInput(project.id, {
+    mode: "recreate", input: { instruction }, expectedRevision: 0,
+  })));
+  assert.equal(results[0].status, "fulfilled");
+  assert.equal(results[1].status, "rejected");
+  assert.equal(results[1].reason.status, 409);
+  assert.equal(store.summary(project.id).inputRevision, 1);
+  assert.equal((await store.reference(project.id)).inputs.recreate.instruction, "first");
+});
+
+test("failed terminal rename records an explicit failure and agrees with feed after restart", async t => {
+  const { default: fs } = await import("node:fs");
+  const { syncBuiltinESMExports } = await import("node:module");
+  let finish;
+  const { request, dir, restart } = await setup(t, { agent: () => new Promise(resolve => { finish = resolve; }) });
+  const job = await (await request("/jobs", post({ image, mode: "recreate" }))).json();
+  const rename = fs.promises.rename;
+  let failed = false;
+  fs.promises.rename = async (source, target) => {
+    if (!failed && target === join(dir, "records", `${job.id}.json`)) {
+      failed = true;
+      throw Object.assign(new Error("simulated terminal commit failure"), { code: "EIO" });
+    }
+    return rename(source, target);
+  };
+  syncBuiltinESMExports();
+  try {
+    finish(result);
+    await settled(request, job.id);
+    const terminal = await (await request(`/jobs/${job.id}`)).json();
+    assert.equal(failed, true);
+    assert.equal(terminal.status, "failed");
+    assert.match(terminal.error, /未能保存/);
+    assert.equal(JSON.parse(await readFile(join(dir, "records", `${job.id}.json`))).status, "failed");
+    assert.equal((await (await request("/task-feed")).json()).tasks.find(task => task.id === job.id).status, "failed");
+  } finally {
+    fs.promises.rename = rename;
+    syncBuiltinESMExports();
+  }
+  await restart();
+  assert.equal((await (await request(`/jobs/${job.id}`)).json()).status, "failed");
 });
