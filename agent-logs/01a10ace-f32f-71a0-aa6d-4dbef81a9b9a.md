@@ -219,3 +219,6 @@
 - 定向检查版本/远端/发布记录，资料整理交当前 PM 01a0ff95-4f2e-77b3-af99-550a20b63407（送达成功）；监工负责最终 zip→compile→测试、产物核验、整合提交、main 推送、标签与 GitHub Release。当前执行中，尚未发布；不把发布授权等同真实模型调用或现用服务重启。
 - 发布验证：v0.4.1 依次 zip→compile→651/651（0 skipped）通过，日志 /tmp/reframe-v0.4.1-{zip,compile,test}.log。ZIP 34 文件、780817 字节，与构建目录逐字节一致；Manifest V3、版本及品牌名、16/32/48/96/128 图标尺寸正确，无服务端/用户数据/测试/依赖目录/source map，权限相较 v0.4.0 不变。SHA-256 为 9fba5e3ebee7adcd1974761c6f3f88266e23a4154df3bf0fb13c70eb948e6319，附件校验文件已生成。
 - 资料复核：根版本及锁文件仅更新版本，当前下载/安装/功能入口对齐，历史版本页与截图未更改；升级明确包括完整仓库、服务重启及扩展重载，数据保留。origin/main=bea694a 为当前分支祖先，将快进发布 main，不强推或改写旧标签。准备发布提交，远端结果待发布后核验。
+- 发布成功：提交 b98284fbf1e8c995bcff4ef4e6ca64182f21a844 已推送 main，v0.4.1 标签解引用同提交。正式 Release：https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.1；GitHub latest=v0.4.1，非 draft/prerelease。两附件 uploaded，名称/大小与本地一致，远端 ZIP SHA-256 同上；SHA256SUMS 自身摘要 fa2e582f053d964ace7700ff7b1b95ee3678e049e20680bc77e6b931cd9e8bfc 也匹配本地。
+- 成功核验后已向当前 PM 送达版本、链接、提交和附件证据（isError=false），交接已完成执行者登记与原日志收尾；保留未完成任职及所有聊天/历史，不操作用户运行服务或安装扩展。发布标签保持不变，收尾文档另行提交。
+- 收尾复核通过：PM 仅移除已完成 UIUX/架构两条任职，原任务补日期、版本、发布提交及验证边界；保留监工/PM 与全部日志/聊天，diff --check 通过。阶段收尾文档随本条提交并同步 main，v0.4.1 标签仍固定发布提交 b98284f。
