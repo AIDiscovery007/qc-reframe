@@ -1,3 +1,4 @@
+import { adaptDefaultInstruction } from "./task-instruction.ts";
 import type { Mode, MultiSubject, Project, Selection } from "./types.ts";
 import type { WorkspaceDraft } from "./workspace-handoff.ts";
 
@@ -96,13 +97,14 @@ export function resolveCreation(state: CreationState, selection: Selection | und
   const referenceIndex = input ? input.referenceIndex ?? (mode === "multi-reenact" ? subjects.length : subjectImage ? 1 : 0)
     : job ? reference?.referenceIndex ?? savedIndex : legacyDraft ? mode === "multi-reenact" ? subjects.length : subjectImage ? 1 : 0 : 0;
   const orderStale = !!job?.result && referenceIndex !== savedIndex;
-  const instruction = state.instructions[draftKey] ?? input?.instruction ?? job?.instruction ?? job?.reenact?.basePrompt ?? defaultInstruction;
+  const subjectCount = mode === "multi-reenact" ? subjects.length : (mode === "style" || mode === "reenact") && subjectImage ? 1 : 0;
+  const instruction = adaptDefaultInstruction(state.instructions[draftKey] ?? input?.instruction ?? job?.instruction ?? job?.reenact?.basePrompt ?? defaultInstruction, mode, subjectCount, referenceIndex);
   const savedSubjects = reference?.reenact?.subjects || [];
-  const instructionStale = !!job?.result && instruction.trim() !== (job.instruction ?? job.reenact?.basePrompt ?? defaultInstruction).trim();
+  const instructionStale = !!job?.result && instruction.trim() !== adaptDefaultInstruction(job.instruction ?? job.reenact?.basePrompt ?? defaultInstruction, mode, mode === "multi-reenact" ? job.reenact?.subjects?.length || 0 : job.reenact ? 1 : 0, savedIndex).trim();
   const multiStale = !!job?.result && (subjects.length !== savedSubjects.length || subjects.some((item, index) => {
     const saved = savedSubjects[index];
     return !saved || item.id !== saved.id || item.subjectImage !== saved.subjectImage || item.role !== saved.role || item.detail !== saved.detail;
-  }) || instruction.trim() !== (job.instruction ?? job.reenact?.basePrompt)?.trim());
+  }) || instructionStale);
   return { key, draftKey, jobs, job, input, subjectImage, subjectError, subjects, referenceIndex, instruction, instructionStale, orderStale, multiStale,
     sessions: input?.sessions ?? job?.sessionContext?.sources ?? [], image: job ? reference?.image : selection?.image };
 }

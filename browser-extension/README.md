@@ -1,8 +1,8 @@
 # QC-Reframe for Chrome
 
-功能概览见 [功能导览](docs/FEATURES.md)。首次安装请先看 [项目首页](../README.md) 和 [交给 Codex 执行的初始化流程](docs/INSTALL_WITH_CODEX.md)。当前发布版本：**0.4.1**。迭代记录见 [更新日志](docs/releases/README.md)，后续待发布改动见 [待发布](docs/releases/unreleased.md)。
+功能概览见 [功能导览](docs/FEATURES.md)。首次安装请先看 [项目首页](../README.md) 和 [交给 Codex 执行的初始化流程](docs/INSTALL_WITH_CODEX.md)。当前发布版本：**0.4.2**。迭代记录见 [更新日志](docs/releases/README.md)，后续待发布改动见 [待发布](docs/releases/unreleased.md)。
 
-本版变化见 [v0.4.1 更新说明](docs/releases/v0.4.1.md)。从 v0.4.0 或更早版本升级需要同步更新完整仓库并重启本机服务，重新加载原扩展并刷新工作台与网页；仅替换 Chrome ZIP 不够。历史项目、提示词、图片、配置和配对保留，不修改 Codex 全局配置；本地正文索引可清除后重建，不影响源会话和创作快照。Chrome ZIP 仅含浏览器端，首次安装仍需完整仓库；具体步骤见 [升级说明](docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)。
+本版变化见 [v0.4.2 更新说明](docs/releases/v0.4.2.md)。从 v0.4.1 或更早版本升级需要同步更新完整仓库并重启本机服务，重新加载原扩展并刷新工作台与网页；仅替换 Chrome ZIP 不够。历史项目、提示词、图片、配置和配对保留，不修改 Codex 全局配置；本地正文索引可清除后重建，不影响源会话和创作快照。Chrome ZIP 仅含浏览器端，首次安装仍需完整仓库；具体步骤见 [升级说明](docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)。
 
 开发与后续维护请先阅读 [贡献指南](../Contribution.md)、[AGENTS.md](AGENTS.md) 和 [架构与维护边界](docs/architecture.md)。领域名称见 [GLOSSARY.md](../GLOSSARY.md)。
 
@@ -126,7 +126,7 @@ npm run pair
 
 ## 任务指令
 
-提取风格、完整复刻、主体重演和多图重演共用「任务指令」输入框，按路径预填默认要求，也可自行编辑。切换路径或提示词版本时各自保留草稿，已提交指令随对应版本保存；旧版记录继续恢复原指令。明确要求优先于路径默认分工，修改后需重新逆向才影响提示词。
+提取风格、完整复刻、主体重演和多图重演共用「任务指令」输入框，按路径预填默认要求，也可自行编辑。切换路径或提示词版本时各自保留草稿，已提交指令随对应版本保存；系统默认指令按当前图片角色和顺序注入图号，排序、增删图片后同步更新；旧版完全匹配的默认文案也会适配。用户自定义文字（包括只改动默认文案一小处）和主动清空保留原样，不自动替换其中的图号；历史任务及输出不回写。明确要求优先于路径默认分工，修改后需重新逆向才影响提示词。
 
 完整复刻可补充需要保留、调整或排除的内容；仅提取通用风格也会使用当前指令。单图路径可清空指令使用默认分析，双图与多图仍需填写指令。
 
@@ -149,7 +149,7 @@ npm run pair
 1. 选择「主体重演」，从网页选一张参考图；也可打开当前或历史记录的原图，无需先完成一次逆向。
 2. **主体图（默认图 2）**。上传 PNG、JPEG 或 WebP，提供人物的身份特征或物体的辨识特征；界面显示实际预览。支持更换主体图。
 3. **原始参考模板（默认图 1）**。自动带入所选原图，默认提供风格、构图、内容关系、姿态、表情、光影、笔触和材质参考。
-4. **输入 3：任务指令**。默认填好「以主体图提供主体身份，以参考图提供风格、构图、姿态与关系，生成风格转换与主体重演提示词。」可直接使用，也可按意图改写，例如「保留主体的姿势，只迁移参考图的配色与笔触」。Codex 按编辑后的指令决定保留与迁移内容，不强制套用默认模板分工，也不会自动带入旧逆向结果。
+4. **输入 3：任务指令**。默认按实际顺序填好图号，例如参考在前时为「以图 2（主体图）提供主体身份，以图 1（参考图）提供风格、构图、姿态与关系，生成风格转换与主体重演提示词。」可直接使用，也可按意图改写，例如「保留主体的姿势，只迁移参考图的配色与笔触」。Codex 按编辑后的指令决定保留与迁移内容，不强制套用默认模板分工，也不会自动带入旧逆向结果。
 5. 点击「生成主体重演提示词」。输出中英文版本，明确两张图的职责。以后使用此 Prompt 出图时，按图条及该版本提示词的图号附图，默认 **图 1 模板 → 图 2 主体**。
 
 逆向完成后可单独点击「生成图片」。主体身份随模板的新姿态和视角重新表现；模板类别不适配、关键细节不可见等情况在结果中说明，不能保证精确身份或像素一致。主体图原有的姿势和背景不会默认锁定。
@@ -310,6 +310,8 @@ npm run preview   # 弹窗视觉预览，不调用 Codex
 开发辅助脚本统一位于根目录 [Agent 工具库](../agent-tool/README.md)，具体依赖、调用目录、输入输出和副作用见该索引。上述命令从 `browser-extension/` 执行，`npm run preview` 调用 `../agent-tool/preview.mjs`；安装/服务管理和图标构建仍使用本目录 `scripts/`。
 
 预览地址 `http://127.0.0.1:43188/?state=result`，也支持 `empty`、`running`、`failed`、`reenact`、`style-new`、`reenact-new`（尚未逆向的参考图）、`generation`、`generation-completed`（生图交互示例），均使用明确标记的示例数据。主体图上传和指令编辑使用真实表单；预览的提交按钮不调用 Codex。增加 `&reminder=toast&tasks=unread` 查看提醒及未读示例，`&reminderTask=image` 切换图片提醒，点击提醒在当前工作台内定位对应示例结果；`&case=任意新值` 重置该组未读示例，`popup.html?state=projects&reminder=unread&reminderTask=image&panelClip=1&case=clip` 验证裁剪和滚动已读（快捷界面组件 fixture，不代表真实 content 浮层）。`&notificationDenied=1` 模拟通知权限关闭；设置声音只修改预览偏好，不播放声音。预览不能替代真实扩展中的权限、声音、悬浮和跨域图片验收。 工作台提交边界可用 `?state=projects&generationStartDelay=4000&generationDelay=2000` 验证（主体重演路径为首次生成，提取风格为已有结果）；加 `generationStart=failed` 模拟提交失败，`motion=reduce` 检查静态反馈。提交延迟最多 60 秒，仅作用于示例，不调用模型。
+
+默认任务指令图号可用 `/workspace.html?state=projects&mode=style&imageOrderRegression=paired&instructionFixture=default&inputSaveDelay=100` 自动检查；旧默认迁移改用 `mode=reenact&imageOrderRegression=instruction-legacy&instructionFixture=legacy`，多图改用 `state=multi&mode=multi-reenact&imageOrderRegression=multi&instructionFixture=default`。`instructionFixture=default` 留空持久化字段，由生产组件生成默认；`legacy` 仅注入原系统默认原文。测试包含改序后的文案、保存与请求，自定义文本保留和旧任务不改写；这些参数只作用于 localhost 示例，不写真实项目。登记命令见 [Agent 工具库](../agent-tool/README.md)。
 
 `/content-preview` 用于网页内浮层验收，`?state=invalidated` 可模拟扩展失效提示；同样只使用示例数据。
 

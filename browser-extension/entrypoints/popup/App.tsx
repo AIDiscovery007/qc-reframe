@@ -27,7 +27,7 @@ import type { Job, Mode, Project, ProjectSummary, SubjectInput, Selection, Multi
 import ProjectHistory from "./ProjectHistory";
 import QuickWorkspace from "./QuickWorkspace";
 import MultiInputPreview from "./MultiInputPreview";
-import { defaultInstructions } from "./TaskInstruction";
+import { adaptDefaultInstruction, defaultInstructions } from "../../lib/task-instruction";
 import GenerationPanel from "./GenerationPanel";
 import Icon from "./Icon";
 import SelectField from "./SelectField";
@@ -513,11 +513,14 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     referenceIndex = contextFor(mode).referenceIndex, onSaved?: () => void) => {
     if (blocked || inputWriter.current!.pending || !selection?.projectId) throw new Error("当前无法修改图片，请稍后重试");
     const revision = selectionRevision.current, context = referenceContext.current;
+    const subjectCount = mode === "multi-reenact" ? subjects.length : (mode === "style" || mode === "reenact") && subject ? 1 : 0;
+    referenceIndex = Math.min(referenceIndex, subjectCount);
+    instruction = adaptDefaultInstruction(instruction, mode, subjectCount, referenceIndex);
     setBusy(true);
     try {
       await inputWriter.current!.save({ selection, mode, referenceJobId: modeJob(mode)?.id,
         image, instruction, subjectImage: subject, subjects, sessionIds,
-        referenceIndex: Math.min(referenceIndex, mode === "multi-reenact" ? subjects.length : (mode === "style" || mode === "reenact") && subject ? 1 : 0) }, next => {
+        referenceIndex }, next => {
         selectionRevision.current++;
         dispatchCreation({ type: "adopt", selection: next, savedMode: mode });
         setSelection(next); setError(""); setRefreshNonce(value => value + 1);

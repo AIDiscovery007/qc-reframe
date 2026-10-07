@@ -254,6 +254,9 @@ const server = createServer(async (req, res) => {
         if(previewOptions.has('imageOrderRegression')&&previewOptions.get('imageOrderRegression')!=='legacy'||previewOptions.get('imageOrderFixture')==='new') {
           const mode=data.preferences.mode, seed=projects[0].jobs[0];
           projects[0].inputs[mode]={referenceIndex:0,instruction:'验证图片顺序',...(mode==='multi-reenact'?{subjects:structuredClone(seed.reenact.subjects)}:{subjectImage:subject})};
+          const instructionFixture=previewOptions.get('instructionFixture');
+          if(instructionFixture==='default')delete projects[0].inputs[mode].instruction;
+          if(instructionFixture==='legacy')projects[0].inputs[mode].instruction='以图 1 为主体，以图 2 为风格参考模板，生成基于图 1 的风格转换与主体重演提示词。';
           projects[0].inputVersions[mode]='new';projects[0].inputRevision=1;data.selection=selection(projects[0]);
         }
         const findJob=(id)=>projects.flatMap(p=>p.jobs).find(j=>j.id===id);

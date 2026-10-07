@@ -23,6 +23,7 @@
 - `PREVIEW_PORT`：默认 `43188`，整数 0–65535；0 自动分配空闲端口，实际地址见 stdout。占用端口报错，不关闭已有服务。
 - `PREVIEW_INPUT_IMAGE` / `PREVIEW_RESULT_IMAGE`：可选本地比对图片，默认使用仓库公开海报素材；自定义相对路径按调用目录解释，也可使用绝对路径。
 - 图片顺序行为场景：`ui.mjs verify --scenario image-order-paired`（双图改序/模式隔离/重开/请求）、`image-order-multi`（参考图中间/末尾与主体跨图移动）、`image-order-legacy`（旧历史编号与当前输入隔离）、`image-order-failed`（保存失败回滚）、`image-order-popup`（轻量窗口）；`image-order-keyboard-new/history/failure/late` 为四个独立的 320px popup 场景，使用真实 Enter 触发改序，验证选中与焦点、失败和迟到响应；焦点移出使用工具 focus，外部项目切换使用公开消息与 popup 轮询，成功后观察一次 Tab，不代表完整键盘导航审计。各命令前加 `node agent-tool/`；可在有效构建指纹后加 `--no-build`。合成预览复用生产图片编号校验函数，但不证明真实 bridge 的任务冻结、失效保护或模型附件顺序；这些由隔离后端测试验证。
+- 默认任务指令图号：`ui.mjs verify --scenario image-instruction-default-paired` 验证改序、模式隔离、重开与提交；`image-instruction-legacy-paired` 验证精确旧默认迁移；`image-instruction-default-multi` 验证参考模板居中及主体增删编号。双图场景同时验证自定义文本原样保存和提交，三个场景均检查历史任务未改写；仅使用合成预览，不证明真实后端持久化或模型遵从。
 - 查询参数和界面场景见 [扩展预览文档](../browser-extension/README.md)。回归脚本仍位于 `browser-extension/tests/`；预览只负责加载。
 
 预览读取构建文件、示例图及显式指定的图片，缩略图在内存生成。浏览器 fixture 会使用当前预览 origin 的 localStorage/sessionStorage；不写真实项目资产、不连接 bridge、不调用 Codex。模拟行为及 HTTP 资源测试不能替代实际扩展与真实模型验收。

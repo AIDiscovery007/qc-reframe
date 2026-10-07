@@ -43,6 +43,9 @@
 | image-order-legacy | workspace 1440×1000 | /workspace.html?state=projects&mode=style&imageOrderRegression=legacy&inputSaveDelay=100 | imageOrderRegression |
 | image-order-failed | workspace 1440×1000 | /workspace.html?state=projects&mode=style&imageOrderRegression=failed&inputSaveDelay=100&inputSaveFailures=1 | imageOrderRegression |
 | image-order-popup | popup 400×740 | /popup.html?state=projects&mode=style&imageOrderRegression=popup&inputSaveDelay=100 | imageOrderRegression |
+| image-instruction-default-paired | workspace 1440×1000 | /workspace.html?state=projects&mode=style&imageOrderRegression=paired&instructionFixture=default&inputSaveDelay=100 | imageOrderRegression |
+| image-instruction-legacy-paired | workspace 1440×1000 | /workspace.html?state=projects&mode=reenact&imageOrderRegression=instruction-legacy&instructionFixture=legacy&inputSaveDelay=100 | imageOrderRegression |
+| image-instruction-default-multi | workspace 1440×1000 | /workspace.html?state=multi&mode=multi-reenact&imageOrderRegression=multi&instructionFixture=default&inputSaveDelay=100 | imageOrderRegression |
 | image-order-keyboard-new | popup 320×740 | /popup.html?state=projects&mode=style&inputSaveDelay=4000&imageOrderFixture=new | imageOrderKeyboard |
 | image-order-keyboard-history | popup 320×740 | /popup.html?state=projects&mode=style&inputSaveDelay=4000 | imageOrderKeyboard |
 | image-order-keyboard-failure | popup 320×740 | /popup.html?state=projects&mode=style&inputSaveDelay=4000&inputSaveFailures=1 | imageOrderKeyboard |

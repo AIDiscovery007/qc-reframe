@@ -38,6 +38,11 @@ export const scenarios = [
     ['image-order-failed', 'projects', 'style', 'failed'],
     ['image-order-popup', 'projects', 'style', 'popup'],
   ].map(([id, state, mode, regression]) => ({ id, surface: regression === 'popup' ? 'popup' : 'workspace', path: `/${regression === 'popup' ? 'popup' : 'workspace'}.html?state=${state}&mode=${mode}&imageOrderRegression=${regression}&inputSaveDelay=100${regression === 'failed' ? '&inputSaveFailures=1' : ''}`, viewport: regression === 'popup' ? { width: 400, height: 740 } : wide, regression: 'imageOrderRegression', rules: [] })),
+  ...[
+    ['default-paired', 'projects', 'style', 'paired', 'default'],
+    ['legacy-paired', 'projects', 'reenact', 'instruction-legacy', 'legacy'],
+    ['default-multi', 'multi', 'multi-reenact', 'multi', 'default'],
+  ].map(([id, state, mode, regression, instruction]) => ({ id: `image-instruction-${id}`, surface: 'workspace', path: `/workspace.html?state=${state}&mode=${mode}&imageOrderRegression=${regression}&instructionFixture=${instruction}&inputSaveDelay=100`, viewport: wide, regression: 'imageOrderRegression', rules: [] })),
   ...['new', 'history', 'failure', 'late'].map(keyboardCase => ({ id: `image-order-keyboard-${keyboardCase}`, surface: 'popup', path: `/popup.html?state=projects&mode=style&inputSaveDelay=4000${keyboardCase === 'new' ? '&imageOrderFixture=new' : ''}${keyboardCase === 'failure' ? '&inputSaveFailures=1' : ''}`, viewport: { width: 320, height: 740 }, regression: 'imageOrderKeyboard', keyboardCase, rules: [] })),
   { id: 'auto-style', surface: 'workspace', path: '/workspace.html?state=projects&mode=style&autoStyleRegression=1&inputSaveDelay=250', viewport: wide, regression: 'autoStyleRegression', rules: [] },
   { id: 'creation-context', surface: 'workspace', path: '/workspace.html?state=alignment&mode=recreate&inputSaveDelay=1800&creationContextRegression=mode', viewport: wide, regression: 'creationContextRegression', rules: [] },
