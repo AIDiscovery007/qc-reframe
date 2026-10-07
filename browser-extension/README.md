@@ -1,8 +1,8 @@
 # QC-Reframe for Chrome
 
-功能概览见 [功能导览](docs/FEATURES.md)。首次安装请先看 [项目首页](../README.md) 和 [交给 Codex 执行的初始化流程](docs/INSTALL_WITH_CODEX.md)。当前发布版本：**0.4.0**。迭代记录见 [更新日志](docs/releases/README.md)，后续待发布改动见 [待发布](docs/releases/unreleased.md)。
+功能概览见 [功能导览](docs/FEATURES.md)。首次安装请先看 [项目首页](../README.md) 和 [交给 Codex 执行的初始化流程](docs/INSTALL_WITH_CODEX.md)。当前发布版本：**0.4.1**。迭代记录见 [更新日志](docs/releases/README.md)，后续待发布改动见 [待发布](docs/releases/unreleased.md)。
 
-本版变化见 [v0.4.0 更新说明](docs/releases/v0.4.0.md)。从 v0.3.x 或更早版本升级需要同步更新完整仓库并重启本机服务，重新加载原扩展并刷新工作台与网页；仅替换 Chrome ZIP 不够。历史项目、提示词、图片、配置和配对保留，不修改 Codex 全局配置；本地正文索引可清除后重建，不影响源会话和创作快照。Chrome ZIP 仅含浏览器端，首次安装仍需完整仓库；具体步骤见 [升级说明](docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)。
+本版变化见 [v0.4.1 更新说明](docs/releases/v0.4.1.md)。从 v0.4.0 或更早版本升级需要同步更新完整仓库并重启本机服务，重新加载原扩展并刷新工作台与网页；仅替换 Chrome ZIP 不够。历史项目、提示词、图片、配置和配对保留，不修改 Codex 全局配置；本地正文索引可清除后重建，不影响源会话和创作快照。Chrome ZIP 仅含浏览器端，首次安装仍需完整仓库；具体步骤见 [升级说明](docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)。
 
 开发与后续维护请先阅读 [贡献指南](../Contribution.md)、[AGENTS.md](AGENTS.md) 和 [架构与维护边界](docs/architecture.md)。领域名称见 [GLOSSARY.md](../GLOSSARY.md)。
 

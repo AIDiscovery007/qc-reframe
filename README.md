@@ -4,15 +4,15 @@
 
 在浏览器里收集灵感，在本机工作台调整主体、提示词与结果。沿用 Codex 登录和额度，无需另外填写模型 API Key。
 
-**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.4.0](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.0)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
+**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.4.1](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.1)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
 
-## v0.4.0，让会话里的故事成为画面
+## v0.4.1，生成操作更直接，任务状态更稳
 
-选择一张风格参考图，再从本机 Codex 会话中挑选创作素材。标题搜索与可重建的本地正文索引帮助找到内容，已选会话始终置顶；人物描述更具体，CLI 安装、兼容检查、升级和失败恢复也在现有设置中贯通。
+提示词生成、目标尺寸与图片生成集中在主界面操作栏，提示词按需展开。提取风格自动根据主体图生成通用或专属提示词；上传失败不会误走通用提取，切换项目或版本后，旧请求的迟到响应也不会改变当前图片定位。
 
 本次升级需更新完整仓库并重启本机服务，再重载扩展、刷新工作台和网页；已有项目、历史结果与配对保留。
 
-[查看 v0.4.0 更新与升级说明 →](browser-extension/docs/releases/v0.4.0.md)
+[查看 v0.4.1 更新与升级说明 →](browser-extension/docs/releases/v0.4.1.md)
 
 ## 工作台，让画面成为主角
 
@@ -22,7 +22,7 @@
 
 图片完整适应固定画布，图条切换主体与参考。逆向路径、图片操作和提示词版本集中在下方工具栏；生成结果在另一侧展开，便于对照和继续创作。
 
-**提示词，需要时展开。** 中英文、复制、编辑、导出和目标尺寸都在内容旁；收起后把空间还给画布。拖动横条可回弹或收起，也支持按钮、键盘和减少动态效果。
+**提示词，需要时展开。** 中英文、复制、编辑和导出保留在面板内；目标尺寸与生成操作直接位于主界面，收起提示词后仍可用。拖动横条可回弹或收起，也支持按钮、键盘和减少动态效果。
 
 <details>
 <summary><strong>展开查看：提示词面板与目标尺寸</strong></summary>
