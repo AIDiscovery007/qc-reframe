@@ -1,6 +1,6 @@
 # QC-Reframe 插件开发指引
 
-作用域为 `browser-extension/` 及其子目录。先遵循上级指令和用户当前要求；本文记录已有产品决策，用户明确调整方向时同步更新。统一协作准则和岗位定义索引见根目录 [AGENTS.md](../AGENTS.md)，当前协作会话及日志索引见[动态任职表](../.agents/roles/assignments.md)；任务详情与复核结论写入 [agent-logs/](../agent-logs/) 的对应会话日志，不追加到准则或任职表；工程、GitHub、文档拆分和发布流程见 [Contribution.md](../Contribution.md)。根目录 `AGENTS.md` 维护协作规则，本文维护插件工程约束，两者不重复维护。
+作用域为 `browser-extension/` 及其子目录。先遵循上级指令和用户当前要求；本文记录已有产品决策，用户明确调整方向时同步更新。统一协作准则和岗位定义索引见根目录 [AGENTS.md](../AGENTS.md)，当前协作会话及日志索引见[动态任职表](../.agents/roles/assignments.md)；任务详情与复核结论写入本机仓库根目录 `agent-logs/` 的对应会话日志（不跟踪、不随 clone 分发），不追加到准则或任职表；工程、GitHub、文档拆分和发布流程见 [Contribution.md](../Contribution.md)。根目录 `AGENTS.md` 维护协作规则，本文维护插件工程约束，两者不重复维护。
 
 本文用于代码开发与仓库维护，不是图片逆向任务的提示词。插件运行时的逆向或生图任务按显式输入与对应技能完成，不因读取本文而执行仓库维护或发布操作。
 

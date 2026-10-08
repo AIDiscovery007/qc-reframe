@@ -6,7 +6,8 @@
 !/Contribution.md
 !/AGENTS.md
 !/GLOSSARY.md
-!/agent-logs/
+# Session logs stay on this machine and are not distributed by clone.
+/agent-logs/
 !/browser-extension/
 !/agent-tool/
 
