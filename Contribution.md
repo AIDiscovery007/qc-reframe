@@ -41,7 +41,7 @@
 
 ## 本地数据与提交范围
 
-- `agent-logs/` 仅本机保留，不跟踪、不提交，也不随 clone 分发；现有日志从 Git 索引移除时保留磁盘文件，历史提交不因此消失。
+- `agent-logs/` 仅本机保留，不跟踪、不提交，也不随 clone 分发；本次执行 `git rm --cached` 的机器已核验磁盘日志保留，历史提交不因此消失。其他已有 clone 更新到移除提交时，Git 会删除原受跟踪日志，ignore 不会保留它们：更新前须将日志单独备份到仓库外（含未提交内容），更新后恢复到本机目录。若已更新且整个 `agent-logs` 路径不存在，先确认本地可读取下列固定历史提交，再运行 `test ! -e agent-logs && test ! -L agent-logs && git restore --source=019fb419950ddbebe77a04ac9e004cb8dc966af3 --worktree -- agent-logs/`，仅恢复工作树，不恢复索引。该命令仅取回移除前已公开的旧快照，不能找回未提交或后续私人日志；已有目录须保留并人工合并备份，避免覆盖。
 - 根目录采用 `.gitignore` 白名单，主要跟踪插件、首页和维护文档；新增根文件时按需添加精确例外，不取消整套隔离规则。
 - `.local/` 中的项目 JSON、Prompt、输入与生成图片、配对码、模型选择、运行配置和日志均不提交。`.output/`、`.wxt/`、`node_modules/`、下载和实验目录也不提交。
 - `browser-extension/design-extract-output/` 是本地 Raft 设计参考，保持忽略；新克隆可能没有它，构建不能依赖它。
