@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sourceState, fingerprint } from './inventory.mjs';
+import { validationWindow } from './build.mjs';
 
 const require = createRequire(new URL('../../browser-extension/package.json', import.meta.url));
 const { chromium } = require('playwright');
@@ -97,7 +98,9 @@ async function sentinel(page) {
 }
 
 /** Requires Playwright's Chromium and an existing MV3 build. Never rebuilds or changes the extension bundle. */
-export async function verifyExtension({ progress = () => {}, extensionPath = defaultExtension } = {}) {
+export function verifyExtension(options = {}) { return validationWindow('extension', () => runExtension(options)); }
+
+async function runExtension({ progress = () => {}, extensionPath = defaultExtension } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'reframe-ui-extension-'));
   const profile = join(directory, 'profile');
   const pageErrors = [];

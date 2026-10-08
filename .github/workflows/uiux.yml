@@ -35,19 +35,20 @@ jobs:
         working-directory: browser-extension
       - run: npx playwright install --with-deps chromium
         working-directory: browser-extension
-      - name: Static, state examples and isolated real extension
+      - name: One final browser or full gate
         run: |
           if ! git rev-parse --verify "$UI_BASE^{commit}" >/dev/null 2>&1; then
             UI_BASE=$(git hash-object -t tree /dev/null)
           fi
           echo "UI_BASE=$UI_BASE" >> "$GITHUB_ENV"
-          node agent-tool/ui.mjs gate --tier browser --base "$UI_BASE" --json > "$TMPDIR/browser-gate.json"
+          UI_TIER=browser
+          if [ "$REQUIRE_VISUAL" = "true" ] || [ -n "$(find browser-extension/docs/uiux/visual-baselines/linux -name manifest.json -print -quit 2>/dev/null)" ]; then
+            UI_TIER=full
+          fi
+          node agent-tool/ui.mjs gate --tier "$UI_TIER" --base "$UI_BASE" --baseline-dir browser-extension/docs/uiux/visual-baselines/linux --reason ci-final --json > "$TMPDIR/final-gate.json"
       - run: npm run compile && npm test
         working-directory: browser-extension
-      - run: node --test agent-tool/ui/*.test.mjs
-      - name: Reviewed visual gate
-        if: ${{ inputs.require_visual || hashFiles('browser-extension/docs/uiux/visual-baselines/linux/**/manifest.json') != '' }}
-        run: node agent-tool/ui.mjs gate --tier full --no-build --base "$UI_BASE" --baseline-dir browser-extension/docs/uiux/visual-baselines/linux --json > "$TMPDIR/full-gate.json"
+      - run: node --test --test-concurrency=1 agent-tool/ui/*.test.mjs
       - name: Initial visual review status
         if: ${{ !inputs.require_visual && hashFiles('browser-extension/docs/uiux/visual-baselines/linux/**/manifest.json') == '' }}
         run: echo 'Visual acceptance is pending human review of the uploaded Linux candidates. Browser gate does not claim pixel approval.' >> "$GITHUB_STEP_SUMMARY"

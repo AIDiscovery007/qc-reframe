@@ -113,3 +113,22 @@ export async function contextFor(files = []) {
     tokens: await tokens(), uncovered,
   };
 }
+
+// Development order only. Final gate never consumes this selection to omit scenarios.
+export async function planFor(files) {
+  const context = await contextFor(files);
+  const riskIds = ['end-to-end-keyboard-workspace-failure', 'end-to-end-keyboard-popup-failure', 'end-to-end-generation-failed'];
+  // Only this dedicated stylesheet has reviewed, bounded consumer coverage. Rule
+  // ownership alone does not map business effects of workspace/shared components.
+  const coverageUncertain = context.fullCoverageFallback || context.files.length !== 1 || context.files[0] !== 'browser-extension/entrypoints/popup/image-viewer.css';
+  const selected = coverageUncertain ? scenarios : scenarios.filter(scene => (!scene.regression && context.scenarios.some(item => item.id === scene.id)) || riskIds.includes(scene.id));
+  return {
+    files: context.files, coverageUncertain,
+    reason: coverageUncertain ? '业务影响映射不完整或输入范围不唯一，建议全部登记场景；规则来源匹配不等于完整业务依赖图。' : '专用 image-viewer.css 的已核实消费者场景，加键盘/失败恢复风险；变更超出局部样式职责时仍须扩大复核。',
+    purpose: 'Development feedback and early risk review only; final browser/full gate remains complete.',
+    scenarios: selected.map(scene => scene.id), requiredRiskScenarios: riskIds,
+    command: 'node agent-tool/ui.mjs verify --no-build --scenarios ' + selected.map(scene => scene.id).join(' ') + ' --reason development-feedback',
+    finalCommand: 'node agent-tool/ui.mjs gate --tier browser --no-build --reason final-validation',
+    uncovered: context.uncovered,
+  };
+}

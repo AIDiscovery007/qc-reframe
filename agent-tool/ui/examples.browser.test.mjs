@@ -33,7 +33,8 @@ after(async () => {
   }
 });
 
-for (const scenario of exampleScenarios) test(`production example: ${scenario.id}`, async t => {
+// All production variants run once in the final gate; these are checker-positive controls.
+for (const scenario of exampleScenarios.filter(scene => ['example-input-loading', 'example-reverse-failed'].includes(scene.id))) test(`production example: ${scenario.id}`, async t => {
   const page = await browser.newPage({ viewport: scenario.viewport, reducedMotion: 'reduce' });
   t.after(() => page.close()); page.setDefaultTimeout(10000);
   await page.goto(baseURL + scenario.path);

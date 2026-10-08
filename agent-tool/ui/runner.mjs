@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir, release } from 'node:os';
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
-import { once } from 'node:events';
+import { prepare, terminate, stop, validationWindow } from './build.mjs';
 import { root, extension, requireExtension, sourceState, fingerprint, fixtureState } from './inventory.mjs';
 import { scenarios, rules, uncovered } from './catalog.mjs';
 import { probeLayout } from './probe.mjs';
@@ -13,40 +13,11 @@ import { checkEndToEndKeyboard } from './end-to-end.mjs';
 
 const { chromium } = requireExtension('playwright');
 const buildDirectory = resolve(extension, '.output/chrome-mv3');
-const stampPath = resolve(extension, '.output/ui-build.json');
 export const faults = {
   'canvas-padding': { scenario: 'workspace-wide', css: '.canvas-input { padding-left:8px!important; }' },
   'quick-height': { scenario: 'popup', css: '.quick-canvas { height:188px!important; }' },
   'image-offset': { scenario: 'popup', css: '.image-preview-trigger { transform:translateX(-8px)!important; }' },
 };
-
-function terminate(child, signal = 'SIGTERM') {
-  if (!child || child.exitCode !== null || child.signalCode) return;
-  try {
-    if (process.platform === 'win32') child.kill(signal);
-    else process.kill(-child.pid, signal);
-  } catch (error) { if (error.code !== 'ESRCH') throw error; }
-}
-
-async function buildCurrent(build, children) {
-  const source = await sourceState();
-  if (build) {
-    await new Promise((resolvePromise, reject) => {
-      const child = spawn('npm', ['run', 'build'], { cwd: extension, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
-      children.add(child);
-      let log = '';
-      child.stdout.on('data', data => { log = (log + data).slice(-6000); });
-      child.stderr.on('data', data => { log = (log + data).slice(-6000); });
-      child.on('error', reject);
-      child.on('close', code => code === 0 ? resolvePromise() : reject(new Error(`Build failed (${code}):\n${log}`)));
-    });
-    if (source.hash !== (await sourceState()).hash) throw new Error('构建期间源码变化，停止验证；请重新运行 verify。');
-    await writeFile(stampPath, JSON.stringify({ sourceHash: source.hash, buildHash: await fingerprint(buildDirectory) }));
-  }
-  const stamp = JSON.parse(await readFile(stampPath, 'utf8').catch(() => { throw new Error('没有 UI 构建指纹；先运行 verify（不加 --no-build）。'); }));
-  if (stamp.sourceHash !== source.hash || stamp.buildHash !== await fingerprint(buildDirectory)) throw new Error('源码或构建与上次指纹不符；移除 --no-build 重新构建。');
-  return { ...source, ...stamp };
-}
 
 async function startPreview(directory, children) {
   const sharp = requireExtension('sharp');
@@ -70,15 +41,6 @@ async function startPreview(directory, children) {
     child.once('exit', code => { clearTimeout(timeout); reject(new Error(`预览退出 (${code}): ${output}`)); });
   });
   return { child, url };
-}
-
-async function stop(child) {
-  if (!child || child.exitCode !== null || child.signalCode) return;
-  const exited = once(child, 'exit');
-  terminate(child);
-  const timeout = setTimeout(() => terminate(child, 'SIGKILL'), 3000);
-  await exited;
-  clearTimeout(timeout);
 }
 
 async function ready(page, scenario) {
@@ -117,13 +79,16 @@ async function ready(page, scenario) {
   });
 }
 
-export async function verify({ scenario: id, build = true, fault, inspect = false, progress = () => {} } = {}) {
+export function verify(options = {}) { return validationWindow('verify', () => runVerify(options)); }
+
+async function runVerify({ scenario: id, scenarioIds, build = true, fault, inspect = false, reason = 'development', progress = () => {} } = {}) {
   if (id && !scenarios.some(scenario => scenario.id === id)) throw new Error(`未知场景 ${id}`);
   if (fault && !faults[fault]) throw new Error(`未知故障 ${fault}`);
   if (fault && id && id !== faults[fault].scenario) throw new Error(`故障 ${fault} 只能用于 ${faults[fault].scenario}`);
-  const selected = scenarios.filter(scenario => !id && !fault || scenario.id === (id || faults[fault]?.scenario));
+  if (scenarioIds && (!scenarioIds.length || id || fault || new Set(scenarioIds).size !== scenarioIds.length || scenarioIds.some(key => !scenarios.some(scene => scene.id === key)))) throw new Error('场景列表为空、重复、未知或与单场景/故障冲突');
+  const selected = scenarios.filter(scenario => scenarioIds ? scenarioIds.includes(scenario.id) : !id && !fault || scenario.id === (id || faults[fault]?.scenario));
   const directory = await mkdtemp(join(tmpdir(), 'reframe-ui-'));
-  const report = { schemaVersion: 1, startedAt: new Date().toISOString(), environment: { platform: process.platform, arch: process.arch, osRelease: release(), headless: true, node: process.version, locale: 'zh-CN', timezone: 'Asia/Taipei', dpr: 1, motion: 'reduce', previewShell: 'existing-notice-and-size-overrides' }, source: null, fault: fault || null, uncovered, scenarios: [], status: 'failed' };
+  const report = { schemaVersion: 1, reason, timing: { waitMs: 0, phases: {} }, scope: selected.length === scenarios.length ? 'complete' : 'development-only', selectedScenarios: selected.map(scene => scene.id), startedAt: new Date().toISOString(), environment: { platform: process.platform, arch: process.arch, osRelease: release(), headless: true, node: process.version, locale: 'zh-CN', timezone: 'Asia/Taipei', dpr: 1, motion: 'reduce', previewShell: 'existing-notice-and-size-overrides' }, source: null, fault: fault || null, uncovered, scenarios: [], status: 'failed' };
   let browser, preview, interrupted = false;
   const children = new Set();
   const interrupt = () => {
@@ -138,13 +103,18 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
     report.fixture = await fixtureState();
     report.environment.clock = 'fixed browser Date for geometry; live behavior and server fixture clocks';
     progress(build ? '构建当前源码并记录指纹' : '核对源码与构建指纹');
-    report.source = await buildCurrent(build, children);
+    let phaseStart = performance.now();
+    report.source = (await prepare({ build })).source;
+    report.timing.phases.buildMs = Math.round(performance.now() - phaseStart);
+    phaseStart = performance.now();
     if (interrupted) throw new Error('验证已取消');
     preview = await startPreview(directory, children);
     browser = await chromium.launch({ headless: true });
     report.environment.browser = browser.version();
+    report.timing.phases.startupMs = Math.round(performance.now() - phaseStart);
     for (const scenario of selected) {
       if (interrupted) throw new Error('验证已取消');
+      const scenarioStart = performance.now();
       progress(`检查 ${scenario.id}`);
       const context = await browser.newContext({ viewport: scenario.viewport, locale: 'zh-CN', timezoneId: 'Asia/Taipei', deviceScaleFactor: 1, reducedMotion: 'reduce' });
       await context.route('**/*', route => new URL(route.request().url()).origin === preview.url ? route.continue() : route.abort());
@@ -201,8 +171,9 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
         await context.tracing.stop({ path: trace });
         item.evidence.trace = trace;
       } else await context.tracing.stop();
-      report.scenarios.push(item);
       await context.close();
+      item.durationMs = Math.round(performance.now() - scenarioStart);
+      report.scenarios.push(item);
     }
     if ((await sourceState()).hash !== report.source.hash || await fingerprint(buildDirectory) !== report.source.buildHash || await fingerprint(resolve(root, 'agent-tool/ui')) !== report.rulesAndRunnerHash) throw new Error('验证过程中源码、构建或检查器变化，结果作废，请重跑。');
     if ((await fixtureState()).hash !== report.fixture.hash) throw new Error('验证过程中预览入口或 fixture 变化，结果作废，请重跑；无需仅因此重建产品。');
@@ -211,12 +182,15 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
   } catch (error) {
     report.error = interrupted ? '验证已取消' : error.message;
   } finally {
+    const cleanupStart = performance.now();
     const cleanup = await Promise.allSettled([browser?.close(), ...[...children].map(stop)]);
     const errors = cleanup.filter(item => item.status === 'rejected').map(item => String(item.reason));
     if (errors.length) { report.status = 'failed'; report.cleanupErrors = errors; }
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', interrupt);
     report.finishedAt = new Date().toISOString();
+    report.timing.phases.cleanupMs = Math.round(performance.now() - cleanupStart);
+    report.timing.durationMs = Date.parse(report.finishedAt) - Date.parse(report.startedAt);
     await writeFile(join(directory, 'report.json'), JSON.stringify(report, null, 2));
     const summary = [`# Reframe UI 检查：${report.status}`, '', `源码：${report.source?.revision || '未建立'}；工作区有修改：${report.source?.dirty ?? '未知'}`, '', ...report.scenarios.map(item => `- ${item.id}: ${item.status} — [截图](${item.id}.png)${Object.keys(item.evidence.imageViewer || {}).map(label => ` / [${label}](${item.id}-${label}.png)`).join('')}${item.evidence.trace ? ` / [trace](${item.id}.trace.zip)` : ''}`), '', ...report.scenarios.flatMap(item => item.checks.filter(check => check.status === 'failed').map(check => `- ${item.id} / ${check.ruleId} / ${check.target}: ${JSON.stringify(check.actual)}`)), ...(report.error ? ['', report.error] : []), '', '## 未覆盖', '', ...uncovered.map(text => '- ' + text), '', '完整测量与祖先样式见 report.json；源码路径是候选来源，不是精确根因。', ''];
     await writeFile(join(directory, 'report.md'), summary.join('\n'));

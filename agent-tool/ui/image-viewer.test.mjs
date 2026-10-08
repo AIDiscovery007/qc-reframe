@@ -52,7 +52,8 @@ async function open(t, scenario) {
   return page;
 }
 
-for (const scenario of exampleScenarios.filter(item => item.example === 'image')) test(`production image viewport: ${scenario.id}`, async t => {
+// Positive checker contract once; the gate owns all six production viewport variants.
+for (const scenario of exampleScenarios.filter(item => item.id === 'example-image-viewer')) test(`production image viewport: ${scenario.id}`, async t => {
   const page = await open(t, scenario), captures = [];
   const checks = await checkImageViewer(page, label => { captures.push(label); });
   assert.deepEqual(checks.filter(check => check.status === 'failed'), []);

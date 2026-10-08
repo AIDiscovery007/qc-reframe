@@ -36,10 +36,13 @@
 
 | 命令 | 用途 / 输出 |
 | --- | --- |
+| `node agent-tool/ui.mjs prepare [--no-build]` | 唯一 UI 构建/指纹准备入口；默认构建，`--no-build` 只核对已有产物。单独构建不能建立 UI 证据。 |
+| `node agent-tool/ui.mjs plan --files PATH …` | 开发期建议；当前自动缩减仅支持单独的 `image-viewer.css`（6视口＋3风险），其他或混合/重复输入显式不确定并回退全量。可人工结合风险选择开发验证，不取代最终门禁。 |
+| `node agent-tool/ui.mjs evidence --report FILE --sha256 DIGEST [--reason TEXT]` | 只读核验执行者交付时的摘要、完整覆盖、附件、当前来源及同机环境；输出可复用范围与未覆盖项，不接受视觉基线。 |
 | `node agent-tool/ui.mjs context --files PATH …` | 按仓库相对路径找规则与候选场景；未知依赖回退全部；`--json` 含组件与变量。 |
 | `node agent-tool/ui.mjs check [--changed] [--base REF]` | AST 检查装载、变量、颜色及目录同步；`--changed` 比较 HEAD（或指定 ref）到当前工作区，含未跟踪文件。变量消费者仍全量检查。 |
 | `node agent-tool/ui.mjs sync [--check]` | 从 catalog 与实际 CSS 生成索引；`--check` 只比较、不修改。 |
-| `node agent-tool/ui.mjs verify [--scenario ID] [--no-build]` | 默认构建并检查全部登记场景；`--no-build` 验证源码/产物指纹后复用构建。 |
+| `node agent-tool/ui.mjs verify [--scenario ID \| --scenarios ID …] [--no-build] [--reason TEXT]` | 默认构建并检查全部登记场景；显式列表仅为开发反馈，报告标注覆盖；`--no-build` 验证源码/产物指纹后复用构建。 |
 | `node agent-tool/ui.mjs inspect --scenario ID [--no-build]` | 同一采样器，额外保留成功场景的祖先测量与 trace。 |
 
 所有命令支持 `--json`，浏览器进度写 stderr。退出码0表示已登记检查通过（允许警告），1表示失败，2表示参数错误。`verify --fault canvas-padding|quick-height|image-offset --no-build` 注入已知错误，**预期退出1**，不改产品文件；默认自动选择该故障的适用场景。
@@ -50,9 +53,29 @@
 
 聚焦验证：`node --test browser-extension/tests/ui-static.test.mjs browser-extension/tests/ui-tool.test.mjs`；真实 Chromium 采样器正反例：`node --test agent-tool/ui/probe.test.mjs`。后者需已安装浏览器，独立于默认产品测试。组件样例、有限视觉比较、隔离真实扩展与分层门禁见下文；各自证据不可替代。
 
-完整 UI 工具测试：`node --test agent-tool/ui/*.test.mjs`。其中门禁取消持久化测试在独立子进程中只保留三个核心视觉场景，以验证信号、失败报告和资源清理；它不替代 `gate --tier browser` 的全场景验收。
+完整 UI 工具测试：`node --test --test-concurrency=1 agent-tool/ui/*.test.mjs`。其中门禁取消持久化测试在独立子进程中只保留三个核心视觉场景，以验证信号、失败报告和资源清理；它不替代 `gate --tier browser` 的全场景验收。
 
 报告另外记录预览 fixture 指纹及文件清单，覆盖 `ui.mjs`、`preview.mjs`、`gallery-preview.mjs`、浏览器回归脚本和画廊 fixture 文件。结束时再次核对；运行中这些输入变化会使结果作废。它独立于产品构建指纹，纯 fixture 修改可以用 `--no-build` 重新验证。
+
+## 开发反馈、最终证据与耗时
+
+```sh
+node agent-tool/ui.mjs prepare
+node agent-tool/ui.mjs plan --files browser-extension/entrypoints/popup/image-viewer.css
+# 按 plan 建议显式选择；独立复核关键键盘、失败恢复与共享消费者后再定稿
+node agent-tool/ui.mjs verify --scenarios example-image-viewer-portrait end-to-end-keyboard-popup-failure --no-build --reason development-risk-review
+node agent-tool/ui.mjs gate --tier browser --no-build --reason final-validation --json
+# DIGEST 使用上一步执行者交付中的 evidenceSha256，不能从待审文件重新算一个代替
+node agent-tool/ui.mjs evidence --report /absolute/gate.json --sha256 DIGEST --reason supervisor-review --json
+```
+
+`prepare`、`verify`、`gate`、`extension`、`evidence` 共用 `.output/ui-validation.lock`。同一调用链可嵌套，其他进程/调用立即失败（等待0毫秒）；不会自动清锁或结束持有者。正常、异常及可处理信号退出释放锁；SIGKILL/崩溃可能残留，先核实持有 PID/操作和工作状态，再人工移除确认无持有者的锁。工具锁无法拦截直接 `npm run build` 或编辑器写入；验证窗口内团队暂停所有构建及受检源码/fixture/检查器修改，首尾指纹变化使报告失效。
+
+`evidence` 仅支持macOS/Linux本机24小时内的完整 browser/full 报告。核验产品源码/产物、fixture、检查器、Node/OS/架构、Playwright驱动/Chromium及headless-shell可执行文件、字体目录元数据及相关环境变量，重算报告和截图/trace/候选附件摘要，再核对原始报告与门禁内容一致。静态/目录/到期例外检查在复用时重新执行，避免跨日期或仅文档变化绕过门禁。缺失、篡改、环境变化、未声明跳过、部分覆盖或取消一律失败；旧报告无新回执时不可复用。摘要须来自可信执行者当轮交付，它只能约束内容未变，不能证明可信执行者以外的任意文件执行过测试。字体目录元数据不能发现保持大小和时间戳的刻意替换；有字体/系统状态疑点时重跑。它不替代独立风险复核，不代表产品/工具测试或视觉批准，真实模型、用户profile与跨机器复用均不在范围内。
+
+报告包含 `reason`、`startedAt/finishedAt`、`timing.durationMs`、阶段耗时与场景 `durationMs`；gate区分静态、预览、隔离扩展、视觉候选，preview区分构建/核验、启动与清理。`waitMs: 0` 仅表示锁不等待，不是团队没有等待。人工开发、评审和协调等待在任务日志按开始/结束或实际估计记录，并标注估计；重跑写明原因，不把缺失工时算0。比较须同机器、同构建模式、同场景及合理负载；历史数字只作历史参考。
+
+正常产品场景归最终gate统一执行。工具自测保留检查器代表正例及错误状态、隐藏/禁用动作、几何故障、取消、清理和来源漂移反例；不再逐一重复全部正常样例。只改产品时按风险选择工具测试，工具改动运行相关自测；最终产品回归和共享界面覆盖不因此减少。交付最少列明变更、定向复核、最终报告及可信摘要、未覆盖项、实际耗时/重跑原因；不为小样式改动扩建无需求的工具或复制日志全文。
 
 ## 状态样例、视觉、扩展与门禁
 

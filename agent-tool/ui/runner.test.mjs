@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { verify } from './runner.mjs';
 
-for (const scenario of ['example-long-instruction', 'example-narrow-input', 'example-narrow-result']) {
+for (const scenario of ['example-long-instruction']) {
   test(`runner combines geometry and state checks without sending interaction rules to geometry: ${scenario}`, { timeout: 45000 }, async () => {
     const result = await verify({ scenario, build: false });
     assert.equal(result.status, 'passed', JSON.stringify(result.scenarios.flatMap(item => item.checks.filter(check => check.status === 'failed'))));

@@ -1,22 +1,25 @@
 #!/usr/bin/env node
-import { root, contextFor, syncCatalog } from './ui/inventory.mjs';
+import { root, contextFor, planFor, syncCatalog } from './ui/inventory.mjs';
 import { scenarios } from './ui/catalog.mjs';
 import { readFile, writeFile, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const help = `Reframe UIUX tools (run from any directory)
+  node agent-tool/ui.mjs prepare [--no-build] [--json]
+  node agent-tool/ui.mjs plan --files PATH ... [--json]
+  node agent-tool/ui.mjs evidence --report FILE --sha256 DIGEST [--reason TEXT] [--json]
   node agent-tool/ui.mjs context [--files PATH ...] [--json]
   node agent-tool/ui.mjs check [--changed] [--base REF] [--json]
   node agent-tool/ui.mjs sync [--check] [--json]
-  node agent-tool/ui.mjs verify [--scenario ID] [--no-build] [--fault NAME] [--json]
+  node agent-tool/ui.mjs verify [--scenario ID | --scenarios ID ...] [--no-build] [--fault NAME] [--reason TEXT] [--json]
   node agent-tool/ui.mjs inspect --scenario ID [--no-build] [--json]
   node agent-tool/ui.mjs examples [--origin URL] [--json]
   node agent-tool/ui.mjs visual --report FILE [--scenario ID] [--baseline-dir DIR] [--json]
   node agent-tool/ui.mjs baseline --report FILE [--scenario ID] [--baseline-dir DIR] [--json]
   node agent-tool/ui.mjs accept --candidate DIR --scenario ID --reason TEXT --reviewer NAME [--baseline-dir DIR] [--json]
   node agent-tool/ui.mjs extension [--json]
-  node agent-tool/ui.mjs gate [--tier quick|browser|full] [--base REF] [--no-build] [--baseline-dir DIR] [--json]
+  node agent-tool/ui.mjs gate [--tier quick|browser|full] [--base REF] [--no-build] [--baseline-dir DIR] [--reason TEXT] [--json]
   node agent-tool/ui.mjs change --files PATH ... --reason TEXT [--output FILE] [--json]
   node agent-tool/ui.mjs change --record FILE [--json]
 
@@ -35,14 +38,15 @@ Scenarios: ${scenarios.map(scenario => scenario.id).join(', ')}
 function parse(args) {
   const [command, ...rest] = args;
   const allowed = {
+    prepare: ['--no-build', '--json'], plan: ['--files', '--json'], evidence: ['--report', '--sha256', '--reason', '--json'],
     context: ['--files', '--json'], check: ['--changed', '--base', '--json'],
-    sync: ['--check', '--json'], verify: ['--scenario', '--no-build', '--fault', '--json'],
+    sync: ['--check', '--json'], verify: ['--scenario', '--scenarios', '--no-build', '--fault', '--reason', '--json'],
     inspect: ['--scenario', '--no-build', '--json'],
     examples: ['--origin', '--json'], extension: ['--json'],
     visual: ['--report', '--scenario', '--baseline-dir', '--json'],
     baseline: ['--report', '--scenario', '--baseline-dir', '--json'],
     accept: ['--candidate', '--scenario', '--reason', '--reviewer', '--baseline-dir', '--json'],
-    gate: ['--tier', '--base', '--no-build', '--baseline-dir', '--json'],
+    gate: ['--tier', '--base', '--no-build', '--baseline-dir', '--reason', '--json'],
     change: ['--files', '--reason', '--output', '--record', '--json'],
   };
   if (!allowed[command]) throw new Error('未知命令');
@@ -52,15 +56,20 @@ function parse(args) {
     const arg = rest[index];
     if (!allowed[command].includes(arg) || seen.has(arg)) throw new Error(`未知或重复参数 ${arg}`);
     seen.add(arg);
-    if (arg === '--files') {
-      while (rest[index + 1] && !rest[index + 1].startsWith('--')) options.files.push(rest[++index]);
-      if (!options.files.length) throw new Error('--files 需要至少一个路径');
-    } else if (['--scenario', '--base', '--fault', '--origin', '--report', '--baseline-dir', '--candidate', '--reason', '--reviewer', '--tier', '--output', '--record'].includes(arg)) {
+    if (arg === '--files' || arg === '--scenarios') {
+      const values = [];
+      while (rest[index + 1] && !rest[index + 1].startsWith('--')) values.push(rest[++index]);
+      if (!values.length) throw new Error(arg + ' 需要至少一个值');
+      options[arg === '--files' ? 'files' : 'scenarioIds'] = values;
+    } else if (['--scenario', '--base', '--fault', '--origin', '--report', '--baseline-dir', '--candidate', '--reason', '--reviewer', '--tier', '--output', '--record', '--sha256'].includes(arg)) {
       if (!rest[index + 1] || rest[index + 1].startsWith('-')) throw new Error(`${arg} 需要值`);
       options[arg.slice(2)] = rest[++index];
     } else if (arg === '--no-build') options.build = false;
     else options[arg.slice(2)] = true;
   }
+  if (command === 'plan' && !options.files.length) throw new Error('plan 必须提供 --files');
+  if (command === 'evidence' && (!options.report || !/^[a-f0-9]{64}$/.test(options.sha256 || ''))) throw new Error('evidence 必须提供 --report 与可信 --sha256');
+  if (options.scenarioIds && (options.scenario || options.fault || new Set(options.scenarioIds).size !== options.scenarioIds.length || options.scenarioIds.some(id => !scenarios.some(scene => scene.id === id)))) throw new Error('场景列表重复、未知或与单场景/故障冲突');
   if (command === 'inspect' && !options.scenario) throw new Error('inspect 必须提供 --scenario');
   if (['visual', 'baseline'].includes(command) && !options.report) throw new Error(command + ' 必须提供 --report');
   if (command === 'accept' && ['candidate', 'scenario', 'reason', 'reviewer'].some(key => !options[key])) throw new Error('accept 必须提供 candidate/scenario/reason/reviewer');
@@ -80,7 +89,18 @@ async function main() {
   catch (error) { console.error(`${error.message}\n${help}`); process.exitCode = 2; return; }
   let result;
   try {
-    if (options.command === 'context') {
+    if (options.command === 'prepare') {
+      const { prepare } = await import('./ui/build.mjs');
+      result = await prepare(options);
+      if (!options.json) console.log(JSON.stringify(result, null, 2));
+    } else if (options.command === 'plan') {
+      result = await planFor(options.files);
+      if (!options.json) console.log(JSON.stringify(result, null, 2));
+    } else if (options.command === 'evidence') {
+      const { inspectEvidence } = await import('./ui/evidence.mjs');
+      result = await inspectEvidence(options);
+      if (!options.json) console.log(JSON.stringify(result, null, 2));
+    } else if (options.command === 'context') {
       result = await contextFor(options.files);
       if (!options.json) {
         console.log(result.reason);
