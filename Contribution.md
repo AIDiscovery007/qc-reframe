@@ -1,6 +1,6 @@
 # QC-Reframe 贡献与维护指南
 
-本文约定开发、文档、GitHub 同步和发布流程，供维护者与新会话中的编码 Agent 使用。协作准则和稳定岗位索引见 [AGENTS.md](AGENTS.md)，当前会话登记见[动态任职表](.agents/roles/assignments.md)，任务记录维护于 [agent-logs/](agent-logs/)；插件内的架构和设计约定见 [browser-extension/AGENTS.md](browser-extension/AGENTS.md)。具体任务以用户当前要求为准，已授权的步骤不重复询问。
+本文约定开发、文档、GitHub 同步和发布流程，供维护者与新会话中的编码 Agent 使用。协作准则和稳定岗位索引见 [AGENTS.md](AGENTS.md)，当前会话登记见[动态任职表](.agents/roles/assignments.md)，任务记录维护于本机 `agent-logs/`（不跟踪、不随 clone 分发）；插件内的架构和设计约定见 [browser-extension/AGENTS.md](browser-extension/AGENTS.md)。具体任务以用户当前要求为准，已授权的步骤不重复询问。
 
 ## 新会话从这里开始
 
@@ -34,13 +34,14 @@
 | [.agents/roles/](.agents/roles/) | 稳定岗位的职责、边界及输入输出；[assignments.md](.agents/roles/assignments.md) 单独维护当前任职与日志索引。 |
 | [UIUX 规范](browser-extension/docs/uiux/README.md) | 设计来源、组件与场景索引、可执行契约及当前覆盖边界；工具命令统一查工具索引。 |
 | [Agent 工具库](agent-tool/README.md) | 工具清单、用途、调用方式、前置条件、输入输出、副作用及验证方式；实际交付证据记入任务日志。 |
-| [agent-logs/](agent-logs/) | 每个会话一份稳定日志，记录任务目标、范围、状态、交叉点、关键结果、复核和提交证据；发版清理动态任职登记时保留日志，历史流水查 Git。 |
+| 本机 `agent-logs/`（不随 clone 分发） | 每个会话一份稳定日志，记录任务目标、范围、状态、交叉点、关键结果、复核和提交证据；发版清理动态任职登记时保留本机日志，任务历史流水查本机记录。 |
 | 本文 / [插件 AGENTS.md](browser-extension/AGENTS.md) | 本文维护工程与发布流程；插件 AGENTS.md 维护实现约束、设计决策和代码入口。不重复维护 Agent 台账或完整版本史。 |
 
 功能变化同步更新当前用法及对应版本页；仅调整文档一般不升插件版本、不新建 Release。历史版本说明和截图保留当时的品牌及验证范围，不把旧截图标为新版实测。后续若改变架构或设计决策，同步修改 browser-extension/AGENTS.md；不要把临时调试记录写成长期规则。
 
 ## 本地数据与提交范围
 
+- `agent-logs/` 仅本机保留，不跟踪、不提交，也不随 clone 分发；现有日志从 Git 索引移除时保留磁盘文件，历史提交不因此消失。
 - 根目录采用 `.gitignore` 白名单，主要跟踪插件、首页和维护文档；新增根文件时按需添加精确例外，不取消整套隔离规则。
 - `.local/` 中的项目 JSON、Prompt、输入与生成图片、配对码、模型选择、运行配置和日志均不提交。`.output/`、`.wxt/`、`node_modules/`、下载和实验目录也不提交。
 - `browser-extension/design-extract-output/` 是本地 Raft 设计参考，保持忽略；新克隆可能没有它，构建不能依赖它。
