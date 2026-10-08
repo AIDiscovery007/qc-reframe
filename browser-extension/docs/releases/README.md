@@ -6,10 +6,11 @@
 
 后续待发布改动见 [unreleased](unreleased.md)。
 
-最新版本：[v0.4.2 · 自定义图片顺序与动态图号](v0.4.2.md)。
+最新版本：[v0.4.3 · 逆向并生图与清晰图片预览](v0.4.3.md)。
 
 | 版本 | 更新内容 | 详情 |
 | --- | --- | --- |
+| 0.4.3 | 逆向后自动生图、保留独立逆向与重复生图、预览控制不遮图、开发验证与证据复用改进 | [版本说明](v0.4.3.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.3) |
 | 0.4.2 | 参考图默认在前、自定义图片排序、默认指令动态图号、开发工具归库与 UIUX 验证体系 | [版本说明](v0.4.2.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.2) |
 | 0.4.1 | 共用生成操作栏、图标放大、风格自动判定与失败保护、创作和任务规则集中化、迟到响应修复 | [版本说明](v0.4.1.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.1) |
 | 0.4.0 | 会话创作、已选置顶、标题与正文搜索、人物描述、CLI 兼容升级与恢复 | [版本说明](v0.4.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.0) |

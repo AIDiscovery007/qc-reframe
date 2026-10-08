@@ -88,4 +88,3 @@ export async function stop(child) {
   await exited;
   clearTimeout(timeout);
 }
-

@@ -4,15 +4,15 @@
 
 在浏览器里收集灵感，在本机工作台调整主体、提示词与结果。沿用 Codex 登录和额度，无需另外填写模型 API Key。
 
-**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.4.2](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.2)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
+**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.4.3](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.3)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
 
-## v0.4.2，图片顺序由你定，默认指令同步图号
+## v0.4.3，逆向后直接生图，预览不再遮挡图片
 
-新输入默认将参考图设为图 1，也可自行调整图片顺序。图条编号、提示词中的图号与生图附件顺序保持一致；系统默认指令随图片顺序和数量更新，你自行编辑的指令保持原样。
+点击「逆向并生图」，提示词保存成功后自动生成一张图片；也可仅逆向，或使用同一提示词多次生图。图片预览的缩放控制移到独立操作行，查看细节时不再遮挡图片。
 
 本次升级需更新完整仓库并重启本机服务，再重载扩展、刷新工作台和网页；已有项目、历史结果与配对保留。
 
-[查看 v0.4.2 更新与升级说明 →](browser-extension/docs/releases/v0.4.2.md)
+[查看 v0.4.3 更新与升级说明 →](browser-extension/docs/releases/v0.4.3.md)
 
 ## 工作台，让画面成为主角
 
