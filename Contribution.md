@@ -103,6 +103,10 @@ UI 改动用 `npm run preview` 检查相关状态，再按任务需要验收实�
 - 推送被远端新提交拒绝时，先检查差异并解决，不用强推绕过。需要 PR 时走所需分支与评审流程，不将“这个仓库曾直接提交 main”当作绕过现有保护的授权。
 - 完成后核对远端分支提交和工作区状态，报告提交号与链接；推送未成功则明确报告，不把本地提交等同于云端同步。
 
+### GitHub 原生 PR 审查
+
+由具备权限的维护者连接仓库，并在 Codex 的仓库设置中启用 Automatic review，核对个人偏好和触发条件；操作以 [OpenAI 官方说明](https://learn.chatgpt.com/docs/third-party/github)为准。审查遵循适用的 AGENTS，身份与交付按[原生 reviewer 边界](AGENTS.md#岗位与任职)及 [Code Review Rules](AGENTS.md#code-review-rules)，保留 PR、受审提交与实际审查记录链接；规则文件存在不证明服务已启用或审查已完成。审查发现由监工按已有授权派工修复，保留现有 CI、独立复核、人工验收及合并/发布权限；GitHub 报告可供审阅，但不能作为本地 Mac 的同机 `evidence` 复用，亦不能跨 Mac/Linux 冒用验证结果。
+
 ## 发布新版本：先提交，再发布
 
 1. 确定目标版本，更新 `package.json` 和 `package-lock.json` 中的根版本。WXT 从包版本生成 manifest；同步 README 当前版本、安装 Prompt、克隆标签、下载链接和安装指引，不复制旧版功能日志到首页。
