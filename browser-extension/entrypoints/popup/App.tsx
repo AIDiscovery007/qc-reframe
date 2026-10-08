@@ -1,3 +1,4 @@
+import { validGenerationRatio } from "../../lib/generation-session";
 import { orderedImageIds } from "../../lib/image-order";
 import { creationContext, emptyCreationState, createInputWriter, resolveCreation, restoredQuickDraft } from "../../lib/creation-context";
 import RecoveryAction, { RecoveryContext } from "./RecoveryAction";
@@ -23,7 +24,7 @@ import TaskCenter from "./TaskCenter";
 import HiddenProjectsToggle from "./HiddenProjectsToggle";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { query, readState, request, type UiState } from "../../lib/client";
-import type { Job, Mode, Project, ProjectSummary, SubjectInput, Selection, MultiSubject } from "../../lib/types";
+import type { Job, Mode, Project, ProjectSummary, SubjectInput, Selection, MultiSubject, AspectRatio } from "../../lib/types";
 import ProjectHistory from "./ProjectHistory";
 import QuickWorkspace from "./QuickWorkspace";
 import MultiInputPreview from "./MultiInputPreview";
@@ -162,7 +163,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const inputWriter = useRef<ReturnType<typeof createInputWriter> | undefined>(undefined);
   inputWriter.current ??= createInputWriter(message => request<Selection>(message),
     () => ({ context: referenceContext.current, revision: selectionRevision.current }));
-  const running = job?.status === "running";
+  const running = job?.status === "running" || job?.autoGeneration?.status === "pending";
   const loadingProject = !!selection && !activeProject;
   const result = job?.result;
     const cancelling = !!job && cancellingJobs.includes(job.id);
@@ -583,26 +584,35 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       setBusy(false);
     }
   };
-  const start = async (mode: Mode = preferences.mode, reenact?: SubjectInput) => {
-    if (!selection || !displayImage || !activeProject || blocked) return;
-    const revision = selectionRevision.current;
+  const startPending = useRef(false);
+  const [continuousJobId, setContinuousJobId] = useState("");
+  const [chainRatio, setChainRatio] = useState<{ key: string; ratio?: AspectRatio }>();
+  const start = async (mode: Mode = preferences.mode, reenact?: SubjectInput, generate = false) => {
+    if (!selection || !displayImage || !activeProject || blocked || startPending.current) return;
+    startPending.current = true;
+    const revision = selectionRevision.current, context = referenceContext.current;
     setBusy(true);
     setError("");
     try {
       const value = await request<{ selection: Selection; currentSelection: Selection; job: Job }>({
         type: "alchemy:start", referenceIndex: contextFor(mode).referenceIndex, id: selection.id, projectId: activeProject.id, mode, reenact, instruction: taskInstruction(mode), ...(mode === "session" ? { sessionIds: selectedSessions().map(item => item.id) } : {}),
         inputRevision: selection.inputRevision || 0, referenceJobId: modeJob(mode)?.id,
+        ...(generate ? { generation: { language: lang, aspectRatio: ratio } } : {}),
       });
       setReferences(items => ({ ...items, [value.job.id]: value.selection }));
       updateJob(value.job);
-      if (revision !== selectionRevision.current) return;
+      if (revision !== selectionRevision.current || context !== referenceContext.current) return;
+      if (generate) setContinuousJobId(value.job.id);
       selectionRevision.current++;
       setSelection((current) => current?.id === selection.id ? value.currentSelection : current);
       dispatchCreation({ type: "revision", projectId: activeProject.id, revision: value.currentSelection.inputRevision || 0 });
       dispatchCreation({ type: "select", key: `${activeProject.id}:${mode}`, version: value.job.id });
       setCopied(false);
-    } catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
+      if (generate && !value.job.autoGeneration) setError("本机服务尚未支持连续生图，本次已提交仅逆向。请在任务结束后重启服务；提示词完成后可单独生图。");
+    } catch (e) {
+      if (revision === selectionRevision.current && context === referenceContext.current) setError((e as Error).message);
+    }
+    finally { startPending.current = false; setBusy(false); }
   };
   const showHistory = () => {
     setGalleryOpen(false);
@@ -756,7 +766,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const reverseStatus = reading ? selection?.stage || "正在读取图片…" : running ? `${job?.stage || "正在逆向提示词…"} · 完成后会提醒你`
+  const reverseStatus = reading ? selection?.stage || "正在读取图片…" : running ? `${job?.autoGeneration?.status === "pending" ? job.result ? "正在准备生图…" : "正在逆向，完成后自动生图…" : job?.stage || "正在逆向提示词…"} · 完成后会提醒你`
     : restoring ? "正在恢复原图…" : loadingProject ? "正在读取模板项目…" : cliBusy ? "Codex 正在升级…"
     : modelBusy ? "正在验证模型…" : busy ? "正在提交…" : undefined;
 
@@ -764,7 +774,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const genericPrompt = !!result && preferences.mode === "style" && !job?.reenact;
   const needsPrompt = !result || instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt;
   const subjectError = contextFor(preferences.mode).subjectError;
-  const genericHint = genericPrompt && !subjectImage("style") ? "添加主体图后可生成专属提示词" : "";
+  const genericHint = preferences.mode === "style" && !subjectImage("style") ? "添加主体图后可逆向并生图；也可仅逆向通用风格" : "";
   const reverseHint = !selection ? "先选择一张参考图。" : referenceError ? "历史参考图不可用，请重新上传参考图。" : !displayImage ? "等待参考图读取完成。"
     : subjectError ? subjectError
     : subjectUnavailable[subjectKey(preferences.mode)] ? "主体图尚未就绪，请完成上传。"
@@ -774,11 +784,14 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     : !taskInstruction(preferences.mode).trim() ? "填写任务指令后可生成提示词。"
     : "";
   const reverseDisabled = blocked || !!reverseHint || !!promptDraft;
-  const reverse = () => {
-    if (reverseDisabled) return;
+  const ratio = workspace ? chainRatio?.key === drawerKey ? chainRatio.ratio : undefined
+    : job?.generations?.length ? job.generations.at(-1)?.aspectRatio : job?.autoGeneration?.aspectRatio;
+  const chainDisabled = reverseDisabled || (preferences.mode === "style" && !subjectImage("style")) || !validGenerationRatio(ratio);
+  const reverse = (generate = false) => {
+    if (generate ? chainDisabled : reverseDisabled) return;
     const mode = preferences.mode;
     void start(mode, mode === "multi-reenact" ? { subjects: multiSubjects, basePrompt: multiPrompt }
-      : mode !== "recreate" && mode !== "session" && subjectImage(mode) ? { subjectImage: subjectImage(mode), basePrompt: taskInstruction(mode) } : undefined);
+      : mode !== "recreate" && mode !== "session" && subjectImage(mode) ? { subjectImage: subjectImage(mode), basePrompt: taskInstruction(mode) } : undefined, generate);
   };
 
   const versionSelector = modeJobs(preferences.mode).length > 0 && <SelectField className="version-select" label="" aria-label="提示词版本" value={job?.id || "new"} disabled={busy}
@@ -811,7 +824,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     if (!workspace || !narrow || !drawerOpen) return;
     if (editor.current?.contains(document.activeElement) || document.activeElement === document.body) resultReturn.current?.focus({ preventScroll: true });
   }, [workspace, narrow, drawerOpen, resultPane]);
-  const generationPanel = activeJob?.result ? <GenerationPanel key={activeJob.id} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace}
+  const generationPanel = activeJob?.result ? <GenerationPanel key={activeJob.id} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace} onAspectRatioChange={ratio => setChainRatio({ key: drawerKey, ratio })}
                   drawerOpen={drawerOpen} requestError={drawer.error} requestPending={drawer.pending}
                   onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabledReason={workspace ? promptDraft ? "编辑未保存，请保存或取消提示词修改。" : needsPrompt ? reverseHint || genericHint || "输入已修改，请更新提示词。" : "" : ""} disabled={blocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
                   subjectImage={(activeJob.mode === "recreate" || activeJob.mode === "session") ? undefined : subjectImage(activeJob.mode)}
@@ -962,9 +975,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           referenceIndex={contextFor(preferences.mode).referenceIndex} onImageOrder={changeImageOrder}
           selected={canvasSelections[subjectKey(preferences.mode)] || "reference"} onSelect={id => setCanvasSelections(items => ({ ...items, [subjectKey(preferences.mode)]: id }))}
           instruction={taskInstruction(preferences.mode)} onInstruction={value => changeInstruction(preferences.mode, value)}
-          disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy} reverseDisabled={reverseDisabled} running={!!running} cancelling={cancelling}
+          disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy} reverseDisabled={reverseDisabled} running={!!running} continuous={!!job?.autoGeneration || job?.id === continuousJobId} submitting={busy && startPending.current} cancelling={cancelling}
           status={reverseStatus || (promptDraft ? "编辑未保存" : reverseHint || genericHint || (preferences.mode === "session" && job?.sessionContext?.attachmentCount ? `会话含 ${job.sessionContext.attachmentCount} 个附件，未读取附件内容` : "") || (job?.status === "cancelled" ? "已取消" : ""))}
-          error={referenceError || subjectError || selection.error || job?.error} errorTaskId={!referenceError && !subjectError && !selection.error && job?.status === "failed" ? job.id : undefined} stale={instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt}
+          error={referenceError || subjectError || selection.error || job?.error || job?.autoGeneration?.error} errorTaskId={!referenceError && !subjectError && !selection.error && job?.status === "failed" ? job.id : undefined} stale={instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt}
           hasPrompt={!!result} promptEditing={!!promptDraft} reduced={reduced} versions={versionSelector} actionsTarget={reverseActions}
           onMode={mode => void saveMode(mode)} onSubject={changeSubject}
           onAvailability={available => setSubjectUnavailable(items => ({ ...items, [subjectKey(preferences.mode)]: !available }))}
@@ -972,7 +985,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           onReference={image => applyReferenceUpload(image, preferences.mode, taskInstruction(preferences.mode))}
           onReferenceRotate={image => applyReferenceRotation(image, preferences.mode, taskInstruction(preferences.mode))}
           onSwap={id => { if (preferences.mode !== "recreate" && preferences.mode !== "session") void swapImages(preferences.mode, taskInstruction(preferences.mode), id); }}
-          onReverse={reverse} onCancel={cancel}
+          onReverse={() => reverse()} onGenerate={() => reverse(true)} chainDisabled={chainDisabled} onCancel={cancel}
           onRetryReference={referenceError ? () => setReferenceErrors(items => { const next = { ...items }; delete next[job!.id]; return next; }) : undefined}
           prompt={result && activeJob && <PromptEditor taskId={activeJob.id} sheet result={result} draft={promptDraft} lang={lang} copied={copied} saving={!!savingPrompt} disabled={!connected} versionSelector={null} onExport={exportResult}
             onLanguage={setLang} onCopy={copy} onEdit={() => setPromptDrafts(items => ({ ...items, [activeJob.id]: { promptZh: result.promptZh, promptEn: result.promptEn, negativePrompt: result.negativePrompt } }))}
@@ -987,7 +1000,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           onInstruction={value => changeInstruction(preferences.mode, value)} onReference={file => void uploadReference(file, false)}
           onRotateReference={image => applyReferenceRotation(image, preferences.mode, taskInstruction(preferences.mode))}
           onSwap={() => { if (preferences.mode !== "recreate" && preferences.mode !== "session") void swapImages(preferences.mode, taskInstruction(preferences.mode)); }}
-          onReverse={reverse} onCancel={cancel} onCopy={copy} onLanguage={setLang} onWorkspace={() => void openWorkspace()} onUpdate={updateJob} onGenerationViewUpdate={revealGeneratedImage}
+          onReverse={() => reverse()} onGenerate={() => reverse(true)} chainDisabled={chainDisabled} continuous={!!job?.autoGeneration || job?.id === continuousJobId} submitting={busy && startPending.current} onCancel={cancel} onCopy={copy} onLanguage={setLang} onWorkspace={() => void openWorkspace()} onUpdate={updateJob} onGenerationViewUpdate={revealGeneratedImage}
           generationHint={promptDraft ? "未保存的提示词请在工作台继续编辑" : instructionStale ? "输入已修改，请重新生成提示词" : reverseStatus || (!connected ? "请先连接服务" : !selectedModel ? "请在工作台选择模型" : "")}
           generationDisabled={!connected || !selectedModel || blocked || !!promptDraft || needsPrompt || !!subjectUnavailable[subjectKey(preferences.mode)]}
         /> : <section className="empty"><span className="empty-mark"><Icon name="image" /></span><h1>选择一张参考图</h1></section>}

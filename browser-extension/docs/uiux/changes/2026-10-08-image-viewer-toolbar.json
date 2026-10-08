@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "intent": "根据人类反馈，将图片预览缩放控制移到视口外独立正常流行，保持既有缩放/平移/旋转/焦点边界，增加可复现的遮挡诊断与正反例",
+  "createdAt": "2026-10-08T09:42:49.420Z",
+  "reviewStatus": "proposed",
+  "files": [
+    {
+      "path": "browser-extension/entrypoints/popup/image-viewer.css",
+      "sha256": "7e99ae49429b7c019a6ddc7c78e44e0547aac8e7ba808c338310fe2ac9a84301"
+    },
+    {
+      "path": "agent-tool/ui/catalog.mjs",
+      "sha256": "60cff77932876f450112125c812de9d90db9b9a19a8b4e575a5208638da49f64"
+    },
+    {
+      "path": "agent-tool/ui/examples.mjs",
+      "sha256": "c591b934e9299a8b80f84b24debc39b4ceb2a8f5f9e985a50356e9d5da8b49b5"
+    },
+    {
+      "path": "agent-tool/ui/runner.mjs",
+      "sha256": "29e1943854343dfdf57870a0f102551515723144bb9ad432f8963464cb837a34"
+    },
+    {
+      "path": "agent-tool/ui/image-viewer.mjs",
+      "sha256": "ea3abc8884ab356d240e6fc6032c8294cb879278a5f3631e5507194c9a562f34"
+    },
+    {
+      "path": "agent-tool/ui/image-viewer.test.mjs",
+      "sha256": "a076523796ebfe335a8e740348a5f3ad83b65fe38166631176862b246c837946"
+    },
+    {
+      "path": "browser-extension/docs/uiux/README.md",
+      "sha256": "54e7b8e14336a7b47c4b827d198f84ba1e725e667f993005e4a06ce5a76fe474"
+    },
+    {
+      "path": "agent-tool/README.md",
+      "sha256": "61945c70a89bba8e1c5250909a2c4952fbcce3086665a1fad59b0dfc700ef5a5"
+    }
+  ],
+  "rules": [
+    "UI-CSS-IMPORT",
+    "UI-TOKEN-DEFINED",
+    "UI-TOKEN-COLOR",
+    "UI-LAYOUT-CANVAS",
+    "UI-LAYOUT-QUICK",
+    "UI-IMAGE-PREVIEW",
+    "UI-IMAGE-VIEWPORT",
+    "UI-EXAMPLE-STATE",
+    "UI-EXAMPLE-KEYBOARD"
+  ],
+  "scenarios": [
+    "workspace-wide",
+    "workspace-prompt",
+    "workspace-narrow",
+    "popup",
+    "popup-narrow",
+    "popup-image-failed",
+    "generation-actions",
+    "end-to-end-keyboard-workspace-cancel",
+    "end-to-end-keyboard-workspace-legacy",
+    "end-to-end-keyboard-workspace-failure",
+    "end-to-end-keyboard-workspace-tab",
+    "end-to-end-keyboard-workspace-tab-failure",
+    "end-to-end-keyboard-workspace-project",
+    "end-to-end-keyboard-workspace-project-failure",
+    "end-to-end-keyboard-popup-cancel",
+    "end-to-end-keyboard-popup-legacy",
+    "end-to-end-keyboard-popup-failure",
+    "end-to-end-keyboard-popup-tab",
+    "end-to-end-keyboard-popup-tab-failure",
+    "end-to-end-keyboard-popup-project",
+    "end-to-end-keyboard-popup-project-failure",
+    "end-to-end-popup-start-failed",
+    "end-to-end-workspace",
+    "end-to-end-popup",
+    "end-to-end-cancel",
+    "end-to-end-phase-cancel",
+    "end-to-end-context",
+    "end-to-end-reverse-failed",
+    "end-to-end-generation-failed",
+    "image-order-paired",
+    "image-order-multi",
+    "image-order-legacy",
+    "image-order-failed",
+    "image-order-popup",
+    "image-instruction-default-paired",
+    "image-instruction-legacy-paired",
+    "image-instruction-default-multi",
+    "image-order-keyboard-new",
+    "image-order-keyboard-history",
+    "image-order-keyboard-failure",
+    "image-order-keyboard-late",
+    "auto-style",
+    "creation-context",
+    "settings-recovery",
+    "example-workspace-empty",
+    "example-popup-empty",
+    "example-input-loading",
+    "example-reverse-busy",
+    "example-reverse-failed",
+    "example-no-model",
+    "example-long-instruction",
+    "example-narrow-input",
+    "example-narrow-result",
+    "example-image-viewer",
+    "example-image-viewer-portrait",
+    "example-image-viewer-narrow",
+    "example-image-viewer-short",
+    "example-image-viewer-result-short",
+    "example-image-viewer-result-popup",
+    "example-native-controls"
+  ],
+  "scopeReason": "共享/未知依赖没有完整影响图，回退全部登记场景，不静默跳过。",
+  "evidence": [
+    {
+      "kind": "targeted-preview",
+      "status": "passed",
+      "reportIndex": "/tmp/reframe-preview-toolbar-targeted.json",
+      "scenarios": 6,
+      "passedChecks": 74,
+      "skippedChecks": 2,
+      "note": "Two read-only previews omit rotation. 640×360 workspace opens at640×740 and restores that size before checking focus return."
+    },
+    {
+      "kind": "regression-tests",
+      "status": "passed",
+      "command": "node --test agent-tool/ui/image-viewer.test.mjs",
+      "tests": 12,
+      "log": "/tmp/reframe-preview-toolbar-tests.log",
+      "note": "Includes old overlay, visible overflow, hidden/disabled rotation negative tests; closed ShadowRoot CSS fixture is not actual content panel validation."
+    },
+    {
+      "kind": "product-tests",
+      "status": "passed",
+      "command": "npm test",
+      "tests": 729,
+      "log": "/tmp/reframe-preview-toolbar-product-tests.log"
+    },
+    {
+      "kind": "build-and-compile",
+      "status": "passed",
+      "sourceHash": "0fac12b5b8aaa01922e96206619a24b2bf6bb41828450e5f63497750dc283455",
+      "buildHash": "7abdd24cb9a2b6a25564beb49ded632275c8c67c6c4543da8245abed6febd930"
+    },
+    {
+      "kind": "all-tool-tests",
+      "status": "passed",
+      "command": "node --test --test-concurrency=1 agent-tool/ui/*.test.mjs",
+      "tests": 60,
+      "log": "/tmp/reframe-preview-toolbar-all-tools.log"
+    },
+    {
+      "kind": "browser-gate",
+      "status": "passed",
+      "reportPath": "<OS临时目录>/reframe-ui-gate-iFGV7g/gate.json",
+      "previewReport": "<OS临时目录>/reframe-ui-MCaYud/report.json",
+      "scenarios": 60,
+      "passedChecks": 246,
+      "skippedChecks": 3,
+      "extensionPassedChecks": 16,
+      "fingerprints": {
+        "source": "0fac12b5b8aaa01922e96206619a24b2bf6bb41828450e5f63497750dc283455",
+        "build": "7abdd24cb9a2b6a25564beb49ded632275c8c67c6c4543da8245abed6febd930",
+        "fixture": "97441b205df676650320c3c1e591603b7960035c8d1dcca14d059a6a277e5b8a",
+        "checker": "8effde8d51ed227d173aa23b334c08181cd4957b630510be1f34b8465933a23e"
+      },
+      "note": "Two read-only rotation checks not applicable; native picker keyboard unsupported. Three initial visual baselines remain uncovered, no acceptance or full visual claim."
+    }
+  ],
+  "reviewChecklist": [
+    "确认设计意图及合法变体",
+    "复核组件复用与所有受影响表面",
+    "附上静态/交互/截图证据",
+    "设计变化时单独审阅指定视觉基线"
+  ]
+}

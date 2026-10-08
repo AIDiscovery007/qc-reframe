@@ -222,3 +222,17 @@ test("background indexing blocks CLI upgrades after the initiating HTTP request 
   assert.equal((await request("/models/refresh", post({}))).status, 409);
   assert.equal((await (await request("/sessions/index", post({ action: "clear" }))).json()).state, "empty");
 });
+
+test("session creation chains its captured prompt into generation without sending session text again", async t => {
+  const { request, wait, calls, generations } = await setup(t);
+  const response = await request("/jobs", post({ mode: "session", image, instruction: "为小说配图", sessionIds: [sid], generation: { language: "en" } }));
+  assert.equal(response.status, 202);
+  const submitted = await response.json(), job = await wait(submitted.id, "completed");
+  assert.equal(job.autoGeneration.status, "started");
+  assert.equal(job.generations[0].status, "completed");
+  assert.equal(calls[0].sessionContext.messages[0].text, "PRIVATE_STORY_BODY");
+  assert.equal(generations[0].prompt, result.promptEn);
+  assert.equal(generations[0].sessionContext, undefined);
+  assert.ok(generations[0].imagePath);
+  assert.equal(generations[0].subjectImagePath, undefined);
+});

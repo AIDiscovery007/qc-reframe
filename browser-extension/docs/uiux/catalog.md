@@ -12,8 +12,9 @@
 | UI-LAYOUT-CANVAS | 工作台画布关系：宽屏双画布等宽，共享标签、画布、图条轨道；窄屏关闭侧 inert。 | workspace | [browser-extension/entrypoints/workspace/CanvasWorkspace.tsx](../../../browser-extension/entrypoints/workspace/CanvasWorkspace.tsx)、[browser-extension/entrypoints/workspace/canvas-workspace.css](../../../browser-extension/entrypoints/workspace/canvas-workspace.css)、[browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css) |
 | UI-LAYOUT-QUICK | 轻量画布与图条：保持已确认的轻量画布和图条尺寸，空态与有图状态分开验证。 | popup | [browser-extension/entrypoints/popup/QuickWorkspace.tsx](../../../browser-extension/entrypoints/popup/QuickWorkspace.tsx)、[browser-extension/entrypoints/popup/compact-editor.css](../../../browser-extension/entrypoints/popup/compact-editor.css) |
 | UI-IMAGE-PREVIEW | 图片预览入口：预览按钮贴合实际 contain 图片边缘，图片失败后不提供无效入口。 | workspace, popup | [browser-extension/entrypoints/popup/ImagePreview.tsx](../../../browser-extension/entrypoints/popup/ImagePreview.tsx)、[browser-extension/entrypoints/popup/image-preview.css](../../../browser-extension/entrypoints/popup/image-preview.css) |
+| UI-IMAGE-VIEWPORT | 图片视口与独立缩放栏：控制行占独立空间，不与图片视口相交；适配完整可见，缩放平移裁剪于视口，工具栏不触发图片手势。 | workspace, popup | [browser-extension/entrypoints/popup/ImageViewer.tsx](../../../browser-extension/entrypoints/popup/ImageViewer.tsx)、[browser-extension/entrypoints/popup/image-viewer.css](../../../browser-extension/entrypoints/popup/image-viewer.css)、[browser-extension/entrypoints/popup/ImagePreview.tsx](../../../browser-extension/entrypoints/popup/ImagePreview.tsx)、[browser-extension/entrypoints/popup/image-preview.css](../../../browser-extension/entrypoints/popup/image-preview.css) |
 | UI-EXAMPLE-STATE | 生产组件代表状态：预览数据驱动真实组件的空态、读取、忙碌、失败、禁用、长文本和窄屏；不通过改DOM伪造业务状态。 | workspace, popup | [browser-extension/entrypoints/popup/QuickWorkspace.tsx](../../../browser-extension/entrypoints/popup/QuickWorkspace.tsx)、[browser-extension/entrypoints/workspace/CanvasWorkspace.tsx](../../../browser-extension/entrypoints/workspace/CanvasWorkspace.tsx) |
-| UI-EXAMPLE-KEYBOARD | 原生控件与浮层交互：真实键盘验证原生select、帮助展开、图片缩放、dialog焦点约束、Escape关闭和焦点返回。 | workspace | [browser-extension/entrypoints/popup/SelectField.tsx](../../../browser-extension/entrypoints/popup/SelectField.tsx)、[browser-extension/entrypoints/popup/InlineHelp.tsx](../../../browser-extension/entrypoints/popup/InlineHelp.tsx)、[browser-extension/entrypoints/popup/ImagePreview.tsx](../../../browser-extension/entrypoints/popup/ImagePreview.tsx)、[browser-extension/lib/motion-dialog.ts](../../../browser-extension/lib/motion-dialog.ts) |
+| UI-EXAMPLE-KEYBOARD | 原生控件与浮层交互：真实键盘验证原生select、帮助展开、图片缩放、dialog焦点约束、Escape关闭和焦点返回。 | workspace, popup | [browser-extension/entrypoints/popup/SelectField.tsx](../../../browser-extension/entrypoints/popup/SelectField.tsx)、[browser-extension/entrypoints/popup/InlineHelp.tsx](../../../browser-extension/entrypoints/popup/InlineHelp.tsx)、[browser-extension/entrypoints/popup/ImagePreview.tsx](../../../browser-extension/entrypoints/popup/ImagePreview.tsx)、[browser-extension/lib/motion-dialog.ts](../../../browser-extension/lib/motion-dialog.ts) |
 
 ## 组件复用入口
 
@@ -38,6 +39,28 @@
 | popup-narrow | popup 320×740 | /popup.html?state=alignment | UI-LAYOUT-QUICK, UI-IMAGE-PREVIEW |
 | popup-image-failed | popup 400×740 | /popup.html?state=alignment / image-failed | UI-LAYOUT-QUICK, UI-IMAGE-PREVIEW |
 | generation-actions | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200 | generationActionsRegression |
+| end-to-end-keyboard-workspace-cancel | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000 | endToEndKeyboard |
+| end-to-end-keyboard-workspace-legacy | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=legacy | endToEndKeyboard |
+| end-to-end-keyboard-workspace-failure | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=failed | endToEndKeyboard |
+| end-to-end-keyboard-workspace-tab | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000 | endToEndKeyboard |
+| end-to-end-keyboard-workspace-tab-failure | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=failed | endToEndKeyboard |
+| end-to-end-keyboard-workspace-project | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000 | endToEndKeyboard |
+| end-to-end-keyboard-workspace-project-failure | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=failed | endToEndKeyboard |
+| end-to-end-keyboard-popup-cancel | popup 320×740 | /popup.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000 | endToEndKeyboard |
+| end-to-end-keyboard-popup-legacy | popup 320×740 | /popup.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=legacy | endToEndKeyboard |
+| end-to-end-keyboard-popup-failure | popup 320×740 | /popup.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=failed | endToEndKeyboard |
+| end-to-end-keyboard-popup-tab | popup 320×740 | /popup.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000 | endToEndKeyboard |
+| end-to-end-keyboard-popup-tab-failure | popup 320×740 | /popup.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=failed | endToEndKeyboard |
+| end-to-end-keyboard-popup-project | popup 320×740 | /popup.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000 | endToEndKeyboard |
+| end-to-end-keyboard-popup-project-failure | popup 320×740 | /popup.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=failed | endToEndKeyboard |
+| end-to-end-popup-start-failed | popup 320×740 | /popup.html?state=alignment&mode=recreate&endToEndRegression=popup-start-failed&generationDelay=1000 | endToEndRegression |
+| end-to-end-workspace | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndRegression=workspace&generationDelay=1000&startDelay=200&reverseDelay=1500 | endToEndRegression |
+| end-to-end-popup | popup 320×740 | /popup.html?state=alignment&mode=recreate&endToEndRegression=popup&generationDelay=1000&startDelay=200&reverseDelay=1500 | endToEndRegression |
+| end-to-end-cancel | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndRegression=cancel&generationDelay=1000&startDelay=200&reverseDelay=1500 | endToEndRegression |
+| end-to-end-phase-cancel | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndRegression=phase-cancel&generationDelay=1000&startDelay=200&reverseDelay=300&generationStartDelay=2000 | endToEndRegression |
+| end-to-end-context | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndRegression=context&generationDelay=1000&startDelay=200&reverseDelay=1500 | endToEndRegression |
+| end-to-end-reverse-failed | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndRegression=reverse-failed&generationDelay=1000&startDelay=200&reverseDelay=1500&reverse=failed | endToEndRegression |
+| end-to-end-generation-failed | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndRegression=generation-failed&generationDelay=1000&startDelay=200&reverseDelay=1500&fx=failed | endToEndRegression |
 | image-order-paired | workspace 1440×1000 | /workspace.html?state=projects&mode=style&imageOrderRegression=paired&inputSaveDelay=100 | imageOrderRegression |
 | image-order-multi | workspace 1440×1000 | /workspace.html?state=multi&mode=multi-reenact&imageOrderRegression=multi&inputSaveDelay=100 | imageOrderRegression |
 | image-order-legacy | workspace 1440×1000 | /workspace.html?state=projects&mode=style&imageOrderRegression=legacy&inputSaveDelay=100 | imageOrderRegression |
@@ -62,7 +85,12 @@
 | example-long-instruction | workspace 1440×1000 | /workspace.html?state=alignment | UI-EXAMPLE-STATE, UI-LAYOUT-CANVAS |
 | example-narrow-input | workspace 600×900 | /workspace.html?state=alignment | UI-EXAMPLE-STATE, UI-LAYOUT-CANVAS |
 | example-narrow-result | workspace 600×900 | /workspace.html?state=alignment | UI-EXAMPLE-STATE, UI-LAYOUT-CANVAS |
-| example-image-viewer | workspace 1440×1000 | /workspace.html?state=alignment | UI-EXAMPLE-KEYBOARD |
+| example-image-viewer | workspace 1440×1000 | /workspace.html?state=alignment | UI-EXAMPLE-KEYBOARD, UI-IMAGE-VIEWPORT |
+| example-image-viewer-portrait | workspace 975×1034 | /workspace.html?state=alignment | UI-EXAMPLE-KEYBOARD, UI-IMAGE-VIEWPORT |
+| example-image-viewer-narrow | popup 320×740 | /popup.html?state=alignment | UI-EXAMPLE-KEYBOARD, UI-IMAGE-VIEWPORT |
+| example-image-viewer-short | popup 320×360 | /popup.html?state=alignment | UI-EXAMPLE-KEYBOARD, UI-IMAGE-VIEWPORT |
+| example-image-viewer-result-short | workspace 640×360 | /workspace.html?state=alignment | UI-EXAMPLE-KEYBOARD, UI-IMAGE-VIEWPORT |
+| example-image-viewer-result-popup | popup 400×740 | /popup.html?state=alignment | UI-EXAMPLE-KEYBOARD, UI-IMAGE-VIEWPORT |
 | example-native-controls | workspace 1440×1000 | /workspace.html?state=alignment | UI-EXAMPLE-KEYBOARD |
 
 ## CSS 变量清单

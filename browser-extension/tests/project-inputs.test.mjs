@@ -222,7 +222,7 @@ test("new task submission commits its current instruction and subjects without r
   assert.equal((await (await request(`${path}/reference`)).json()).inputs.reenact.instruction, "new");
 });
 
-test("failure selecting a new task leaves a persisted failed task and no running controller", async t => {
+for (const automatic of [false, true]) test(`failure selecting a new ${automatic ? "automatic" : "reverse"} task leaves a persisted failed task and no running controller`, async t => {
   const { default: fs } = await import("node:fs");
   const { syncBuiltinESMExports } = await import("node:module");
   const { request, dir, restart } = await setup(t);
@@ -235,7 +235,7 @@ test("failure selecting a new task leaves a persisted failed task and no running
   };
   syncBuiltinESMExports();
   try {
-    assert.equal((await request("/jobs", post({ projectId: project.id, image, mode: "recreate" }))).status, 500);
+    assert.equal((await request("/jobs", post({ projectId: project.id, image, mode: "recreate", ...(automatic ? { generation: { language: "zh" } } : {}) }))).status, 500);
   } finally {
     fs.promises.rename = rename;
     syncBuiltinESMExports();
@@ -243,6 +243,11 @@ test("failure selecting a new task leaves a persisted failed task and no running
   const jobs = await (await request("/jobs")).json();
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].status, "failed");
+  if (automatic) {
+    assert.equal(jobs[0].autoGeneration.status, "failed");
+    assert.match(jobs[0].autoGeneration.error, /未启动/);
+    assert.equal((await (await request("/task-feed")).json()).tasks[0].status, "failed");
+  }
   assert.equal((await (await request("/health")).json()).active, 0);
   assert.equal(JSON.parse(await readFile(join(dir, "records", `${jobs[0].id}.json`))).status, "failed");
   await restart();

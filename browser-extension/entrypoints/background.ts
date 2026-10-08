@@ -6,6 +6,7 @@ import { operationFor, allowsOperation, messageSource, PORT_KEEP_ALIVE } from ".
 import { captureImage } from "../lib/capture";
 import type {
   ImageTarget,
+  AspectRatio,
   CollectionResult,
   Job,
   Mode,
@@ -131,7 +132,7 @@ export default defineBackground(() => {
     if (typeof id !== "string" || !/^[\da-f]{64}$/.test(id)) throw new Error("无效项目");
     return bridge<Selection>(`/projects/${id}/reference`, token);
   };
-  const start = async (id: string, mode: Mode, referenceJobId?: string, reenact?: SubjectInput, projectId?: string, instruction?: string, inputRevision?: number, sessionIds?: string[], signal?: AbortSignal, referenceIndex?: number) => {
+  const start = async (id: string, mode: Mode, referenceJobId?: string, reenact?: SubjectInput, projectId?: string, instruction?: string, inputRevision?: number, sessionIds?: string[], signal?: AbortSignal, referenceIndex?: number, generation?: { language: "zh" | "en"; aspectRatio?: AspectRatio }) => {
     if (selecting) throw new Error("正在处理图片，请稍候");
     selecting = true;
     try {
@@ -157,7 +158,7 @@ export default defineBackground(() => {
         throw new Error("所选图片已变化，请重试");
       const job = await bridge<Job>("/jobs", stored.preferences?.token || "", {
         image: selection.image,
-        mode, sessionIds, referenceIndex,
+        mode, sessionIds, referenceIndex, generation,
         sourceUrl: selection.sourceUrl,
         capture: selection.capture,
         instruction,
@@ -530,7 +531,7 @@ export default defineBackground(() => {
           : bridge(`${path}/${message.generationId}/cancel`, token, {});
       }
       case "alchemy:start":
-        return start(message.id, message.mode, message.referenceJobId, message.reenact, message.projectId, message.instruction, message.inputRevision, message.sessionIds, signal, message.referenceIndex);
+        return start(message.id, message.mode, message.referenceJobId, message.reenact, message.projectId, message.instruction, message.inputRevision, message.sessionIds, signal, message.referenceIndex, message.generation);
     }
   };
   browser.runtime.onConnect.addListener(port => {

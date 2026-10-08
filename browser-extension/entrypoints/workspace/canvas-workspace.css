@@ -68,7 +68,7 @@
 .workspace-app .canvas-prompt-content .negative { padding:6px 12px; }
 .workspace-app .canvas-prompt-content .prompt-save { position:sticky;bottom:0;background:var(--surface); }
 .canvas-primary-actions { display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:end;gap:8px;padding:0 28px 16px;flex:none; }
-.canvas-reverse-actions { grid-column:1;grid-row:1; }
+.canvas-reverse-actions { grid-column:1;grid-row:1;display:flex;gap:8px;flex-wrap:wrap; }
 .canvas-generation-actions { display:contents; }
 .canvas-generation-actions .generation-ratio { grid-column:2;grid-row:1;justify-self:end;margin:0;min-width:0; }
 .canvas-generation-actions .generation-ratio-fields { gap:8px; }
@@ -133,3 +133,5 @@
  .canvas-primary-actions:has(.custom-ratio) .select-field { flex-basis:104px; }
  .canvas-primary-actions:has(.custom-ratio) .canvas-reverse-actions,.workspace-app .canvas-primary-actions:has(.custom-ratio) .generate-button { grid-row:2; }
 }
+
+.canvas-generate[aria-disabled="true"] { opacity:.35;cursor:default; }

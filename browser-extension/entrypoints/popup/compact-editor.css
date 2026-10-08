@@ -50,7 +50,7 @@
 .quick-prompt-toggle[aria-expanded="true"] { background:var(--surface-muted);border-radius:6px; }
 .quick-compose { border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden; }
 .quick-compose textarea { display:block;width:100%;min-height:60px;max-height:140px;padding:10px 12px;border:0;resize:vertical;background:transparent;font-size:12px;line-height:1.7; }
-.quick-submit { display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 8px 8px; }
+.quick-submit { flex-wrap:wrap;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 8px 8px; }
 .quick-submit > span { min-width:0;color:var(--muted);font-size:11px;overflow-wrap:anywhere; }
 .quick-workspace .primary { width:auto;flex-shrink:0;min-height:32px;margin:0;padding:6px 10px;border-radius:7px;font-size:11px; }
 .quick-handoff { display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted); }
@@ -71,3 +71,7 @@
 .quick-tools .select-field { margin:0;min-width:0;max-width:120px; }
 .quick-tools .select-control select { height:30px;min-height:30px;padding-block:0;padding-left:8px;font-size:11px; }
 .quick-generation-hint { margin:8px 0;font-size:11px;color:var(--muted); }
+
+.quick-submit-actions { display:flex;gap:8px;align-items:center;margin-inline-start:auto; }
+
+.quick-submit-actions button[aria-disabled="true"] { opacity:.35;cursor:default; }

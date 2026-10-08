@@ -288,3 +288,14 @@ test("generation revalidates source existence after its compatibility probe", as
   assert.equal((await pending).status, 404);
   assert.ok(!f.calls.includes("generation"));
 });
+
+test("automatic generation checks image capability before starting reverse or writing a job", async t => {
+  const f = await setup(t);
+  f.block("generation");
+  await rejected(await f.request("/jobs", post({ ...input, generation: { language: "zh" } })));
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(await readdir(join(f.dir, "records")), []);
+  assert.deepEqual(await readdir(join(f.dir, "images")), []);
+  const id = await f.start();
+  assert.equal((await f.wait(id)).autoGeneration, undefined);
+});

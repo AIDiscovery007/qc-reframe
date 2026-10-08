@@ -46,6 +46,7 @@ export type Result = {
   uncertainties: string[];
 };
 export type Job = {
+  autoGeneration?: { language: "zh" | "en"; aspectRatio?: AspectRatio; status: "pending" | "started" | "failed" | "cancelled"; generationId?: string; error?: string };
   referenceIndex?: number;
   sessionContext?: SessionContext;
   id: string;

@@ -78,3 +78,29 @@ test("a failed completion commit becomes a persisted failure rather than apparen
   assert.match(persisted.error, /未能保存/);
   assert.equal(runtime.count, 0);
 });
+
+test("post-commit continuation retains occupancy and observes failed commits before starting", async () => {
+  for (const failed of [false, true]) {
+    const finalSave = pending(), saving = pending(), snapshots = [];
+    let writes = 0, started = false;
+    const job = jobFor("reverse");
+    const runtime = createTaskRuntime({ save: async job => {
+      if (++writes === 1) { saving.resolve(); await finalSave.promise; if (failed) throw new Error("disk failure"); }
+      snapshots.push(structuredClone(job));
+    }, onProgress: () => {}, onIdle: async () => {}, onFailure: async () => {} });
+    runtime.reserve(job.id, job.projectId);
+    const running = runtime.run(job, job, { ...options(async () => ({ result: "prompt" })), onSettled: async ({ signal }) => {
+      assert.equal(runtime.has(job.id), true);
+      assert.equal(signal.aborted, false);
+      assert.equal(snapshots.at(-1).status, failed ? "failed" : "completed");
+      started = job.status === "completed";
+      if (started) runtime.reserve("generation", job.projectId);
+    } });
+    await saving.promise;
+    assert.equal(started, false);
+    assert.equal(runtime.busy, true);
+    finalSave.resolve(); await running;
+    assert.equal(started, !failed);
+    assert.equal(runtime.count, failed ? 0 : 1);
+  }
+});

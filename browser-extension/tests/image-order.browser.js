@@ -30,6 +30,7 @@ const order = expected => JSON.stringify(ids()) === JSON.stringify(expected);
 const version = () => find('[aria-label="提示词版本"]');
 const mode = () => find('[aria-label="逆向模式"]');
 const reverse = () => find('.canvas-generate') || find('.quick-reverse');
+const reverseReady = () => reverse()?.checkVisibility() && !reverse().disabled && reverse().getAttribute('aria-disabled') !== 'true' && reverse().getAttribute('aria-busy') !== 'true';
 const input = async () => (await send({ type: 'alchemy:project-reference', id: 'a'.repeat(64) })).value;
 const openProject = async title => {
   const button = () => find(`[aria-label="打开项目：${title}"]`);
@@ -144,7 +145,7 @@ try {
     assertNumberedDefault();
     const displayedInstruction = instruction();
     if (instructionFixture) assert((await input()).inputs[mode().value].instruction === displayedInstruction, '保存重开后的默认指令应与当前编号一致');
-    await waitFor(() => reverse() && !reverse().disabled, '逆向入口应可用');
+    await waitFor(reverseReady, '逆向入口应可用');
     reverse().click();
     await waitFor(() => starts.length === 1, '应提交一次逆向请求');
     assert(starts[0].referenceIndex === expected, '逆向请求应携带用户指定顺序');
@@ -153,7 +154,7 @@ try {
     await waitFor(async () => (await input()).inputs[mode().value].referenceIndex === expected, '新任务输入快照应保存顺序');
   }
   if (instructionFixture) {
-    await waitFor(() => reverse()?.getAttribute('aria-busy') === 'false' && !reverse().disabled, '默认指令逆向应完成');
+    await waitFor(reverseReady, '默认指令逆向应完成');
     const after = (await send({ type: 'alchemy:project', id: 'a'.repeat(64) })).value.jobs;
     assert(originalJobs.every(original => JSON.stringify(after.find(job => job.id === original.id)) === JSON.stringify(original)), '迁移与改序不能写回旧任务或结果');
     if (scenario !== 'multi') {
@@ -163,7 +164,7 @@ try {
       imageButton('reference').click();
       await waitFor(() => !find('[aria-label="图片前移"]').disabled, '自定义指令时应能改序');
       find('[aria-label="图片前移"]').click();
-      await waitFor(() => order(['reference', 'subject']) && !reverse().disabled, '自定义指令改序应保存');
+      await waitFor(() => order(['reference', 'subject']) && reverseReady(), '自定义指令改序应保存');
       assert(instruction() === custom && (await input()).inputs[mode().value].instruction === custom, '自定义内容即使包含旧图号也必须原样保留');
       reverse().click();
       await waitFor(() => starts.length === 2, '自定义指令应可提交');

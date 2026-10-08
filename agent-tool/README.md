@@ -22,8 +22,10 @@
 
 - `PREVIEW_PORT`：默认 `43188`，整数 0–65535；0 自动分配空闲端口，实际地址见 stdout。占用端口报错，不关闭已有服务。
 - `PREVIEW_INPUT_IMAGE` / `PREVIEW_RESULT_IMAGE`：可选本地比对图片，默认使用仓库公开海报素材；自定义相对路径按调用目录解释，也可使用绝对路径。
+- 图片预览遮挡检查：`node agent-tool/ui.mjs verify --scenario example-image-viewer-portrait`（975×1034），另有 `example-image-viewer`（宽屏）、`example-image-viewer-narrow`（320×740）、`example-image-viewer-short`（320×360）、`example-image-viewer-result-short`（先640×740打开再缩小至640×360，恢复原尺寸检查焦点返回，只读结果）、`example-image-viewer-result-popup`（400×740 只读结果）。使用生产组件与合成数据，检查独立控制行、适配/缩放/平移/旋转及键盘返回；报告 `evidence.imageViewer` 含过程截图。运行后关闭临时页面，不应用旋转、不写真实项目；需要已有有效产物时使用 `--no-build`。`node --test agent-tool/ui/image-viewer.test.mjs` 验证旧浮层遮挡和裁剪失效负例，不触发构建；closed ShadowRoot 的共享 CSS fixture 只证明合成布局，不能代替真实内容面板验收。
 - 图片顺序行为场景：`ui.mjs verify --scenario image-order-paired`（双图改序/模式隔离/重开/请求）、`image-order-multi`（参考图中间/末尾与主体跨图移动）、`image-order-legacy`（旧历史编号与当前输入隔离）、`image-order-failed`（保存失败回滚）、`image-order-popup`（轻量窗口）；`image-order-keyboard-new/history/failure/late` 为四个独立的 320px popup 场景，使用真实 Enter 触发改序，验证选中与焦点、失败和迟到响应；焦点移出使用工具 focus，外部项目切换使用公开消息与 popup 轮询，成功后观察一次 Tab，不代表完整键盘导航审计。各命令前加 `node agent-tool/`；可在有效构建指纹后加 `--no-build`。合成预览复用生产图片编号校验函数，但不证明真实 bridge 的任务冻结、失效保护或模型附件顺序；这些由隔离后端测试验证。
 - 默认任务指令图号：`ui.mjs verify --scenario image-instruction-default-paired` 验证改序、模式隔离、重开与提交；`image-instruction-legacy-paired` 验证精确旧默认迁移；`image-instruction-default-multi` 验证参考模板居中及主体增删编号。双图场景同时验证自定义文本原样保存和提交，三个场景均检查历史任务未改写；仅使用合成预览，不证明真实后端持久化或模型遵从。
+- 连续生图：`node agent-tool/ui.mjs verify --scenario end-to-end-workspace`；另有 `end-to-end-popup`（320px）、`end-to-end-cancel`、`end-to-end-phase-cancel`、`end-to-end-context`、`end-to-end-reverse-failed`、`end-to-end-generation-failed`、`end-to-end-popup-start-failed`（自动启动失败后重试比例）。验证一次提交、独立逆向、同提示词重复生图、语言比例、阶段取消、跨上下文及失败恢复；预览新增 `endToEndRegression`、`reverse=failed`、`reverseDelay` 等仅用于合成场景，不调用真实模型或写入真实项目。API持久化及服务重启另由后端隔离测试覆盖。真实键盘场景为 `end-to-end-keyboard-{workspace|popup}-{cancel|failure|tab|tab-failure|project|project-failure|legacy}`，使用 Playwright Enter/Tab 验证提交、取消、失败及迟到响应焦点，复用统一 runner；项目切换用公开消息或工作台导航 hash 触发，不代表点击提交期间被禁用的项目按钮，仍仅操作合成预览。
 - 查询参数和界面场景见 [扩展预览文档](../browser-extension/README.md)。回归脚本仍位于 `browser-extension/tests/`；预览只负责加载。
 
 预览读取构建文件、示例图及显式指定的图片，缩略图在内存生成。浏览器 fixture 会使用当前预览 origin 的 localStorage/sessionStorage；不写真实项目资产、不连接 bridge、不调用 Codex。模拟行为及 HTTP 资源测试不能替代实际扩展与真实模型验收。
@@ -47,6 +49,8 @@
 报告保留在 OS 临时目录 `reframe-ui-*`，包含 JSON 测量、Markdown 摘要、所有场景截图和失败/inspect trace；路径在 stdout。诊断限制16个目标、每个至多5层自身/祖先样式。可用扩展目录中的 `npx playwright show-trace /absolute/path/scene.trace.zip` 查看。报告不会写入版本库；不再需要时可删除这次输出目录。正常退出及 SIGINT/SIGTERM 清理本次进程，系统强制杀死可能留下临时文件或进程。
 
 聚焦验证：`node --test browser-extension/tests/ui-static.test.mjs browser-extension/tests/ui-tool.test.mjs`；真实 Chromium 采样器正反例：`node --test agent-tool/ui/probe.test.mjs`。后者需已安装浏览器，独立于默认产品测试。组件样例、有限视觉比较、隔离真实扩展与分层门禁见下文；各自证据不可替代。
+
+完整 UI 工具测试：`node --test agent-tool/ui/*.test.mjs`。其中门禁取消持久化测试在独立子进程中只保留三个核心视觉场景，以验证信号、失败报告和资源清理；它不替代 `gate --tier browser` 的全场景验收。
 
 报告另外记录预览 fixture 指纹及文件清单，覆盖 `ui.mjs`、`preview.mjs`、`gallery-preview.mjs`、浏览器回归脚本和画廊 fixture 文件。结束时再次核对；运行中这些输入变化会使结果作废。它独立于产品构建指纹，纯 fixture 修改可以用 `--no-build` 重新验证。
 

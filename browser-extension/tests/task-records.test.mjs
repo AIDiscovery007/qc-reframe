@@ -84,3 +84,16 @@ test("a recovery commit failure aborts startup without publishing or discarding 
     syncBuiltinESMExports();
   }
 });
+
+test("restart terminates a persisted pending continuation without replaying or discarding its prompt", async t => {
+  const dir = await directory(t), job = { ...jobFor(), status: "completed", result: { promptZh: "saved" }, autoGeneration: { status: "pending", language: "zh" } };
+  await writeFile(join(dir, `${job.id}.json`), JSON.stringify(job));
+  const records = await createTaskRecords({ dataDir: dir, onCommit: () => {} });
+  const restored = records.jobs.get(job.id);
+  assert.equal(restored.status, "completed");
+  assert.deepEqual(restored.result, job.result);
+  assert.equal(restored.autoGeneration.status, "failed");
+  assert.match(restored.autoGeneration.error, /重启/);
+  assert.equal(restored.generations, undefined);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, `${job.id}.json`))), restored);
+});

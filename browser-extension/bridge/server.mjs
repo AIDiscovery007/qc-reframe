@@ -30,6 +30,16 @@ const MAX_BODY = 24 * 1024 * 1024;
 const bad = (message, status = 400) =>
   Object.assign(new Error(message), { status });
 
+function validateGenerationOptions(body) {
+  if (!["zh", "en"].includes(body.language)) throw bad("无效提示词语言");
+  const { aspectRatio } = body;
+  if (aspectRatio !== undefined && (!aspectRatio || typeof aspectRatio !== "object" || Array.isArray(aspectRatio)
+    || Object.keys(aspectRatio).some(key => !["width", "height"].includes(key))
+    || ![aspectRatio.width, aspectRatio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000)
+    || aspectRatio.width / aspectRatio.height < 1 / 20 || aspectRatio.width / aspectRatio.height > 20))
+    throw bad("宽高须为 1–10000 的整数，比例须在 1:20 至 20:1 之间");
+}
+
 function sourceUrlFor(value) {
   try {
     const url = new URL(value);
@@ -208,6 +218,70 @@ export async function createBridge({
     catch (error) { console.error("回收图片失败:", error.message); }
     finally { release(); }
   };
+  const startGeneration = async (job, body, { modelSettings = models.selection(), promptResult = job.result, automatic = false, signal } = {}) => {
+    if (job.status !== "completed" || !job.result) throw bad("请先完成提示词逆向", 409);
+    if (job.mode === "style" && !job.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
+    if (!automatic && job.autoGeneration?.status === "pending") throw bad("这条提示词正在准备自动生图，请等待完成或取消", 409);
+    if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+    if (models.busy) throw bad("正在验证模型，请稍候", 409);
+    if (job.generations?.some((item) => item.status === "running" || runtime.has(item.id)))
+      throw bad("这条提示词仍在生图，请等待完成或取消", 409);
+    validateGenerationOptions(body);
+    const { aspectRatio } = body;
+    if (job.mode === "recreate" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("完整复刻使用纯文生图，不接受主体图");
+    if (job.mode === "session" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("会话创作不接受主体图");
+    if (job.mode !== "multi-reenact" && body.subjects !== undefined) throw bad("此模式不接受多张主体图");
+    if (job.mode === "multi-reenact" && body.subjectImage !== undefined) throw bad("多图重演需要主体图列表");
+    const referenceIndex = savedReferenceIndex(job);
+    if (body.referenceIndex !== undefined && body.referenceIndex !== referenceIndex) throw bad("图片顺序已变化，请重新生成提示词");
+    const { negativePrompt } = promptResult;
+    let prompt = body.language === "zh" ? promptResult.promptZh : promptResult.promptEn;
+    if (!prompt?.trim() || /\[SUBJECT\]/i.test(prompt)) throw bad("提示词仍缺少主体，请补充后重新逆向");
+    if (aspectRatio) prompt += body.language === "zh"
+      ? `\n\n用户指定的输出画面宽高比例：${aspectRatio.width}:${aspectRatio.height}（宽:高）。此比例要求优先于原提示词及参考图中的画幅要求。请调整构图和背景以适应该比例，保持主体自然比例，不拉伸或压缩主体。`
+      : `\n\nUser-requested output aspect ratio: ${aspectRatio.width}:${aspectRatio.height} (width:height). This ratio takes priority over framing requirements in the original prompt and reference images. Adapt the composition and background to this ratio while preserving natural subject proportions; do not stretch or compress the subject.`;
+    const imagePath = job.mode === "recreate" ? undefined : await storedImage(job, false, true);
+    const multi = job.mode === "multi-reenact";
+    const decodedSubjects = multi ? decodeSubjects(body.subjects !== undefined ? body.subjects : await restoreSubjects(job.reenact?.subjects), (await images.read(job.imageAsset)).length) : undefined;
+    if (multi && JSON.stringify(decodedSubjects.map(subject => subject.id)) !== JSON.stringify(job.reenact?.subjects?.map(subject => subject.id)))
+      throw bad("主体图片顺序已变化，请重新生成提示词");
+    const subject = !multi && job.mode !== "recreate" && job.reenact
+      ? decodeImage(body.subjectImage !== undefined ? body.subjectImage : await storedImage(job, true)) : undefined;
+    if (subject?.bytes.length > 2 * 1024 * 1024) throw bad("主体图最多 2 MB，请压缩后重试");
+    try { await readFile(generationSkillPath); } catch { throw bad("找不到 imagegen 技能，请设置 IMAGEGEN_SKILL_PATH", 503); }
+    const id = randomUUID();
+    const subjectAsset = subject ? await images.put(subject) : undefined;
+    const subjectImagePath = subjectAsset ? images.path(subjectAsset) : undefined;
+    const subjects = multi ? await saveSubjects(decodedSubjects) : undefined;
+    const subjectImagePaths = subjects?.map((item) => images.path(item.subjectAsset));
+    referencePosition(referenceIndex, subjects?.length ?? (subject ? 1 : 0));
+    signal?.throwIfAborted();
+    const controller = runtime.reserve(id, job.projectId);
+    const next = { id, referenceIndex, model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
+    job.generations ||= [];
+    job.generations.push(next);
+    if (automatic) Object.assign(job.autoGeneration, { status: "started", generationId: id });
+    try {
+      await save(job);
+    } catch (error) {
+      runtime.release(id);
+      job.generations.pop();
+      if (automatic) { job.autoGeneration.status = "pending"; delete job.autoGeneration.generationId; }
+      throw error;
+    }
+    if (signal?.aborted) { controller.abort(); Object.assign(next, { status: "cancelled", stage: "已取消" }); }
+    void runtime.run(job, next, { modelSettings, completedStage: "图片已生成", failedStage: "生图失败",
+      execute: async ({ signal, progress }) => {
+        const output = await generator({ mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt: next.negativePrompt,
+          skillPath: generationSkillPath, cwd: root, signal, modelSettings, onProgress: progress });
+        signal.throwIfAborted();
+        if (!["png", "jpeg", "webp"].includes(output.extension)) throw new Error("生图返回了不支持的文件格式");
+        const imageAsset = await images.put(output);
+        return { extension: output.extension, imageAsset, revisedPrompt: output.revisedPrompt };
+      },
+    });
+    return job;
+  };
   let deletionFailed = false;
   let shuttingDown = false;
   let cliStarting = false;
@@ -267,6 +341,7 @@ export async function createBridge({
         if (value !== null && value !== "true" && value !== "false") throw bad("无效隐藏项目参数");
         return value === "true";
       };
+      const submittedJob = req.method === "POST" && path === "/jobs" ? await readBody(req) : undefined;
       // Probe before taking the mutation lock; all task/revision checks still run under it.
       const feature = req.method !== "POST" ? undefined : path === "/jobs" ? "reverse"
         : /^\/jobs\/[\da-f-]{36}\/generations$/.test(path) ? "generation"
@@ -280,7 +355,7 @@ export async function createBridge({
         try {
           if (res.destroyed || req.aborted) abort();
           controller.signal.throwIfAborted();
-          await Promise.race([requireFeature(feature), new Promise((_, reject) => {
+          await Promise.race([Promise.all([requireFeature(feature), ...(submittedJob?.generation !== undefined ? [requireFeature("generation")] : [])]), new Promise((_, reject) => {
             controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true });
           })]);
         } finally {
@@ -666,70 +741,8 @@ export async function createBridge({
           return;
         }
         if (req.method !== "POST" || generationMatch[2]) throw bad("Not found", 404);
-        if (job.status !== "completed" || !job.result) throw bad("请先完成提示词逆向", 409);
-        if (job.mode === "style" && !job.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
-        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-        if (models.busy) throw bad("正在验证模型，请稍候", 409);
-        if (job.generations?.some((item) => item.status === "running" || runtime.has(item.id)))
-          throw bad("这条提示词仍在生图，请等待完成或取消", 409);
-        const body = await readBody(req);
-        if (!["zh", "en"].includes(body.language)) throw bad("无效提示词语言");
-        const { aspectRatio } = body;
-        if (aspectRatio !== undefined && (!aspectRatio || typeof aspectRatio !== "object" || Array.isArray(aspectRatio)
-          || Object.keys(aspectRatio).some(key => !["width", "height"].includes(key))
-          || ![aspectRatio.width, aspectRatio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000)
-          || aspectRatio.width / aspectRatio.height < 1 / 20 || aspectRatio.width / aspectRatio.height > 20))
-          throw bad("宽高须为 1–10000 的整数，比例须在 1:20 至 20:1 之间");
-        if (job.mode === "recreate" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("完整复刻使用纯文生图，不接受主体图");
-        if (job.mode === "session" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("会话创作不接受主体图");
-        if (job.mode !== "multi-reenact" && body.subjects !== undefined) throw bad("此模式不接受多张主体图");
-        if (job.mode === "multi-reenact" && body.subjectImage !== undefined) throw bad("多图重演需要主体图列表");
-        const referenceIndex = savedReferenceIndex(job);
-        if (body.referenceIndex !== undefined && body.referenceIndex !== referenceIndex) throw bad("图片顺序已变化，请重新生成提示词");
-        const { negativePrompt } = job.result;
-        let prompt = body.language === "zh" ? job.result.promptZh : job.result.promptEn;
-        if (!prompt?.trim() || /\[SUBJECT\]/i.test(prompt)) throw bad("提示词仍缺少主体，请补充后重新逆向");
-        if (aspectRatio) prompt += body.language === "zh"
-          ? `\n\n用户指定的输出画面宽高比例：${aspectRatio.width}:${aspectRatio.height}（宽:高）。此比例要求优先于原提示词及参考图中的画幅要求。请调整构图和背景以适应该比例，保持主体自然比例，不拉伸或压缩主体。`
-          : `\n\nUser-requested output aspect ratio: ${aspectRatio.width}:${aspectRatio.height} (width:height). This ratio takes priority over framing requirements in the original prompt and reference images. Adapt the composition and background to this ratio while preserving natural subject proportions; do not stretch or compress the subject.`;
-        const imagePath = job.mode === "recreate" ? undefined : await storedImage(job, false, true);
-        const multi = job.mode === "multi-reenact";
-        const decodedSubjects = multi ? decodeSubjects(body.subjects !== undefined ? body.subjects : await restoreSubjects(job.reenact?.subjects), (await images.read(job.imageAsset)).length) : undefined;
-        if (multi && JSON.stringify(decodedSubjects.map(subject => subject.id)) !== JSON.stringify(job.reenact?.subjects?.map(subject => subject.id)))
-          throw bad("主体图片顺序已变化，请重新生成提示词");
-        const subject = !multi && job.mode !== "recreate" && job.reenact
-          ? decodeImage(body.subjectImage !== undefined ? body.subjectImage : await storedImage(job, true)) : undefined;
-        if (subject?.bytes.length > 2 * 1024 * 1024) throw bad("主体图最多 2 MB，请压缩后重试");
-        try { await readFile(generationSkillPath); } catch { throw bad("找不到 imagegen 技能，请设置 IMAGEGEN_SKILL_PATH", 503); }
-        const modelSettings = models.selection();
-        const id = randomUUID();
-        const subjectAsset = subject ? await images.put(subject) : undefined;
-        const subjectImagePath = subjectAsset ? images.path(subjectAsset) : undefined;
-        const subjects = multi ? await saveSubjects(decodedSubjects) : undefined;
-        const subjectImagePaths = subjects?.map((item) => images.path(item.subjectAsset));
-        referencePosition(referenceIndex, subjects?.length ?? (subject ? 1 : 0));
-        runtime.reserve(id, job.projectId);
-        const next = { id, referenceIndex, model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
-        job.generations ||= [];
-        job.generations.push(next);
-        try {
-          await save(job);
-        } catch (error) {
-          runtime.release(id);
-          job.generations.pop();
-          throw error;
-        }
+        await startGeneration(job, await readBody(req));
         json(202, job);
-        void runtime.run(job, next, { modelSettings, completedStage: "图片已生成", failedStage: "生图失败",
-          execute: async ({ signal, progress }) => {
-            const output = await generator({ mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt: next.negativePrompt,
-              skillPath: generationSkillPath, cwd: root, signal, modelSettings, onProgress: progress });
-            signal.throwIfAborted();
-            if (!["png", "jpeg", "webp"].includes(output.extension)) throw new Error("生图返回了不支持的文件格式");
-            const imageAsset = await images.put(output);
-            return { extension: output.extension, imageAsset, revisedPrompt: output.revisedPrompt };
-          },
-        });
         return;
       }
       const idMatch = /^\/jobs\/([\da-f-]{36})(\/(?:cancel|reference))?$/.exec(path);
@@ -770,7 +783,14 @@ export async function createBridge({
           return;
         }
         if (req.method === "POST" && idMatch[2] === "/cancel") {
-          await runtime.cancel(job);
+          if (job.autoGeneration?.status === "pending") {
+            job.autoGeneration.status = "cancelled";
+            if (job.status === "running") await runtime.cancel(job);
+            else await save(job);
+          } else if (job.autoGeneration?.status === "started") {
+            const generation = job.generations?.find(item => item.id === job.autoGeneration.generationId);
+            if (generation) await runtime.cancel(job, generation);
+          } else await runtime.cancel(job);
           json(200, job);
           return;
         }
@@ -783,7 +803,13 @@ export async function createBridge({
         throw bad("Not found", 404);
       if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
       if (models.busy) throw bad("正在验证模型，请稍候", 409);
-      const body = await readBody(req);
+      const body = submittedJob;
+      if (body.generation !== undefined) {
+        if (!body.generation || typeof body.generation !== "object" || Array.isArray(body.generation) || Object.keys(body.generation).some(key => !["language", "aspectRatio"].includes(key))) throw bad("无效自动生图参数");
+        validateGenerationOptions(body.generation);
+        if (body.mode === "style" && !body.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
+        try { await readFile(generationSkillPath); } catch { throw bad("找不到 imagegen 技能，请设置 IMAGEGEN_SKILL_PATH", 503); }
+      }
       if (!["style", "recreate", "reenact", "multi-reenact", "session"].includes(body.mode)) throw bad("无效逆向模式");
       const submittedInstruction = body.instruction ?? body.reenact?.basePrompt;
       if (body.instruction === null || (submittedInstruction !== undefined && typeof submittedInstruction !== "string")) throw bad("任务指令必须是文本");
@@ -870,6 +896,7 @@ export async function createBridge({
         capture: body.capture === "screenshot" ? "screenshot" : "original",
         ...(instruction !== undefined ? { instruction } : {}),
         ...(reenact ? { reenact } : {}),
+        ...(body.generation ? { autoGeneration: { ...body.generation, status: "pending" } } : {}),
         ...(selectedSessions ? { sessionContext: { sources: selectedSessions } } : {}),
       };
       try {
@@ -878,13 +905,29 @@ export async function createBridge({
         else if (project.inputVersions?.[body.mode] === undefined && jobs.has(currentJobId)) await projects.selectInputVersion(project.id, jobs.get(currentJobId), true);
       } catch (error) {
         Object.assign(job, { status: "failed", stage: "任务保存失败", error: "任务未启动，请重试" });
+        if (job.autoGeneration) Object.assign(job.autoGeneration, { status: "failed", error: job.error });
         await save(job).catch((failure) => console.error("保存失败任务状态失败:", failure.message));
         projects.updateJob(job);
         runtime.release(id);
         throw error;
       }
       json(202, job);
-      void runtime.run(job, job, { modelSettings, completedStage: "逆向完成", failedStage: "逆向失败",
+      let promptSnapshot;
+      void runtime.run(job, job, { modelSettings, onSettled: body.generation ? async ({ signal }) => {
+        const release = await acquireMutation();
+        try {
+          if (job.autoGeneration.status !== "pending") return;
+          if (job.status !== "completed" || signal.aborted) {
+            Object.assign(job.autoGeneration, { status: job.status === "cancelled" || signal.aborted ? "cancelled" : "failed", error: job.error });
+          } else {
+            try {
+              await startGeneration(job, body.generation, { modelSettings, promptResult: promptSnapshot, automatic: true, signal });
+              return;
+            } catch (error) { Object.assign(job.autoGeneration, { status: "failed", error: error.message }); }
+          }
+          await save(job);
+        } finally { release(); }
+      } : undefined, completedStage: "逆向完成", failedStage: "逆向失败",
         execute: async ({ signal, progress }) => {
           let sessionContext;
           if (selectedSessions) {
@@ -900,6 +943,7 @@ export async function createBridge({
             subjectImagePaths: reenact?.subjects?.map((item) => images.path(item.subjectAsset)),
             subjects: reenact?.subjects, referenceIndex, basePrompt: reenact?.basePrompt, instruction: job.instruction,
             mode: job.mode, skillPath, cwd: root, signal, modelSettings, onProgress: progress });
+          promptSnapshot = structuredClone(result);
           return { result };
         },
       });

@@ -26,7 +26,7 @@ export function createTaskRuntime({ save, onProgress, onIdle, onFailure }) {
       controllers.get(task.id)?.controller.abort();
       await save(job);
     },
-    async run(job, task, { execute, modelSettings, completedStage, failedStage }) {
+    async run(job, task, { execute, modelSettings, completedStage, failedStage, onSettled }) {
       const { controller } = controllers.get(task.id);
       const progress = update => {
         if (task.status !== "running") return;
@@ -50,8 +50,9 @@ export function createTaskRuntime({ save, onProgress, onIdle, onFailure }) {
           onProgress(job);
           await save(job).catch(failure => console.error("保存任务失败:", failure.message));
         }
-        controllers.delete(task.id);
-        await onIdle();
+        try { await onSettled?.({ signal: controller.signal }); }
+        catch (error) { console.error("后续任务保存失败:", error.message); }
+        finally { controllers.delete(task.id); await onIdle(); }
       }
     },
     close() { for (const { controller } of controllers.values()) controller.abort(); },

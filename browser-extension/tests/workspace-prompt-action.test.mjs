@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { validGenerationRatio } from '../lib/generation-session.ts';
 import { creationContext, emptyCreationState, resolveCreation } from '../lib/creation-context.ts';
 
 // Exercise the actual workspace action derivation and submitted input for each path.
 const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
 const tree = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ['instructionStale', 'genericPrompt', 'needsPrompt', 'subjectError', 'reverseHint', 'genericHint', 'reverseDisabled', 'reverse'];
+const names = ['instructionStale', 'genericPrompt', 'needsPrompt', 'subjectError', 'reverseHint', 'genericHint', 'reverseDisabled', 'ratio', 'chainDisabled', 'reverse'];
 const declarations = new Map();
 function visit(node) {
   if (ts.isVariableDeclaration(node) && names.includes(node.name.getText(tree))) declarations.set(node.name.getText(tree), node.initializer.getText(tree));
@@ -19,7 +20,7 @@ const compiled = ts.transpileModule(names.map(name => `const ${name} = ${declara
 function fixture(mode, overrides = {}) {
   const calls = [], drafts = {}, exports = {};
   runInNewContext(compiled, {
-    exports, preferences: { mode }, result: undefined, job: undefined, blocked: false, promptDraft: undefined,
+    exports, workspace: true, chainRatio: undefined, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, promptDraft: undefined,
     selection: { image: 'reference' }, referenceError: undefined, displayImage: 'reference', subjectDraftKey: mode => `project:${mode}:new`, subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
     taskInstruction: () => 'instruction', defaultInstructions: { [mode]: 'instruction' }, subjectImage: () => 'subject',
     multiSubjects: [{ id: 'one', subjectImage: 'one' }, { id: 'two', subjectImage: 'two' }], multiPrompt: 'instruction', multiStale: false,
@@ -27,7 +28,7 @@ function fixture(mode, overrides = {}) {
       { projectId: 'project' }, { id: 'project', jobs: [{ ...overrides.job, id: 'v1', mode, result: overrides.result }] }, {}, mode, 'instruction'),
     modeJob: () => overrides.job,
     dispatchCreation: action => Object.assign(drafts, creationContext(emptyCreationState, action).subjectDrafts),
-    start: (mode, input) => calls.push({ mode, input }), ...overrides,
+    start: (mode, input, generate) => calls.push({ mode, input, generate }), ...overrides,
     setSubjectDrafts: update => Object.assign(drafts, update(drafts)),
   });
   return { ...exports, calls, drafts };
@@ -156,4 +157,25 @@ test('missing subject resources block style extraction; valid replacements and e
     const state = creationContext(emptyCreationState, { type: 'edit', key: 'project:style', version: 'v1', subjectImage });
     check(state, selection, subjectImage || undefined);
   }
+});
+
+
+test('continuous action uses a new reverse submission and blocks incomplete inputs or invalid ratios', () => {
+  for (const mode of ['style', 'recreate', 'reenact', 'multi-reenact']) {
+    const ui = fixture(mode);
+    ui.reverse(true);
+    assert.equal(ui.calls.length, 1);
+    assert.equal(ui.calls[0].generate, true);
+    ui.reverse();
+    assert.equal(ui.calls[1].generate, false);
+  }
+  for (const overrides of [{ subjectImage: () => '' }, { promptDraft: {} }, { blocked: true },
+    { chainRatio: { key: 'project:mode:version', ratio: { width: 0, height: 1 } } }]) {
+    const ui = fixture('style', overrides);
+    ui.reverse(true);
+    assert.equal(ui.calls.length, 0);
+  }
+  const ui = fixture('style', { subjectImage: () => '' });
+  ui.reverse();
+  assert.equal(ui.calls.length, 1, 'reference-only style still supports reverse only');
 });

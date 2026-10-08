@@ -9,6 +9,7 @@ import { scenarios, rules, uncovered } from './catalog.mjs';
 import { probeLayout } from './probe.mjs';
 import { prepareExample, checkExample } from './examples.mjs';
 import { checkImageOrderKeyboard } from './image-order.mjs';
+import { checkEndToEndKeyboard } from './end-to-end.mjs';
 
 const { chromium } = requireExtension('playwright');
 const buildDirectory = resolve(extension, '.output/chrome-mv3');
@@ -157,7 +158,9 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
       page.on('pageerror', error => item.errors.push(error.message.slice(0, 500)));
       try {
         await page.goto(preview.url + scenario.path);
-        if (scenario.keyboardCase) {
+        if (scenario.flowKeyboardCase) {
+          item.checks.push(...await checkEndToEndKeyboard(page, scenario));
+        } else if (scenario.keyboardCase) {
           item.checks.push(...await checkImageOrderKeyboard(page, scenario));
         } else if (scenario.regression) {
           await page.waitForFunction(key => ['passed', 'failed'].includes(document.documentElement.dataset[key]), scenario.regression, { timeout: 60000 });
@@ -167,7 +170,11 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
           await prepareExample(page, scenario);
           const geometryRules = scenario.rules.filter(id => rules.some(rule => rule.id === id && rule.kind === 'geometry'));
           if (geometryRules.length) Object.assign(item, await page.evaluate(probeLayout, { surface: scenario.surface, rules: geometryRules, inspect }));
-          item.checks.push(...await checkExample(page, scenario));
+          item.checks.push(...await checkExample(page, scenario, async label => {
+            const path = join(directory, `${scenario.id}-${label}.png`);
+            await page.screenshot({ path });
+            (item.evidence.imageViewer ||= {})[label] = path;
+          }));
         } else {
           await ready(page, scenario);
           if (fault) await page.addStyleTag({ content: faults[fault].css });
@@ -188,6 +195,7 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
       const screenshot = join(directory, scenario.id + '.png');
       await page.screenshot({ path: screenshot, fullPage: true });
       item.evidence.screenshot = screenshot;
+      if (scenario.imageOpenViewport) item.evidence.returnViewport = page.viewportSize();
       if (item.status !== 'passed' || inspect) {
         const trace = join(directory, scenario.id + '.trace.zip');
         await context.tracing.stop({ path: trace });
@@ -210,7 +218,7 @@ export async function verify({ scenario: id, build = true, fault, inspect = fals
     process.off('SIGTERM', interrupt);
     report.finishedAt = new Date().toISOString();
     await writeFile(join(directory, 'report.json'), JSON.stringify(report, null, 2));
-    const summary = [`# Reframe UI 检查：${report.status}`, '', `源码：${report.source?.revision || '未建立'}；工作区有修改：${report.source?.dirty ?? '未知'}`, '', ...report.scenarios.map(item => `- ${item.id}: ${item.status} — [截图](${item.id}.png)${item.evidence.trace ? ` / [trace](${item.id}.trace.zip)` : ''}`), '', ...report.scenarios.flatMap(item => item.checks.filter(check => check.status === 'failed').map(check => `- ${item.id} / ${check.ruleId} / ${check.target}: ${JSON.stringify(check.actual)}`)), ...(report.error ? ['', report.error] : []), '', '## 未覆盖', '', ...uncovered.map(text => '- ' + text), '', '完整测量与祖先样式见 report.json；源码路径是候选来源，不是精确根因。', ''];
+    const summary = [`# Reframe UI 检查：${report.status}`, '', `源码：${report.source?.revision || '未建立'}；工作区有修改：${report.source?.dirty ?? '未知'}`, '', ...report.scenarios.map(item => `- ${item.id}: ${item.status} — [截图](${item.id}.png)${Object.keys(item.evidence.imageViewer || {}).map(label => ` / [${label}](${item.id}-${label}.png)`).join('')}${item.evidence.trace ? ` / [trace](${item.id}.trace.zip)` : ''}`), '', ...report.scenarios.flatMap(item => item.checks.filter(check => check.status === 'failed').map(check => `- ${item.id} / ${check.ruleId} / ${check.target}: ${JSON.stringify(check.actual)}`)), ...(report.error ? ['', report.error] : []), '', '## 未覆盖', '', ...uncovered.map(text => '- ' + text), '', '完整测量与祖先样式见 report.json；源码路径是候选来源，不是精确根因。', ''];
     await writeFile(join(directory, 'report.md'), summary.join('\n'));
   }
   return { ...report, reportPath: join(directory, 'report.json'), summaryPath: join(directory, 'report.md') };

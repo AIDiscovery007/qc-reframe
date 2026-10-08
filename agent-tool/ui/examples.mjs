@@ -1,3 +1,4 @@
+import { checkImageViewer } from './image-viewer.mjs';
 import { components, exampleScenarios } from './catalog.mjs';
 export { exampleScenarios } from './catalog.mjs';
 
@@ -19,12 +20,30 @@ function example(scenario) {
   return value;
 }
 
+export function imageTrigger(page, item) {
+  const canvas = item.imageTarget === 'result' ? (item.surface === 'popup' ? '.quick-result' : '.generation-result-preview') : item.surface === 'popup' ? '.quick-canvas' : '.canvas-large';
+  return page.locator(`${canvas} .image-preview-trigger`);
+}
+
 // Call after navigating to scenario.path in an isolated preview context.
 export async function prepareExample(page, scenario) {
   const item = example(scenario);
   await page.waitForSelector('.app');
   await page.evaluate(() => document.fonts.ready);
-  if (item.example === 'empty') {
+  if (item.example === 'image') {
+    if (item.imageOpenViewport) await page.setViewportSize(item.imageOpenViewport);
+    await page.waitForSelector(item.surface === 'popup' ? '.quick-workspace' : '.canvas-workspace');
+    await page.getByRole('combobox', { name: '逆向模式', exact: true }).selectOption('recreate');
+    if (item.surface === 'workspace' && item.imageTarget === 'result') {
+      const toggle = page.locator('.result-return');
+      if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
+    }
+    const trigger = imageTrigger(page, item);
+    await trigger.waitFor({ state: 'visible' });
+    await trigger.focus(); await trigger.press('Enter');
+    await page.waitForFunction(() => { const img = document.querySelector('.image-viewer-stage img'); return img?.complete && img.naturalWidth > 0 && img.style.width; });
+    if (item.imageOpenViewport) await page.setViewportSize(item.viewport);
+  } else if (item.example === 'empty') {
     if (item.surface === 'workspace') { await page.getByRole('button', { name: '关闭设置', exact: true }).click(); await page.waitForSelector('main > .empty'); }
     else await page.waitForSelector('.quick-upload');
   } else if (item.example === 'loading') {
@@ -46,10 +65,6 @@ export async function prepareExample(page, scenario) {
       await page.waitForSelector('.canvas-workspace[data-prompt-open="true"]');
     } else if (item.example.startsWith('narrow-')) {
       await page.getByRole('button', { name: item.example === 'narrow-input' ? '输入画布' : '生成结果', exact: true }).click();
-    } else if (item.example === 'image') {
-      const trigger = page.locator('.canvas-large .image-preview-trigger');
-      await trigger.focus(); await trigger.press('Enter');
-      await page.waitForSelector('.image-preview-dialog[open] .image-viewer-stage');
     } else if (item.example === 'controls') {
       const trigger = page.getByRole('button', { name: '设置中心', exact: true });
       await trigger.focus(); await trigger.press('Enter');
@@ -80,7 +95,7 @@ async function nativeSelectCapability(page) {
   } finally { await context.close(); }
 }
 
-export async function checkExample(page, scenario) {
+export async function checkExample(page, scenario, capture) {
   const item = example(scenario), checks = [];
   const ruleId = item.example === 'image' || item.example === 'controls' ? 'UI-EXAMPLE-KEYBOARD' : 'UI-EXAMPLE-STATE';
   const sourceFiles = components.filter(component => item.components.includes(component.name)).map(component => component.source);
@@ -120,6 +135,7 @@ export async function checkExample(page, scenario) {
       const modal = await page.locator(selector).evaluate(node => ({ nativeModal: node.matches(':modal'), focusInside: node.contains(document.activeElement) }));
       record(modal.nativeModal && modal.focusInside, selector, { nativeModal: true, focusInside: true }, modal, 'Production dialog uses the native modal focus boundary.');
       if (item.example === 'image') {
+        checks.push(...await checkImageViewer(page, capture));
         const output = page.getByRole('status', { name: '缩放比例', exact: true });
         await page.getByRole('button', { name: '放大图片', exact: true }).focus();
         await page.keyboard.press('Enter');
@@ -157,9 +173,14 @@ export async function checkExample(page, scenario) {
         else if (!focus.inside) backgroundControlFocused = true;
       }
       record(!backgroundControlFocused, selector, 'Tab cannot focus page controls behind native modal', { backgroundControlFocused, browserBoundaryStops }, 'Native browser focus boundary stops are allowed; background page controls are not.');
+      // The short workspace cannot render its background trigger. Restore the opening size before testing focus return.
+      if (item.imageOpenViewport) {
+        await page.setViewportSize(item.imageOpenViewport);
+        await page.waitForFunction(() => { const trigger = document.querySelector('.generation-result-preview .image-preview-trigger'); return trigger && !trigger.disabled && trigger.getBoundingClientRect().width > 0; });
+      }
       await page.keyboard.press('Escape');
       await page.locator(selector).waitFor({ state: 'detached' });
-      const trigger = item.example === 'image' ? page.locator('.canvas-large .image-preview-trigger') : page.getByRole('button', { name: '设置中心', exact: true });
+      const trigger = item.example === 'image' ? imageTrigger(page, item) : page.getByRole('button', { name: '设置中心', exact: true });
       const restored = await trigger.evaluate(node => node === document.activeElement);
       record(restored, selector, 'Escape closes and returns focus to its trigger', { closed: !await visible(selector), focusRestored: restored }, 'Dialog closing restores the initiating control.');
     }

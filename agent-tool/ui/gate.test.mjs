@@ -36,6 +36,10 @@ fs.promises.writeFile = async function(path,...args) {
   return original.call(this,path,...args);
 };
 syncBuiltinESMExports();
+const {scenarios}=await import(${JSON.stringify(new URL('./catalog.mjs', import.meta.url).href)});
+// Limit this child's browser selection while preserving the full static catalog inventory.
+const select = scenarios.filter.bind(scenarios);
+scenarios.filter = predicate => select(predicate).filter(scene=>['workspace-wide','workspace-narrow','popup'].includes(scene.id));
 const {gate}=await import(${JSON.stringify(new URL('./gate.mjs', import.meta.url).href)});
 const report=await gate({tier:'browser',build:false});
 console.log(JSON.stringify({report,sent:[...sent]}));`;

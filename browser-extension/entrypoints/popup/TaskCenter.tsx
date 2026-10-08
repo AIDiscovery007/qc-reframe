@@ -45,7 +45,7 @@ export default function TaskCenter({ unread, onNoticeOpen, onClose, onOpen, onUp
       const current = revision.current;
       try {
         const values = await query<Job[]>("/jobs");
-        if (!stopped && current === revision.current) { setJobs(values); setError(""); active = values.some(job => job.status === "running" || job.generations?.some(item => item.status === "running")); }
+        if (!stopped && current === revision.current) { setJobs(values); setError(""); active = values.some(job => (job.status === "running" || job.autoGeneration?.status === "pending") || job.generations?.some(item => item.status === "running")); }
       } catch (e) { if (!stopped) setError((e as Error).message); }
       finally { if (!stopped) setLoaded(true); }
       return active ? 2000 : 10_000;
@@ -93,7 +93,7 @@ export default function TaskCenter({ unread, onNoticeOpen, onClose, onOpen, onUp
   };
 
   const tasks = jobs.filter(job => showHidden || !hiddenProjectIds.includes(job.projectId || "")).flatMap((job) => [
-    { job, task: job, generation: undefined as Generation | undefined },
+    { job, task: job.autoGeneration?.status === "pending" ? { ...job, status: "running" as const, stage: job.result ? "正在准备生图…" : job.stage } : job, generation: undefined as Generation | undefined },
     ...(job.generations || []).map((generation) => ({ job, task: generation, generation })),
   ]).map((item) => {
     const timestamp = Date.parse(item.task.createdAt || item.job.createdAt);
@@ -124,7 +124,7 @@ export default function TaskCenter({ unread, onNoticeOpen, onClose, onOpen, onUp
         <div className="task-meta" role="status" aria-atomic="true"><strong>{job.result?.title || "参考图项目"} · {modes[job.mode]}</strong>
           <small title={timestamp === null ? "时间未知" : new Date(timestamp).toLocaleString("zh-CN")}>{generation ? "生成图片" : "逆向提示词"} / <i className={task.status === "running" ? "activity-dot" : "task-status-dot"} aria-hidden="true" /> {statuses[task.status]}</small>
           {task.status === "running" && <small className="task-stage" title={task.stage}>{task.stage}</small>}
-          {task.error && <small className="task-error">{task.error}</small>}
+          {(task.error || !generation && job.autoGeneration?.error) && <small className="task-error">{task.error || job.autoGeneration?.error}</small>}
         </div>
         <button type="button" className="text-link task-cancel" style={{ visibility: task.status === "running" ? "visible" : "hidden" }} disabled={pending.includes(task.id)} onClick={() => void cancel(job, generation)}>{pending.includes(task.id) ? "正在取消…" : "取消"}</button>
         {job.projectId && <button type="button" className="outline-button" title={`打开逆向版本 ${job.id}`} disabled={!!opening} onClick={() => void open(job, generation)}>{opening === job.id ? "正在打开…" : "查看项目"}</button>}

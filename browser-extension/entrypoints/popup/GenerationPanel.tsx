@@ -8,7 +8,7 @@ import { createPortal } from "react-dom";
 import { createContext, useContext, useEffect, useId, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { request } from "../../lib/client";
 import { useGeneration } from "../../lib/use-generation";
-import type { Generation, Job, MultiSubject } from "../../lib/types";
+import type { AspectRatio, Generation, Job, MultiSubject } from "../../lib/types";
 import Icon from "./Icon";
 import AsyncAction from "./AsyncAction";
 import { logo } from "../../lib/brand";
@@ -18,7 +18,8 @@ const ratios = ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"];
 
 export const GenerationEffectContext = createContext<ComponentType<{ running: boolean; image: string; failed: boolean }> | null>(null);
 
-export default function GenerationPanel({ targetGeneration, onTargetSelected, job, lang, disabled, disabledReason = "", subjectImage, subjects, inputPreview, onUpdate, workspace = false, actionsTarget, hideActions = false, versionNumber = 1, drawerOpen = true, onRequestState, requestError = "", requestPending = false }: {
+export default function GenerationPanel({ onAspectRatioChange, targetGeneration, onTargetSelected, job, lang, disabled, disabledReason = "", subjectImage, subjects, inputPreview, onUpdate, workspace = false, actionsTarget, hideActions = false, versionNumber = 1, drawerOpen = true, onRequestState, requestError = "", requestPending = false }: {
+  onAspectRatioChange?(ratio?: AspectRatio): void;
   targetGeneration?: string; onTargetSelected?(): void; requestPending?: boolean; requestError?: string; drawerOpen?: boolean; onRequestState?(pending: boolean, error?: string): void;
   inputPreview?: ReactNode; workspace?: boolean; hideActions?: boolean; actionsTarget?: HTMLElement | null; versionNumber?: number;
   job: Job; lang: "zh" | "en"; disabled: boolean; disabledReason?: string; subjectImage?: string; subjects?: MultiSubject[]; onUpdate(job: Job, subjectImage?: string, subjects?: MultiSubject[]): void;
@@ -29,13 +30,14 @@ export default function GenerationPanel({ targetGeneration, onTargetSelected, jo
   const infoDialog = useRef<HTMLDialogElement>(null);
   const [selected, setSelected] = useState(targetGeneration || "");
   useEffect(() => { if (targetGeneration) { setSelected(targetGeneration); onTargetSelected?.(); } }, [targetGeneration, onTargetSelected]);
-  const previousRatio = job.generations?.at(-1)?.aspectRatio;
+  const previousRatio = job.generations?.length ? job.generations.at(-1)?.aspectRatio : job.autoGeneration?.aspectRatio;
   const previousRatioValue = previousRatio ? `${previousRatio.width}:${previousRatio.height}` : "auto";
   const [ratio, setRatio] = useState(previousRatio ? ratios.includes(previousRatioValue) ? previousRatioValue : "custom" : "auto");
   const [ratioWidth, setRatioWidth] = useState(String(previousRatio?.width || 1));
   const [ratioHeight, setRatioHeight] = useState(String(previousRatio?.height || 1));
   const ratioHintId = useId();
   const [width = NaN, height = NaN] = ratio === "custom" ? [Number(ratioWidth), Number(ratioHeight)] : ratio.split(":").map(Number);
+  useEffect(() => { onAspectRatioChange?.(ratio === "auto" ? undefined : { width, height }); }, [ratio, width, height]);
   const [copied, setCopied] = useState("");
   const [copyError, setCopyError] = useState("");
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);

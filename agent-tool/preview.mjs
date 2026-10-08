@@ -63,6 +63,11 @@ const server = createServer(async (req, res) => {
       res.end(await readFile(new URL("../browser-extension/tests/settings-recovery.browser.js", import.meta.url)));
       return;
     }
+    if (path === "/end-to-end-regression.js") {
+      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+      res.end(await readFile(new URL("../browser-extension/tests/end-to-end.browser.js", import.meta.url)));
+      return;
+    }
     if (path === "/generation-actions-regression.js") {
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       res.end(await readFile(new URL("../browser-extension/tests/generation-actions.browser.js", import.meta.url)));
@@ -182,9 +187,15 @@ const server = createServer(async (req, res) => {
         if (previewOptions.has('reminder')) {job.id='11111111-1111-4111-8111-111111111111';if(job.generations?.length)job.generations[0].id='22222222-2222-4222-8222-222222222222';}
         if (/^[a-f0-9-]{36}$/.test(previewOptions.get('task') || '')) job.id=previewOptions.get('task');
         if (/^[a-f0-9-]{36}$/.test(previewOptions.get('generation') || '') && job.generations?.length) job.generations[0].id=previewOptions.get('generation');
+        if((previewOptions.has('endToEndRegression')||previewOptions.has('endToEndKeyboard'))&&job.mode==='recreate'){delete job.reenact;job.referenceIndex=0;}
         const older={...structuredClone(job),id:'older-style',createdAt:'2026-09-01T00:00:00Z',result:{...job.result,title:'早期风格版本',promptZh:'早期版本：保留原始构图，迁移平涂质感。'},generations:[]};
         const projects=[{id:projectId,title:state.startsWith('multi')?'水彩里的日常':state==='gallery'?'午后，一杯水彩':'暖纸底几何模板',createdAt:job.createdAt,updatedAt:job.createdAt,sourceUrl:job.sourceUrl,capture:'original',jobs:state.endsWith('-new')?[]:state==='projects'?[job,reenact,older]:state==='alignment'?[job,older]:[job]},
           {id:secondId,title:'另一个空白项目',createdAt:job.createdAt,updatedAt:job.createdAt,sourceUrl:'https://example.com/second',capture:'original',jobs:[]}];
+        if(previewOptions.has('endToEndKeyboard'))projects[1].jobs=[{...structuredClone(older),id:'44444444-4444-4444-8444-444444444444',projectId:secondId}];
+        if(previewOptions.get('endToEndRegression')==='popup-start-failed') {
+          job.generations=[];
+          job.autoGeneration={status:'failed',language:'zh',aspectRatio:{width:3,height:2},error:'示例：自动生图启动失败，请重试'};
+        }
         if(previewOptions.has('creationContextRegression')) {
           job.id='11111111-1111-4111-8111-111111111111';
           older.id='22222222-2222-4222-8222-222222222222';
@@ -261,6 +272,22 @@ const server = createServer(async (req, res) => {
         }
         const findJob=(id)=>projects.flatMap(p=>p.jobs).find(j=>j.id===id);
         const models={accountLabel:'ChatGPT · 预览',selected:state==='models-new'?null:'preview-vision',reasoningEffort:state==='models-new'?undefined:'medium',models:[{model:'preview-vision',label:'Vision Model',isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:['low','medium','high','xhigh'].map(reasoningEffort=>({reasoningEffort})),status:state==='models-new'?'unverified':'verified'},{model:'preview-unavailable',label:'Unavailable Model',defaultReasoningEffort:'low',supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],status:'unverified'}]};
+        // Both standalone and chained fixtures use this same synthetic generation lifecycle.
+        const startGeneration=async(saved,message,chained=false)=>{
+          await new Promise(resolve=>setTimeout(resolve,Math.min(60000,Math.max(0,Number(previewOptions.get('generationStartDelay'))||0))));
+          if(chained&&saved.autoGeneration.status!=='pending')return;
+          if(previewOptions.get('generationStart')==='failed')throw new Error('示例：生成请求提交失败，请重试');
+          const generation={id:crypto.randomUUID(),status:'running',stage:'正在生成图片…',language:message.language,extension:'png',createdAt:new Date().toISOString(),prompt:message.language==='zh'?saved.result.promptZh:saved.result.promptEn,negativePrompt:saved.result.negativePrompt,model:saved.model||models.selected,referenceIndex:savedReferenceIndex(saved),subjectImage:message.subjectImage,subjects:message.subjects?structuredClone(message.subjects):undefined,aspectRatio:message.aspectRatio};
+          saved.generations||=[];saved.generations.push(generation);touch(projects.find(p=>p.id===saved.projectId));
+          setTimeout(()=>{if(generation.status==='running'){
+            generation.status=previewOptions.get('fx')==='failed'?'failed':'completed';
+            generation.stage=generation.status==='failed'?'预览：生图失败':'图片已生成';
+            if(generation.status==='failed')generation.error=generation.stage;
+            touch(projects.find(p=>p.id===saved.projectId));
+          }},Math.min(60000,Math.max(1000,Number(previewOptions.get('generationDelay'))||5000)));
+          if(chained)Object.assign(saved.autoGeneration,{status:'started',generationId:generation.id});
+          return generation;
+        };
         const service={service:'qc-alchemy',version:'0.3.2',managed:previewOptions.get('restart')!=='manual',canRestart:!['old','manual'].includes(previewOptions.get('restart')),instanceId:'preview-first'};
         let restartingUntil=0;
         const cli={detectedAt:new Date().toISOString(),checkedAt:new Date().toISOString(),installed:true,version:'0.100.0',latestVersion:'0.101.0',executable:'/example/bin/codex',source:'npm',canUpdate:true,updateAvailable:true,command:'npm install -g @openai/codex@latest',instructions:{message:'升级后确认 Reframe 使用的 CLI 路径。',loginCommand:"'/example/bin/codex' login"},compatibility:{features:Object.fromEntries(['models','reverse','generation','sessions'].map(key=>[key,{status:'supported'}]))}};
@@ -434,17 +461,32 @@ const server = createServer(async (req, res) => {
             return {ok:true,value:{...selection(projects.find(p=>p.id===saved.projectId)),image:saved.image||template,jobId:saved.id,referenceIndex:savedReferenceIndex(saved),reenact:saved.reenact?(saved.mode==='multi-reenact'?{...saved.reenact,subjects:saved.generations?.at(-1)?.subjects||saved.reenact.subjects}:{...saved.reenact,subjectImage:saved.reenact.subjectImage||subject}):undefined,generationSubjectImage:saved.generations?.at(-1)?.subjectImage}};
           }
           if(message.type==='alchemy:start') {
+            const selectedAtStart=data.selection?.id;
             await new Promise(resolve=>setTimeout(resolve,Math.min(10000,Math.max(0,Number(previewOptions.get('startDelay'))||0))));
+            if(previewOptions.get('start')==='failed')throw new Error('示例：逆向提交失败，请重试');
             const project=projects.find(p=>p.id===message.projectId);
-            const next={id:'preview-'+Date.now(),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,referenceIndex:message.referenceIndex,instruction:message.instruction,...(message.mode==='session'?{sessionContext:{sources:selectedSessionRows(message.sessionIds),capturedAt:new Date().toISOString(),hash:'preview-snapshot',messageCount:6,attachmentCount:0}}:{}),reenact:message.reenact?structuredClone(message.reenact):undefined};
-            project.jobs.unshift(next);project.inputs={...project.inputs,[message.mode]:{referenceIndex:message.referenceIndex,instruction:message.instruction,...structuredClone(message.reenact),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};project.inputVersions={...project.inputVersions,[message.mode]:next.id};project.inputRevision=(project.inputRevision||0)+1;touch(project);data.selection={...selection(project),jobId:next.id,reenact:structuredClone(message.reenact)};
-            setTimeout(()=>{if(next.status==='running'){next.status='completed';next.stage='逆向完成';next.result={...${JSON.stringify(result)},title:message.mode+' 新提示词',promptZh:message.mode==='session'?'以海边小城的旅行成片为内容，清晨码头、沿海骑行与夕阳灯塔呼应，天空留白；迁移参考图的配色、光影与笔触。':'当前路径 '+message.mode+' 的独立提示词',promptEn:message.mode==='session'?'Illustrate a quiet coastal journey in the visual style of the reference image.':'Use the supplied subjects and reference template.'};touch(project);}},1500);
-            return {ok:true,value:{selection:{...data.selection,image:next.image},currentSelection:selection(project),job:structuredClone(next)}};
+            const next={id:crypto.randomUUID(),model:models.selected,...(message.generation&&previewOptions.get('start')!=='legacy'?{autoGeneration:{...structuredClone(message.generation),status:'pending'}}:{}),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,referenceIndex:message.referenceIndex,instruction:message.instruction,...(message.mode==='session'?{sessionContext:{sources:selectedSessionRows(message.sessionIds),capturedAt:new Date().toISOString(),hash:'preview-snapshot',messageCount:6,attachmentCount:0}}:{}),reenact:message.reenact?structuredClone(message.reenact):undefined};
+            project.jobs.unshift(next);project.inputs={...project.inputs,[message.mode]:{referenceIndex:message.referenceIndex,instruction:message.instruction,...structuredClone(message.reenact),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};project.inputVersions={...project.inputVersions,[message.mode]:next.id};project.inputRevision=(project.inputRevision||0)+1;touch(project);const submittedSelection={...selection(project),jobId:next.id,reenact:structuredClone(message.reenact)};
+            if(data.selection?.id===selectedAtStart)data.selection=submittedSelection;
+            setTimeout(async()=>{
+              if(next.status!=='running')return;
+              if(previewOptions.get('reverse')==='failed'){
+                next.status='failed';next.error='示例：逆向失败';
+                if(next.autoGeneration)Object.assign(next.autoGeneration,{status:'failed',error:next.error});
+              } else {
+                next.status='completed';next.stage='逆向完成';next.result={...${JSON.stringify(result)},title:message.mode+' 新提示词',promptZh:message.mode==='session'?'以海边小城的旅行成片为内容，清晨码头、沿海骑行与夕阳灯塔呼应，天空留白；迁移参考图的配色、光影与笔触。':'当前路径 '+message.mode+' 的独立提示词',promptEn:message.mode==='session'?'Illustrate a quiet coastal journey in the visual style of the reference image.':'Use the supplied subjects and reference template.'};
+                if(next.autoGeneration)try {
+                  await startGeneration(next,{...next.autoGeneration,subjectImage:next.reenact?.subjectImage,subjects:next.reenact?.subjects},true);
+                } catch(error){Object.assign(next.autoGeneration,{status:'failed',error:error.message});}
+              }
+              touch(project);
+            },Math.min(60000,Math.max(100,Number(previewOptions.get('reverseDelay'))||1500)));
+            return {ok:true,value:{selection:{...submittedSelection,image:next.image},currentSelection:selection(project),job:structuredClone(next)}};
           }
           if(message.type==='alchemy:cancel'){
             await new Promise(resolve=>setTimeout(resolve,Math.min(10000,Math.max(0,Number(previewOptions.get('cancelDelay'))||0))));
             if(previewOptions.get('cancel')==='failed')throw new Error('示例：取消失败，请重试');
-            const saved=findJob(message.id);saved.status='cancelled';touch(projects.find(p=>p.id===saved.projectId));return {ok:true,value:structuredClone(saved)};}
+            const saved=findJob(message.id);if(saved.status==='running')saved.status='cancelled';if(saved.autoGeneration?.status==='pending')saved.autoGeneration.status='cancelled';touch(projects.find(p=>p.id===saved.projectId));return {ok:true,value:structuredClone(saved)};}
           if(message.type==='alchemy:generation-file-action')throw new Error('界面预览不会打开本机文件，请在扩展中使用。');
           if(message.type==='alchemy:generation-reference')return {ok:true,value:{image:findJob(message.id).generations.find(g=>g.id===message.generationId)?.subjectImage||template,subjects:findJob(message.id).generations.find(g=>g.id===message.generationId)?.subjects}};
           if(message.type==='alchemy:generation-image') {
@@ -457,17 +499,8 @@ const server = createServer(async (req, res) => {
             return {ok:true,value:job};
           }
           if(message.type==='alchemy:generate') {
-            await new Promise(resolve=>setTimeout(resolve,Math.min(60000,Math.max(0,Number(previewOptions.get('generationStartDelay'))||0))));
-            if(previewOptions.get('generationStart')==='failed')return {error:'示例：生成请求提交失败，请重试'};
             const saved=findJob(message.id);
-            const generation={id:'preview-'+Date.now(),status:'running',stage:'正在生成图片…',language:message.language,extension:'png',createdAt:new Date().toISOString(),prompt:message.language==='zh'?saved.result.promptZh:saved.result.promptEn,negativePrompt:saved.result.negativePrompt,model:models.selected,referenceIndex:savedReferenceIndex(saved),subjectImage:message.subjectImage,subjects:message.subjects?structuredClone(message.subjects):undefined,aspectRatio:message.aspectRatio};
-            saved.generations||=[];saved.generations.push(generation);touch(projects.find(p=>p.id===saved.projectId));
-            setTimeout(()=>{if(generation.status==='running'){
-              generation.status=previewOptions.get('fx')==='failed'?'failed':'completed';
-              generation.stage=generation.status==='failed'?'预览：生图失败':'图片已生成';
-              if(generation.status==='failed')generation.error=generation.stage;
-              touch(projects.find(p=>p.id===saved.projectId));
-            }},Math.min(60000,Math.max(1000,Number(previewOptions.get('generationDelay'))||5000)));
+            await startGeneration(saved,message);
             return {ok:true,value:structuredClone(saved)};
           }
           if(message.type==='alchemy:generation-cancel') {
@@ -530,6 +563,8 @@ const server = createServer(async (req, res) => {
       );
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('settingsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/settings-recovery-regression.js"></script></body>'));
+    if (['/workspace.html','/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('endToEndRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/end-to-end-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('generationActionsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/generation-actions-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('autoStyleRegression'))

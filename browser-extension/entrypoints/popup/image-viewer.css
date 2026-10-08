@@ -1,9 +1,9 @@
-.image-viewer { position: relative; flex: 1; min-height: 0; background: var(--surface-muted); }
-.image-viewer-stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; }
+.image-viewer { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--surface-muted); }
+.image-viewer-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; user-select: none; }
 .image-viewer-stage[data-zoomed="true"] { cursor: grab; }
 .image-viewer-stage[data-zoomed="true"][data-dragging="true"] { cursor: grabbing; }
 .image-viewer-stage img { position: absolute; left: 50%; top: 50%; max-width: none; max-height: none; pointer-events: none; transform-origin: center; }
-.image-viewer-tools { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 5px; background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-floating); }
+.image-viewer-tools { display: flex; flex: none; align-items: center; justify-content: center; gap: 4px; padding: 5px; border-top: 1px solid var(--line); background: var(--surface); }
 .image-viewer-tools button { display: grid; place-items: center; width: 32px; height: 32px; padding: 6px; border: 0; border-radius: 4px; background: transparent; line-height: 1; }
 .image-viewer-tools .ui-icon { display: block; width: 20px; height: 20px; }
 .image-viewer-tools button:disabled { opacity: .3; }

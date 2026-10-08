@@ -7,3 +7,4 @@
 | [supervisor](supervisor.md) | [接任 Reframe 监工与后续维护](codex://threads/01a11545-ff7f-7890-a09f-1cca67b84a65) | 分工、复核、冲突整合及授权提交发布。 | [工作日志](../../agent-logs/01a11545-ff7f-7890-a09f-1cca67b84a65.md)；执行任务复核结论记入对应执行者日志。 |
 | [project-manager](project-manager.md) | [项目管理](codex://threads/01a0ff95-4f2e-77b3-af99-550a20b63407) | 协作准则、任职索引与阶段收尾。 | [工作日志](../../agent-logs/01a0ff95-4f2e-77b3-af99-550a20b63407.md)；阶段收尾记入对应任务日志。 |
 | [uiux-engineer](uiux-engineer.md) | [梳理 Reframe UIUX 规范与工具](codex://threads/01a11556-7e12-7440-b956-f968b3a00034) | UIUX 规范、设计一致性与诊断工具实现维护。 | [工作日志](../../agent-logs/01a11556-7e12-7440-b956-f968b3a00034.md) |
+| [executor](executor.md) | [逆向与生图端到端流程](codex://threads/01a119f3-2d49-7a83-bcb4-849b6295b931) | 创作流程衔接与独立操作兼容；用户未指定编号。 | [工作日志](../../agent-logs/01a119f3-2d49-7a83-bcb4-849b6295b931.md) |

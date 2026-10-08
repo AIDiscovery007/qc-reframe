@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "intent": "用户要求保留独立逆向及重复生图，同时新增逆向并生图；共享现有按钮、任务状态和生图设置",
+  "createdAt": "2026-10-08T05:30:26.971Z",
+  "reviewStatus": "proposed",
+  "files": [
+    {
+      "path": "browser-extension/entrypoints/popup/App.tsx",
+      "sha256": "d759d038bbb2446b2f1472da6ec1388b22acad4a7bb879e407454f3d4bb6fd86"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/GenerationPanel.tsx",
+      "sha256": "a1bcc685ad784e7c039eb6757d7015f4f469f9ec228263884824ff94dcdc8bf3"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/QuickWorkspace.tsx",
+      "sha256": "20249347929bbb77eb7cc1e0587cc38108785eeaaee7f95de837e996e94374f1"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/TaskCenter.tsx",
+      "sha256": "4e57ba213932d2e2b740bc78e010b1eaed4ccb5517eaaeaa7fe4dd13f6c76380"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/compact-editor.css",
+      "sha256": "661e9613c0960795d001db9b07f4ee6057696d40dd144859b9db618a4e5786f0"
+    },
+    {
+      "path": "browser-extension/entrypoints/workspace/CanvasWorkspace.tsx",
+      "sha256": "ff44b09880c82a9a8282f09cc53986b179a52b0cd550606e45d1dbb7e14d3b38"
+    },
+    {
+      "path": "browser-extension/entrypoints/workspace/canvas-workspace.css",
+      "sha256": "fa562c05f67fe35bf0228e30238e25981f310aa6acc1ce729855637eaeb3004e"
+    }
+  ],
+  "rules": [
+    "UI-CSS-IMPORT",
+    "UI-TOKEN-DEFINED",
+    "UI-TOKEN-COLOR",
+    "UI-LAYOUT-CANVAS",
+    "UI-LAYOUT-QUICK",
+    "UI-IMAGE-PREVIEW",
+    "UI-EXAMPLE-STATE",
+    "UI-EXAMPLE-KEYBOARD"
+  ],
+  "scenarios": [
+    "workspace-wide",
+    "workspace-prompt",
+    "workspace-narrow",
+    "popup",
+    "popup-narrow",
+    "popup-image-failed",
+    "generation-actions",
+    "end-to-end-workspace",
+    "end-to-end-popup",
+    "end-to-end-cancel",
+    "end-to-end-phase-cancel",
+    "end-to-end-context",
+    "end-to-end-reverse-failed",
+    "end-to-end-generation-failed",
+    "image-order-paired",
+    "image-order-multi",
+    "image-order-legacy",
+    "image-order-failed",
+    "image-order-popup",
+    "image-instruction-default-paired",
+    "image-instruction-legacy-paired",
+    "image-instruction-default-multi",
+    "image-order-keyboard-new",
+    "image-order-keyboard-history",
+    "image-order-keyboard-failure",
+    "image-order-keyboard-late",
+    "auto-style",
+    "creation-context",
+    "settings-recovery",
+    "example-workspace-empty",
+    "example-popup-empty",
+    "example-input-loading",
+    "example-reverse-busy",
+    "example-reverse-failed",
+    "example-no-model",
+    "example-long-instruction",
+    "example-narrow-input",
+    "example-narrow-result",
+    "example-image-viewer",
+    "example-native-controls"
+  ],
+  "scopeReason": "共享/未知依赖没有完整影响图，回退全部登记场景，不静默跳过。",
+  "evidence": [
+    {
+      "kind": "intermediate-browser-gate",
+      "status": "passed",
+      "report": "<OS临时目录>/reframe-ui-gate-CRittz/gate.json",
+      "scope": "40 synthetic preview scenarios plus isolated extension; no real model or user profile; superseded by subsequent ratio fallback changes, final source review requires new proposal"
+    }
+  ],
+  "reviewChecklist": [
+    "确认设计意图及合法变体",
+    "复核组件复用与所有受影响表面",
+    "附上静态/交互/截图证据",
+    "设计变化时单独审阅指定视觉基线"
+  ]
+}

@@ -8,8 +8,9 @@ export const rules = [
   { id: 'UI-LAYOUT-CANVAS', title: '工作台画布关系', kind: 'geometry', surfaces: ['workspace'], sources: [workspace + 'CanvasWorkspace.tsx', workspace + 'canvas-workspace.css', workspace + 'results.css'], intent: '宽屏双画布等宽，共享标签、画布、图条轨道；窄屏关闭侧 inert。' },
   { id: 'UI-LAYOUT-QUICK', title: '轻量画布与图条', kind: 'geometry', surfaces: ['popup'], sources: [popup + 'QuickWorkspace.tsx', popup + 'compact-editor.css'], intent: '保持已确认的轻量画布和图条尺寸，空态与有图状态分开验证。' },
   { id: 'UI-IMAGE-PREVIEW', title: '图片预览入口', kind: 'geometry', surfaces: ['workspace', 'popup'], sources: [popup + 'ImagePreview.tsx', popup + 'image-preview.css'], intent: '预览按钮贴合实际 contain 图片边缘，图片失败后不提供无效入口。' },
+  { id: 'UI-IMAGE-VIEWPORT', title: '图片视口与独立缩放栏', kind: 'interaction', surfaces: ['workspace', 'popup'], sources: [popup + 'ImageViewer.tsx', popup + 'image-viewer.css', popup + 'ImagePreview.tsx', popup + 'image-preview.css'], intent: '控制行占独立空间，不与图片视口相交；适配完整可见，缩放平移裁剪于视口，工具栏不触发图片手势。' },
   { id: 'UI-EXAMPLE-STATE', title: '生产组件代表状态', kind: 'interaction', surfaces: ['workspace', 'popup'], sources: [popup + 'QuickWorkspace.tsx', workspace + 'CanvasWorkspace.tsx'], intent: '预览数据驱动真实组件的空态、读取、忙碌、失败、禁用、长文本和窄屏；不通过改DOM伪造业务状态。' },
-  { id: 'UI-EXAMPLE-KEYBOARD', title: '原生控件与浮层交互', kind: 'interaction', surfaces: ['workspace'], sources: [popup + 'SelectField.tsx', popup + 'InlineHelp.tsx', popup + 'ImagePreview.tsx', 'browser-extension/lib/motion-dialog.ts'], intent: '真实键盘验证原生select、帮助展开、图片缩放、dialog焦点约束、Escape关闭和焦点返回。' },
+  { id: 'UI-EXAMPLE-KEYBOARD', title: '原生控件与浮层交互', kind: 'interaction', surfaces: ['workspace', 'popup'], sources: [popup + 'SelectField.tsx', popup + 'InlineHelp.tsx', popup + 'ImagePreview.tsx', 'browser-extension/lib/motion-dialog.ts'], intent: '真实键盘验证原生select、帮助展开、图片缩放、dialog焦点约束、Escape关闭和焦点返回。' },
 ];
 
 export const components = [
@@ -31,6 +32,17 @@ export const scenarios = [
   { id: 'popup-narrow', surface: 'popup', path: '/popup.html?state=alignment', viewport: { width: 320, height: 740 }, rules: ['UI-LAYOUT-QUICK', 'UI-IMAGE-PREVIEW'] },
   { id: 'popup-image-failed', surface: 'popup', path: '/popup.html?state=alignment', viewport: { width: 400, height: 740 }, prepare: 'image-failed', rules: ['UI-LAYOUT-QUICK', 'UI-IMAGE-PREVIEW'] },
   { id: 'generation-actions', surface: 'workspace', path: '/workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200', viewport: wide, regression: 'generationActionsRegression', rules: [] },
+  ...['workspace', 'popup'].flatMap(surface => ['cancel', 'legacy', 'failure', 'tab', 'tab-failure', 'project', 'project-failure'].map(flowKeyboardCase => ({
+    id: `end-to-end-keyboard-${surface}-${flowKeyboardCase}`, surface,
+    path: `/${surface}.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000${flowKeyboardCase === 'legacy' ? '&start=legacy' : flowKeyboardCase.includes('failure') ? '&start=failed' : ''}`,
+    viewport: surface === 'popup' ? { width: 320, height: 740 } : wide, regression: 'endToEndKeyboard', flowKeyboardCase, rules: [],
+  }))),
+  { id: 'end-to-end-popup-start-failed', surface: 'popup', path: '/popup.html?state=alignment&mode=recreate&endToEndRegression=popup-start-failed&generationDelay=1000', viewport: { width: 320, height: 740 }, regression: 'endToEndRegression', rules: [] },
+  ...['workspace', 'popup', 'cancel', 'phase-cancel', 'context', 'reverse-failed', 'generation-failed'].map(flow => ({
+    id: `end-to-end-${flow}`, surface: flow === 'popup' ? 'popup' : 'workspace',
+    path: `/${flow === 'popup' ? 'popup' : 'workspace'}.html?state=alignment&mode=recreate&endToEndRegression=${flow}&generationDelay=1000&startDelay=200${flow === 'phase-cancel' ? '&reverseDelay=300&generationStartDelay=2000' : '&reverseDelay=1500'}${flow === 'reverse-failed' ? '&reverse=failed' : ''}${flow === 'generation-failed' ? '&fx=failed' : ''}`,
+    viewport: flow === 'popup' ? { width: 320, height: 740 } : wide, regression: 'endToEndRegression', rules: [],
+  })),
   ...[
     ['image-order-paired', 'projects', 'style', 'paired'],
     ['image-order-multi', 'multi', 'multi-reenact', 'multi'],
@@ -60,8 +72,15 @@ export const exampleScenarios = [
   { id: 'example-narrow-input', title: '窄屏输入区', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: { width: 600, height: 900 }, example: 'narrow-input', states: ['narrow'], components: ['CanvasWorkspace'], steps: '窗口宽度600px，点击输入画布；结果侧应inert。' },
   { id: 'example-narrow-result', title: '窄屏结果区', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: { width: 600, height: 900 }, example: 'narrow-result', states: ['narrow'], components: ['CanvasWorkspace'], steps: '窗口宽度600px，点击生成结果；输入侧应inert。' },
   { id: 'example-image-viewer', title: '图片查看与键盘返回', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: wide, example: 'image', states: ['keyboard', 'dialog', 'focus'], components: ['ImagePreview / ImageViewer', 'motion-dialog'], steps: '聚焦图片放大入口按Enter，缩放/适应窗口；Tab留在dialog内，Escape返回触发器。' },
+  ...[
+    ['portrait', '竖图预览与独立控制行', 'workspace', { width: 975, height: 1034 }, 'input'],
+    ['narrow', '320px 图片预览与旋转', 'popup', { width: 320, height: 740 }, 'input'],
+    ['short', '320px 矮窗口图片预览', 'popup', { width: 320, height: 360 }, 'input'],
+    ['result-short', '矮窗口只读结果预览', 'workspace', { width: 640, height: 360 }, 'result'],
+    ['result-popup', '轻量窗口只读结果预览', 'popup', { width: 400, height: 740 }, 'result'],
+  ].map(([suffix, title, surface, viewport, imageTarget]) => ({ id: `example-image-viewer-${suffix}`, title, surface, path: `/${surface}.html?state=alignment`, viewport, imageTarget, ...(suffix === 'result-short' ? { imageOpenViewport: { width: 640, height: 740 } } : {}), example: 'image', states: ['keyboard', 'dialog', 'focus', 'geometry', 'zoom', ...(imageTarget === 'input' ? ['rotation'] : ['read-only'])], components: ['ImagePreview / ImageViewer', 'motion-dialog'], steps: `${suffix === 'result-short' ? '先在640×740打开，缩小到640×360验证弹窗，恢复原尺寸再检查焦点返回；' : ''}打开图片预览，检查适配/放大/拖拽与控制栏不交叠；输入图旋转后重新适配，Escape返回入口。` })),
   { id: 'example-native-controls', title: '原生下拉、帮助与设置弹窗', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: wide, example: 'controls', states: ['keyboard', 'dialog', 'focus'], components: ['SelectField', 'InlineHelp', 'motion-dialog'], steps: '打开设置→界面与动效；键盘改变原生下拉、Escape收起选项、Enter/Space展开帮助，最后Escape关闭设置。' },
-].map(scenario => ({ ...scenario, rules: [scenario.example === 'image' || scenario.example === 'controls' ? 'UI-EXAMPLE-KEYBOARD' : 'UI-EXAMPLE-STATE', ...(['long', 'narrow-input', 'narrow-result'].includes(scenario.example) ? ['UI-LAYOUT-CANVAS'] : [])] }));
+].map(scenario => ({ ...scenario, rules: [scenario.example === 'image' || scenario.example === 'controls' ? 'UI-EXAMPLE-KEYBOARD' : 'UI-EXAMPLE-STATE', ...(scenario.example === 'image' ? ['UI-IMAGE-VIEWPORT'] : []), ...(['long', 'narrow-input', 'narrow-result'].includes(scenario.example) ? ['UI-LAYOUT-CANVAS'] : [])] }));
 scenarios.push(...exampleScenarios);
 for (const component of components) component.examples = exampleScenarios.filter(scenario => scenario.components.includes(component.name)).map(scenario => scenario.id);
 

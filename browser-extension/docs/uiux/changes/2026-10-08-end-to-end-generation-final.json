@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "intent": "端到端创作及独立逆向/重复生图；补失败比例沿用与稳定键盘焦点，覆盖两端、旧服务和迟到响应",
+  "createdAt": "2026-10-08T05:45:25.586Z",
+  "reviewStatus": "proposed",
+  "files": [
+    {
+      "path": "browser-extension/entrypoints/popup/App.tsx",
+      "sha256": "e0fb146eea8dc4a82b6b174c41b5c4a7f5d51cb652a381e169931b60790deee5"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/GenerationPanel.tsx",
+      "sha256": "a1bcc685ad784e7c039eb6757d7015f4f469f9ec228263884824ff94dcdc8bf3"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/QuickWorkspace.tsx",
+      "sha256": "7f70b0f55f72679263f1bd2e5ba9c971d3d8d133444438c66791c899b224894c"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/TaskCenter.tsx",
+      "sha256": "4e57ba213932d2e2b740bc78e010b1eaed4ccb5517eaaeaa7fe4dd13f6c76380"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/compact-editor.css",
+      "sha256": "e265ed298afcef6a5f2ab5a147e0efe63792bd67a4d4387bf57e19b423b71601"
+    },
+    {
+      "path": "browser-extension/entrypoints/workspace/CanvasWorkspace.tsx",
+      "sha256": "688fad63c9a901d6c77285c76d4c034878ea5bd58832fbb4b32947a1af86523c"
+    },
+    {
+      "path": "browser-extension/entrypoints/workspace/canvas-workspace.css",
+      "sha256": "e31daae76df655e3dd6fd140a7302d471272c6d0c56172bb88a70c915f68e958"
+    },
+    {
+      "path": "agent-tool/ui/catalog.mjs",
+      "sha256": "dd44321ac7ae37f482d50d7bd7ca5833d60f06a3f071101f8482e8e8152612a3"
+    },
+    {
+      "path": "agent-tool/ui/runner.mjs",
+      "sha256": "c1c9598c30d261143fd9c9d63d053fbe6b82533b2b07f3213151b4649bb83aa7"
+    },
+    {
+      "path": "agent-tool/ui/end-to-end.mjs",
+      "sha256": "fefdb535015eec7bbe782396a5913cd9701496b6cc396878f4ce5cbcb9c596e4"
+    },
+    {
+      "path": "agent-tool/preview.mjs",
+      "sha256": "aa9539ee5c9e8ec306d3a699292fd73c480d071d0582665d1a1cec356d64cbc3"
+    },
+    {
+      "path": "agent-tool/ui/gate.test.mjs",
+      "sha256": "45ba491885e7d04303c5671cf6e037d452d39802c0a1c5f1deb50e99078007a9"
+    },
+    {
+      "path": "browser-extension/tests/image-order.browser.js",
+      "sha256": "4f2b269209246dca19749a07965528f5a2fcb458356115221a49427a067c061c"
+    }
+  ],
+  "rules": [
+    "UI-CSS-IMPORT",
+    "UI-TOKEN-DEFINED",
+    "UI-TOKEN-COLOR",
+    "UI-LAYOUT-CANVAS",
+    "UI-LAYOUT-QUICK",
+    "UI-IMAGE-PREVIEW",
+    "UI-EXAMPLE-STATE",
+    "UI-EXAMPLE-KEYBOARD"
+  ],
+  "scenarios": [
+    "workspace-wide",
+    "workspace-prompt",
+    "workspace-narrow",
+    "popup",
+    "popup-narrow",
+    "popup-image-failed",
+    "generation-actions",
+    "end-to-end-keyboard-workspace-cancel",
+    "end-to-end-keyboard-workspace-legacy",
+    "end-to-end-keyboard-workspace-failure",
+    "end-to-end-keyboard-workspace-tab",
+    "end-to-end-keyboard-workspace-tab-failure",
+    "end-to-end-keyboard-workspace-project",
+    "end-to-end-keyboard-workspace-project-failure",
+    "end-to-end-keyboard-popup-cancel",
+    "end-to-end-keyboard-popup-legacy",
+    "end-to-end-keyboard-popup-failure",
+    "end-to-end-keyboard-popup-tab",
+    "end-to-end-keyboard-popup-tab-failure",
+    "end-to-end-keyboard-popup-project",
+    "end-to-end-keyboard-popup-project-failure",
+    "end-to-end-popup-start-failed",
+    "end-to-end-workspace",
+    "end-to-end-popup",
+    "end-to-end-cancel",
+    "end-to-end-phase-cancel",
+    "end-to-end-context",
+    "end-to-end-reverse-failed",
+    "end-to-end-generation-failed",
+    "image-order-paired",
+    "image-order-multi",
+    "image-order-legacy",
+    "image-order-failed",
+    "image-order-popup",
+    "image-instruction-default-paired",
+    "image-instruction-legacy-paired",
+    "image-instruction-default-multi",
+    "image-order-keyboard-new",
+    "image-order-keyboard-history",
+    "image-order-keyboard-failure",
+    "image-order-keyboard-late",
+    "auto-style",
+    "creation-context",
+    "settings-recovery",
+    "example-workspace-empty",
+    "example-popup-empty",
+    "example-input-loading",
+    "example-reverse-busy",
+    "example-reverse-failed",
+    "example-no-model",
+    "example-long-instruction",
+    "example-narrow-input",
+    "example-narrow-result",
+    "example-image-viewer",
+    "example-native-controls"
+  ],
+  "scopeReason": "共享/未知依赖没有完整影响图，回退全部登记场景，不静默跳过。",
+  "evidence": [
+    {
+      "kind": "product-tests",
+      "status": "passed",
+      "report": "/tmp/reframe-e2e-final-tests-3.log",
+      "scope": "build, TypeScript compile, 729 tests; synthetic/stub models only"
+    },
+    {
+      "kind": "keyboard-browser",
+      "status": "passed",
+      "report": "/tmp/reframe-keyboard-final.json",
+      "scope": "14 real Enter/Tab checks across workspace and 320px popup with synthetic backend"
+    },
+    {
+      "kind": "independent-keyboard-review",
+      "status": "passed",
+      "report": "<OS临时目录>/reframe-e2e-keyboard-rereview-86ex6Y/report.json",
+      "scope": "P2 focus issue closed; no accepted visual baseline"
+    },
+    {
+      "kind": "ui-tool-tests",
+      "status": "passed",
+      "report": "/tmp/reframe-e2e-tool-tests-final-2.log",
+      "scope": "43/43; cancelled-gate test uses isolated three-scene selection with unchanged failure assertions. Earlier timeout and static-catalog failure retained in task log."
+    },
+    {
+      "kind": "final-browser-gate",
+      "status": "passed",
+      "report": "<OS临时目录>/reframe-ui-gate-EUYCWz/gate.json",
+      "scope": "55/55 preview scenarios, static/maintenance and isolated extension passed; synthetic images/stub models. Source/build/fixture fingerprints verified throughout.",
+      "sourceHash": "35ff0ea0b6e7152daeba00c20077cd2a2b117b7761dc9b0b82a011134b23ee73",
+      "buildHash": "8f6160779bd873df14f9b974c8a92732204bf99a668daf926b9eb0a64c44dbe7",
+      "fixtureHash": "97441b205df676650320c3c1e591603b7960035c8d1dcca14d059a6a277e5b8a"
+    },
+    {
+      "kind": "visual-inspection",
+      "status": "reviewed-by-agent",
+      "report": "<OS临时目录>/reframe-ui-RoZDS1/report.json",
+      "scope": "Inspected workspace-wide and 320px popup-narrow screenshots; all three action paths visible without overlap. Candidate only, no human baseline acceptance.",
+      "candidate": "<OS临时目录>/reframe-ui-visual-ZugvtZ/candidate.json"
+    }
+  ],
+  "reviewChecklist": [
+    "确认设计意图及合法变体",
+    "复核组件复用与所有受影响表面",
+    "附上静态/交互/截图证据",
+    "设计变化时单独审阅指定视觉基线"
+  ]
+}

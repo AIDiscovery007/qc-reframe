@@ -13,16 +13,16 @@ import PromptSheet from "./PromptSheet";
 import useEditorExpansion from "./useEditorExpansion";
 
 const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
-export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contextKey, mode, image, subjectImage, subjects, referenceIndex, onImageOrder, selected, onSelect, instruction, disabled, modeDisabled, reverseDisabled, running, cancelling, status, error, errorTaskId, stale, hasPrompt, promptEditing, reduced, versions, prompt, actionsTarget, onMode, onInstruction, onSubject, onAvailability, onSubjects, onReference, onReferenceRotate, onSwap, onReverse, onCancel, onRetryReference, sessionTitle, onSessions }: {
+export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contextKey, mode, image, subjectImage, subjects, referenceIndex, onImageOrder, selected, onSelect, instruction, disabled, modeDisabled, reverseDisabled, running, continuous, submitting, cancelling, status, error, errorTaskId, stale, hasPrompt, promptEditing, reduced, versions, prompt, actionsTarget, onMode, onInstruction, onSubject, onAvailability, onSubjects, onReference, onReferenceRotate, onSwap, onReverse, onGenerate, chainDisabled, onCancel, onRetryReference, sessionTitle, onSessions }: {
   revealPrompt?: number; onPromptRevealed?(): void; contextKey: string; mode: Mode; image?: string; subjectImage: string; subjects: MultiSubject[]; selected: string; onSelect(id: string): void;
   referenceIndex: number; onImageOrder(referenceIndex: number, subjects: MultiSubject[]): Promise<void>;
-  instruction: string; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; running: boolean; cancelling: boolean;
+  instruction: string; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; running: boolean; continuous: boolean; submitting: boolean; cancelling: boolean;
   status?: string; error?: string; errorTaskId?: string; stale: boolean; hasPrompt: boolean; promptEditing: boolean; reduced: boolean;
   sessionTitle?: string; onSessions?(): void;
   versions: ReactNode; prompt: ReactNode; actionsTarget?: HTMLElement | null;
   onMode(mode: Mode): void; onInstruction(value: string): void; onSubject(image: string): void | Promise<void>; onAvailability(available: boolean): void;
   onSubjects(subjects: MultiSubject[]): void | Promise<void>; onReference(image: string): Promise<void>; onReferenceRotate(image: string): Promise<void>; onSwap(id?: string): void;
-  onReverse(): void; onCancel(): void; onRetryReference?: () => void;
+  onReverse(): void; onGenerate(): void; chainDisabled: boolean; onCancel(): void; onRetryReference?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const composer = useRef<HTMLDivElement>(null);
@@ -136,7 +136,11 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
     return destination?.disabled ? modeControl.current?.querySelector('select') || null : destination;
   };
   const sheetOpen = open && hasPrompt;
-  const reverseButton = <button ref={generate} className="primary canvas-generate" data-ready={hasPrompt && !stale && !running} disabled={running ? cancelling : reverseDisabled || uploading} aria-busy={running} onClick={running ? onCancel : onReverse}><Icon name={running ? "close" : hasPrompt ? "retry" : "edit"} />{running ? cancelling ? "正在取消…" : "取消提示词" : hasPrompt ? "更新提示词" : "生成提示词"}</button>;
+  // Keep the initiating button mounted and focusable while its guarded request settles.
+  const reverseButton = <>
+    <button ref={generate} className="primary canvas-generate" hidden={running && continuous} data-ready={!running} disabled={!running && !submitting && (reverseDisabled || uploading)} aria-disabled={running ? cancelling : reverseDisabled || uploading} aria-busy={running && !continuous} onClick={running ? cancelling ? undefined : onCancel : reverseDisabled || uploading ? undefined : onReverse}><Icon name={running ? "close" : hasPrompt ? "retry" : "edit"} />{running ? cancelling ? "正在取消…" : "取消提示词" : hasPrompt ? "更新提示词" : "仅逆向"}</button>
+    <button className="primary canvas-generate" hidden={running && !continuous} disabled={!running && !submitting && (chainDisabled || uploading)} aria-disabled={running ? cancelling : chainDisabled || uploading} aria-busy={running && continuous} onClick={running ? cancelling ? undefined : onCancel : chainDisabled || uploading ? undefined : onGenerate}><Icon name={running ? "close" : "image"} />{running ? cancelling ? "正在取消…" : "取消流程" : "逆向并生图"}</button>
+  </>;
   return <section className="canvas-workspace" data-prompt-open={sheetOpen} aria-label={`${modes[mode]}工作区`}>
     <div className="canvas-input" ref={inputArea}>
       <div className="canvas-stage" inert={sheetOpen}>

@@ -256,7 +256,7 @@ const submit = (extra) => ({
 async function waitFor(request, id, status) {
   for (let i = 0; i < 80; i++) {
     const job = await (await request(`/jobs/${id}`)).json();
-    if (job.status === status && !(await (await request("/health")).json()).active) return job;
+    if (job.status === status && job.autoGeneration?.status !== "pending" && !(await (await request("/health")).json()).active) return job;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.fail(`Task did not reach ${status}`);
@@ -786,4 +786,150 @@ test("task history includes old active reverse/generation tasks beyond the 30 re
   assert.equal((await (await request("/jobs")).json())[0].id, older.id, "new generation activity moves the old reverse record to the front");
   finishGeneration(decodeImage(image));
   await waitGeneration(request, older.id, "completed");
+});
+
+for (const mode of ["recreate", "style", "reenact", "multi-reenact"]) test(`${mode} chains reverse into generation without another client request and preserves retry snapshots`, async t => {
+  const finalResult = { ...result, promptZh: "实际主体", promptEn: "Actual subject", negativePrompt: "no text" };
+  const generationStarted = Promise.withResolvers(), calls = [];
+  const { request, dir } = await setup(t, async () => finalResult, async args => {
+    calls.push(args); generationStarted.resolve(); return decodeImage(image);
+  });
+  const subjects = ["person", "bag"].map(id => ({ id, role: "自动", detail: "保留", subjectImage: image }));
+  const extra = mode === "recreate" ? {} : { instruction: "保留主体", reenact: mode === "multi-reenact" ? { subjects } : { subjectImage: image }, referenceIndex: 1 };
+  const response = await request("/jobs", submit({ mode, ...extra, generation: { language: "en", aspectRatio: { width: 3, height: 4 } } }));
+  assert.equal(response.status, 202);
+  const submitted = await response.json();
+  assert.equal(submitted.autoGeneration.status, "pending");
+  // Only the initial POST is needed to enter the image model; no UI poll triggers it.
+  await Promise.race([generationStarted.promise, new Promise((_, reject) => setTimeout(() => reject(new Error("automatic generation did not start")), 2000).unref())]);
+  const completed = await waitGeneration(request, submitted.id, "completed");
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.autoGeneration.status, "started");
+  assert.equal(completed.autoGeneration.generationId, completed.generations[0].id);
+  assert.match(calls[0].prompt, /^Actual subject/);
+  assert.match(calls[0].prompt, /3:4/);
+  assert.equal(calls[0].negativePrompt, "no text");
+  assert.equal(calls[0].modelSettings.model, completed.model);
+  assert.equal(calls[0].referenceIndex, mode === "recreate" ? 0 : 1);
+  assert.equal(!!calls[0].imagePath, mode !== "recreate");
+  if (mode === "multi-reenact") assert.deepEqual(calls[0].subjects.map(item => item.id), ["person", "bag"]);
+  const first = structuredClone(completed.generations[0]);
+  assert.equal((await request(`/jobs/${submitted.id}/generations`, { method: "POST", body: JSON.stringify({ language: "en", aspectRatio: { width: 3, height: 4 } }) })).status, 202);
+  const retry = await waitGeneration(request, submitted.id, "completed");
+  assert.equal(retry.generations.length, 2);
+  assert.deepEqual(retry.generations[0], first);
+  assert.equal(calls[1].prompt, calls[0].prompt);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "records", `${submitted.id}.json`))), retry);
+});
+
+test("automatic generation validates options and generic style before invoking reverse", async t => {
+  let calls = 0;
+  const { request } = await setup(t, async () => { calls++; return result; });
+  for (const generation of [null, [], true, {}, { language: "other" }, { language: "en", aspectRatio: { width: 0, height: 1 } }, { language: "zh", subjectImage: image }])
+    assert.equal((await request("/jobs", submit({ mode: "recreate", generation }))).status, 400);
+  assert.equal((await request("/jobs", submit({ generation: { language: "zh" } }))).status, 400);
+  assert.equal(calls, 0);
+  const plain = await (await request("/jobs", submit())).json();
+  const completed = await waitFor(request, plain.id, "completed");
+  assert.equal(completed.autoGeneration, undefined);
+  assert.equal(completed.generations, undefined);
+});
+
+for (const cancelled of [false, true]) test(`automatic generation never starts after reverse ${cancelled ? "cancellation with late success" : "failure"}`, async t => {
+  const reverse = Promise.withResolvers();
+  let calls = 0;
+  const { request } = await setup(t, () => reverse.promise, async () => { calls++; return decodeImage(image); });
+  const submitted = await (await request("/jobs", submit({ mode: "recreate", generation: { language: "zh" } }))).json();
+  if (cancelled) {
+    const stopped = await (await request(`/jobs/${submitted.id}/cancel`, { method: "POST" })).json();
+    assert.equal(stopped.autoGeneration.status, "cancelled");
+    reverse.resolve({ ...result, promptZh: "complete" });
+  } else reverse.reject(new Error("reverse failed"));
+  const completed = await waitFor(request, submitted.id, cancelled ? "cancelled" : "failed");
+  assert.equal(completed.autoGeneration.status, cancelled ? "cancelled" : "failed");
+  assert.equal(completed.generations, undefined);
+  assert.equal(calls, 0);
+});
+
+test("automatic preparation and image failures preserve the usable reverse result", async t => {
+  const { request } = await setup(t, async () => result, async () => { throw new Error("image model failed"); });
+  const submitted = await (await request("/jobs", submit({ mode: "recreate", generation: { language: "zh" } }))).json();
+  const failed = await waitFor(request, submitted.id, "completed");
+  assert.equal(failed.autoGeneration.status, "failed");
+  assert.match(failed.autoGeneration.error, /缺少主体/);
+  assert.deepEqual(failed.result, result);
+  const edits = { promptZh: "实际主体", promptEn: "Actual subject", negativePrompt: "no text" };
+  assert.equal((await request(`/jobs/${submitted.id}/prompt`, { method: "POST", body: JSON.stringify(edits) })).status, 200);
+  assert.equal((await request(`/jobs/${submitted.id}/generations`, { method: "POST", body: '{"language":"zh"}' })).status, 202);
+  const imageFailed = await waitGeneration(request, submitted.id, "failed");
+  assert.equal(imageFailed.result.promptZh, edits.promptZh);
+  assert.match(imageFailed.generations[0].error, /image model failed/);
+});
+
+test("the chain cancel endpoint cancels image generation after reverse completes", async t => {
+  const generation = Promise.withResolvers(), entered = Promise.withResolvers();
+  const { request } = await setup(t, async () => ({ ...result, promptZh: "实际主体" }), async () => { entered.resolve(); return generation.promise; });
+  const submitted = await (await request("/jobs", submit({ mode: "recreate", generation: { language: "zh" } }))).json();
+  await entered.promise;
+  const stopped = await (await request(`/jobs/${submitted.id}/cancel`, { method: "POST" })).json();
+  assert.equal(stopped.status, "completed");
+  assert.equal(stopped.generations[0].status, "cancelled");
+  generation.resolve(decodeImage(image));
+  const completed = await waitGeneration(request, submitted.id, "cancelled");
+  assert.equal(completed.generations[0].imageAsset, undefined);
+  assert.equal(completed.result.promptZh, "实际主体");
+});
+
+for (const change of ["edit", "cancel", "disk failure"]) test(`automatic handoff handles ${change} while the reverse completion is being saved`, async t => {
+  const { default: fs } = await import("node:fs");
+  const { syncBuiltinESMExports } = await import("node:module");
+  const reverse = Promise.withResolvers(), saving = Promise.withResolvers(), release = Promise.withResolvers(), calls = [];
+  const finalResult = { ...result, promptZh: "original", negativePrompt: "original exclusion" };
+  const { request, dir } = await setup(t, () => reverse.promise, async args => { calls.push(args); return decodeImage(image); });
+  const submitted = await (await request("/jobs", submit({ mode: "recreate", generation: { language: "zh" } }))).json();
+  const path = join(dir, "records", `${submitted.id}.json`), rename = fs.promises.rename;
+  let intercepted = false;
+  fs.promises.rename = async (source, target) => {
+    if (target === path && !intercepted) {
+      const snapshot = JSON.parse(await readFile(source, "utf8"));
+      if (snapshot.status === "completed" && snapshot.autoGeneration?.status === "pending") {
+        intercepted = true; saving.resolve(); await release.promise;
+        if (change === "disk failure") throw new Error("disk failure");
+      }
+    }
+    return rename(source, target);
+  };
+  syncBuiltinESMExports();
+  try {
+    reverse.resolve(finalResult); await saving.promise;
+    assert.equal(calls.length, 0, "image generation must wait for successful prompt persistence");
+    assert.equal((await request("/cli/update", { method: "POST", body: "{}" })).status, 409);
+    assert.equal((await request("/models/verify", { method: "POST", body: '{"model":"other"}' })).status, 409);
+    let mutation;
+    if (change !== "disk failure") {
+      mutation = request(`/jobs/${submitted.id}/${change === "edit" ? "prompt" : "cancel"}`, {
+        method: "POST", body: JSON.stringify(change === "edit" ? { promptZh: "edited", promptEn: "edited", negativePrompt: "edited exclusion" } : {}),
+      });
+      let observed = false;
+      for (let i = 0; i < 100; i++) {
+        const job = await (await request(`/jobs/${submitted.id}`)).json();
+        if (change === "edit" ? job.result.promptZh === "edited" : job.autoGeneration.status === "cancelled") { observed = true; break; }
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+      assert.equal(observed, true);
+    }
+    release.resolve();
+    if (mutation) assert.equal((await mutation).status, 200);
+    const job = await waitFor(request, submitted.id, change === "disk failure" ? "failed" : "completed");
+    if (change === "edit") {
+      assert.equal(job.result.promptZh, "edited");
+      assert.equal(calls[0].prompt, "original");
+      assert.equal(calls[0].negativePrompt, "original exclusion");
+    } else {
+      assert.equal(calls.length, 0);
+      assert.equal(job.autoGeneration.status, change === "cancel" ? "cancelled" : "failed");
+    }
+  } finally {
+    release.resolve(); fs.promises.rename = rename; syncBuiltinESMExports();
+  }
 });

@@ -18,6 +18,9 @@ type Snapshot = {
 };
 type Request = <T>(message: Record<string, unknown>) => Promise<T>;
 
+export const validGenerationRatio = (ratio?: AspectRatio) => !ratio || [ratio.width, ratio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000)
+  && ratio.width / ratio.height >= 1 / 20 && ratio.width / ratio.height <= 20;
+
 export function generationReadiness({ job, lang, disabled, subjectImage, subjects, aspectRatio, allowMulti = true, requestPending }: GenerationInput) {
   const running = job.generations?.find(item => item.status === "running");
   const multi = job.mode === "multi-reenact";
@@ -26,10 +29,9 @@ export function generationReadiness({ job, lang, disabled, subjectImage, subject
     : !!subjectImage);
   const generic = job.mode === "style" && !job.reenact;
   const incomplete = /\[SUBJECT\]/i.test((lang === "zh" ? job.result?.promptZh : job.result?.promptEn) || "");
-  const validRatio = !aspectRatio || [aspectRatio.width, aspectRatio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000)
-    && aspectRatio.width / aspectRatio.height >= 1 / 20 && aspectRatio.width / aspectRatio.height <= 20;
+  const validRatio = validGenerationRatio(aspectRatio);
   return { running, multi, inputsReady, generic, incomplete, validRatio,
-    canGenerate: !!job.result && !disabled && !requestPending && !running && inputsReady && !generic && !incomplete && validRatio && (allowMulti || !multi) };
+    canGenerate: !!job.result && job.autoGeneration?.status !== "pending" && !disabled && !requestPending && !running && inputsReady && !generic && !incomplete && validRatio && (allowMulti || !multi) };
 }
 
 // One mounted prompt version owns its reads and view state. Submission callbacks

@@ -160,3 +160,15 @@ test('closing comparison or leaving the view invalidates snapshot reads without 
   assert.equal(f.session.getSnapshot().asset, undefined);
   assert.equal(f.requests.some(item => item.message.type === 'alchemy:generation-cancel'), false);
 });
+
+
+test('automatic handoff blocks manual generation until settled and allows failed-chain retry', async () => {
+  const f = fixture();
+  const waiting = input({ job: { ...job(), autoGeneration: { language: 'zh', status: 'pending' } } });
+  assert.equal(await f.session.act(waiting, false, f.callbacks), false);
+  assert.equal(f.requests.length, 0);
+  const retry = f.session.act(input({ job: { ...job(), autoGeneration: { language: 'zh', status: 'failed' } } }), false, f.callbacks);
+  assert.equal(f.requests.length, 1);
+  f.requests[0].resolve(job());
+  assert.equal(await retry, true);
+});

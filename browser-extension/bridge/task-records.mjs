@@ -39,6 +39,10 @@ export async function createTaskRecords({ dataDir, onCommit }) {
       Object.assign(job, { status: "failed", stage: "逆向中断", error: "本机服务已重启，请重新逆向" });
       interrupted = true;
     }
+    if (job.autoGeneration?.status === "pending") {
+      Object.assign(job.autoGeneration, { status: "failed", error: "本机服务已重启，请重新生成图片" });
+      interrupted = true;
+    }
     for (const generation of job.generations || []) {
       if (generation.status !== "running") continue;
       Object.assign(generation, { status: "failed", stage: "生图中断", error: "本机服务已重启，请重新生成图片" });

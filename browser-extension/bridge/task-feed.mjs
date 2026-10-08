@@ -8,10 +8,12 @@ export function createTaskFeed() {
   const touch = () => { revision++; for (const resolve of [...listeners]) resolve(); };
   return {
     update(job) {
-      const tasks = [job, ...(job.generations || [])].map(task => ({
+      const tasks = [...(job.autoGeneration?.status === "started" ? [] : [job]), ...(job.generations || [])].map(task => ({
         id: task.id, jobId: job.id, projectId: job.projectId, mode: job.mode,
         generationId: task === job ? undefined : task.id,
-        status: task.status, createdAt: task.createdAt,
+        status: task === job && job.autoGeneration ? ({ pending: "running", failed: "failed", cancelled: "cancelled" }[job.autoGeneration.status] || task.status) : task.status,
+        ...(task === job && job.autoGeneration ? { autoGeneration: true } : {}),
+        createdAt: task.createdAt,
       }));
       if (JSON.stringify(records.get(job.id)) === JSON.stringify(tasks)) return;
       records.set(job.id, tasks); touch();

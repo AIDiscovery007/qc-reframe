@@ -88,7 +88,7 @@ try {
   await waitFor(() => generate()?.textContent === '再生成图片', '切回版本应恢复其生图历史');
   setValue(versions, 'new');
   await waitFor(() => find('.canvas-generation-actions .generate-button')?.disabled, '无结果时生图应保持禁用');
-  assert(generate().disabled && find('.canvas-generate').textContent === '生成提示词', '无结果时两个动作仍可见且区分可用状态');
+  assert(generate().disabled && find('.canvas-generate').textContent === '仅逆向', '无结果时两个动作仍可见且区分可用状态');
   find('.canvas-generate').click();
   await waitFor(() => find('.canvas-generate')?.getAttribute('aria-busy') === 'true', '应开始逆向');
   assert(generate().disabled && find('.canvas-generate').textContent === '取消提示词', '提示词运行中保留明确取消动作');
