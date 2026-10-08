@@ -16,26 +16,44 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      UI_BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD' }}
       REQUIRE_VISUAL: ${{ inputs.require_visual || false }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - name: Set up Node for classification
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Classify complete event diff
+        id: scope
+        run: node agent-tool/ci.mjs classify
+      - name: Check documentation diff and repository links
+        if: steps.scope.outputs.mode == 'docs'
+        run: node agent-tool/ci.mjs docs
+      - name: Enable existing npm cache for full validation
+        if: steps.scope.outputs.mode == 'full'
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: browser-extension/package-lock.json
       - name: Prepare UIUX report directory
+        id: reports
+        if: steps.scope.outputs.mode == 'full'
         run: |
           mkdir -p "$RUNNER_TEMP/reframe-ui"
           echo "TMPDIR=$RUNNER_TEMP/reframe-ui" >> "$GITHUB_ENV"
       - run: npm ci
+        if: steps.scope.outputs.mode == 'full'
         working-directory: browser-extension
       - run: npx playwright install --with-deps chromium
+        if: steps.scope.outputs.mode == 'full'
         working-directory: browser-extension
       - name: One final browser or full gate
+        if: steps.scope.outputs.mode == 'full'
+        env:
+          UI_BASE: ${{ steps.scope.outputs.base }}
         run: |
           if ! git rev-parse --verify "$UI_BASE^{commit}" >/dev/null 2>&1; then
             UI_BASE=$(git hash-object -t tree /dev/null)
@@ -47,13 +65,15 @@ jobs:
           fi
           node agent-tool/ui.mjs gate --tier "$UI_TIER" --base "$UI_BASE" --baseline-dir browser-extension/docs/uiux/visual-baselines/linux --reason ci-final --json > "$TMPDIR/final-gate.json"
       - run: npm run compile && npm test
+        if: steps.scope.outputs.mode == 'full'
         working-directory: browser-extension
-      - run: node --test --test-concurrency=1 agent-tool/ui/*.test.mjs
+      - run: node --test --test-concurrency=1 agent-tool/ci.test.mjs agent-tool/ui/*.test.mjs
+        if: steps.scope.outputs.mode == 'full'
       - name: Initial visual review status
-        if: ${{ !inputs.require_visual && hashFiles('browser-extension/docs/uiux/visual-baselines/linux/**/manifest.json') == '' }}
+        if: ${{ steps.scope.outputs.mode == 'full' && !inputs.require_visual && hashFiles('browser-extension/docs/uiux/visual-baselines/linux/**/manifest.json') == '' }}
         run: echo 'Visual acceptance is pending human review of the uploaded Linux candidates. Browser gate does not claim pixel approval.' >> "$GITHUB_STEP_SUMMARY"
       - name: Reports, candidates, screenshots and failure traces
-        if: always()
+        if: always() && steps.scope.outputs.mode == 'full' && steps.reports.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: uiux-evidence
