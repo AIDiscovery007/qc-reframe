@@ -107,6 +107,8 @@ UI 改动用 `npm run preview` 检查相关状态，再按任务需要验收实�
 
 由具备权限的维护者连接仓库，并在 Codex 的仓库设置中启用 Automatic review，核对个人偏好和触发条件；操作以 [OpenAI 官方说明](https://learn.chatgpt.com/docs/third-party/github)为准。审查遵循适用的 AGENTS，身份与交付按[原生 reviewer 边界](AGENTS.md#岗位与任职)及 [Code Review Rules](AGENTS.md#code-review-rules)，保留 PR、受审提交与实际审查记录链接；规则文件存在不证明服务已启用或审查已完成。审查发现由监工按已有授权派工修复，保留现有 CI、独立复核、人工验收及合并/发布权限；GitHub 报告可供审阅，但不能作为本地 Mac 的同机 `evidence` 复用，亦不能跨 Mac/Linux 冒用验证结果。
 
+自动巡检使用当前监工会话的本机定时任务（heartbeat），范围限于本仓库已获用户授权的任务；按当前 PR head SHA 及对应工作流的最新运行（含重跑）识别新审查问题和 CI 失败，在原任务日志保留证据链接、去重并跟踪派工、返修、验证和监工复核，无变化时静默。监工按动态任职表向当前责任 agent 派工；岗位缺位时报告用户，不自动任命、合并或发布。本机须开机且桌面 app 运行，仓库保持可访问（见[官方定时任务说明](https://learn.chatgpt.com/docs/automations?surface=app)）；监工交接时须迁移巡检并停用旧监工的任务，避免重复派工。
+
 ## 发布新版本：先提交，再发布
 
 1. 确定目标版本，更新 `package.json` 和 `package-lock.json` 中的根版本。WXT 从包版本生成 manifest；同步 README 当前版本、安装 Prompt、克隆标签、下载链接和安装指引，不复制旧版功能日志到首页。
