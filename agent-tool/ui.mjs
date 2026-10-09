@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { root, contextFor, syncCatalog } from './ui/inventory.mjs';
+import { contextFor, syncCatalog } from './ui/inventory.mjs';
 import { scenarios } from './ui/catalog.mjs';
 import { readFile, writeFile, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -90,8 +90,6 @@ async function main() {
     if (options.command === 'prepare') {
       const { prepare } = await import('./ui/build.mjs');
       result = await prepare(options);
-      if (!options.json) console.log(JSON.stringify(result, null, 2));
-
       if (!options.json) console.log(JSON.stringify(result, null, 2));
     } else if (options.command === 'evidence') {
       const { inspectEvidence } = await import('./ui/evidence.mjs');

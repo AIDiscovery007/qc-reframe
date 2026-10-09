@@ -19,7 +19,7 @@ async function temporary(t) {
 
 test('invalid UI commands and parameters exit 2 before starting verification', async () => {
   for (const args of [
-    ['unknown'], ['context', '--unknown'], ['context', '--json', '--json'],
+    ['unknown'], ['plan', '--files', 'example.css'], ['context', '--unknown'], ['context', '--json', '--json'],
     ['context', '--files'], ['check', '--base'], ['verify', '--scenario'],
     ['verify', '--scenario', 'missing'], ['verify', '--fault', 'missing'],
     ['verify', '--scenario', 'popup', '--fault', 'canvas-padding'],
@@ -34,6 +34,23 @@ test('invalid UI commands and parameters exit 2 before starting verification', a
       return true;
     });
   }
+});
+
+test('user（开发者）prepare默认及JSON模式只输出一份可解析结果', async t => {
+  // Given the real CLI in an isolated fixture with a synthetic build result.
+  const directory = await temporary(t);
+  await mkdir(join(directory, 'ui'));
+  await copyFile(join(root, 'agent-tool/ui.mjs'), join(directory, 'ui.mjs'));
+  await writeFile(join(directory, 'ui/inventory.mjs'), 'export const contextFor = null, syncCatalog = null;');
+  await writeFile(join(directory, 'ui/catalog.mjs'), 'export const scenarios = [];');
+  await writeFile(join(directory, 'ui/build.mjs'), 'export const prepare = async options => ({status:"passed",build:options.build,source:{hash:"fixture"}});');
+  for (const flags of [[], ['--json'], ['--no-build'], ['--no-build', '--json']]) await t.test(flags.join(' ') || 'default', async () => {
+    // When running prepare, without invoking a product build or using real output.
+    const { stdout, stderr } = await exec(process.execPath, [join(directory, 'ui.mjs'), 'prepare', ...flags], { cwd: directory, timeout: 15000 });
+    // Then the whole stdout parses as exactly one result in either output mode.
+    assert.deepEqual(JSON.parse(stdout), { status: 'passed', build: !flags.includes('--no-build'), source: { hash: 'fixture' } });
+    assert.equal(stderr, '');
+  });
 });
 
 test('context JSON and repository-relative paths are independent of caller directory', async t => {
