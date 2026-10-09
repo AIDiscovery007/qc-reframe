@@ -94,10 +94,10 @@ export async function run({ root = process.cwd(), index: indexPath, output, full
     report.node = await phase('nodeMs',()=>collectNode({root,tests:plan.selected.filter(id=>!id.startsWith('browser:')),directory:join(directory,'node'),signal:controller.signal,progress:id=>console.error('Test '+id)}));
     report.tests.push(...report.node.tests.map(item=>withConservativeDependencies(item,undefined,browserIsolated)));
     if (report.node.status !== 'passed' || report.node.tests.some(item=>item.skipped !== 0 || item.todo !== 0)) throw Error('Node tests failed; see node logs');
+    const { validateCoverage, validateBrowserCoverage } = await import('./ui/evidence.mjs');
     let browser;
     if (plan.mode === 'full') {
       report.gate = await phase('gateMs',()=>gate({coverage:true,build:false,base,tier:visual?'full':'browser',baselineDirectory:resolve(root,`browser-extension/docs/uiux/visual-baselines/${process.platform}`),reason:'complete-regression',progress:console.error}));
-      const { validateCoverage } = await import('./ui/evidence.mjs');
       report.skippedChecks = validateCoverage(report.gate); // Only three existing declared capability exceptions; all others fail.
       browser = report.gate.steps[1];
     } else {
@@ -107,9 +107,10 @@ export async function run({ root = process.cwd(), index: indexPath, output, full
       browser = await phase('browserMs',()=>verify({coverage:true,build:false,scenarioIds:plan.selected.filter(id=>id.startsWith('browser:')).map(id=>id.slice(8)),reason:'selected-regression',progress:console.error}));
       report.browser = browser;
       report.extension = await phase('extensionMs',()=>verifyExtension({progress:console.error}));
-      if (browser.status !== 'passed' || report.extension.status !== 'passed') throw Error('Selected browser/extension validation failed');
+      report.skippedChecks = validateBrowserCoverage(browser, report.extension, plan.selected.filter(id=>id.startsWith('browser:')).map(id=>id.slice(8)));
     }
-    report.tests.push(...browser.scenarios.map(item=>({id:`browser:${item.id}`,status:item.status,skipped:0,todo:0,skippedChecks:item.checks.filter(check=>check.status==='skipped'),durationMs:item.durationMs,...item.execution})).map(item=>withConservativeDependencies(item,undefined,browserIsolated)));
+    // skipped counts whole scenarios; declared skipped assertions retain their actual evidence separately.
+    report.tests.push(...browser.scenarios.map(item=>({id:`browser:${item.id}`,status:item.status,skipped:Number(item.status==='skipped'),todo:0,skippedChecks:item.checks.filter(check=>check.status==='skipped'),durationMs:item.durationMs,...item.execution})).map(item=>withConservativeDependencies(item,undefined,browserIsolated)));
     const after = await snapshot(root);
     if (env !== await environment(root,after)) throw Error('Environment changed during regression');
     if (JSON.stringify(before) !== JSON.stringify(after)) throw Error('Source changed during regression');
