@@ -4,13 +4,37 @@ import { resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { isDoc } from './ci.mjs';
 import { execFileSync } from 'node:child_process';
+// Collapse attempts before comparing run start times; never trust API array order.
+export function latestJobs(jobs) {
+  const attempts = new Map(), latest = new Map();
+  for (const job of jobs) {
+    if (!Number.isInteger(job.runId) || job.runId < 1 || !Number.isInteger(job.runAttempt) || job.runAttempt < 1 || !Number.isFinite(Date.parse(job.runStartedAt))) throw Error('Missing execution identity/time');
+    const key = JSON.stringify([job.name, job.runId]), previous = attempts.get(key)?.[0];
+    if (!previous || job.runAttempt > previous.runAttempt) attempts.set(key, [job]);
+    else if (job.runAttempt === previous.runAttempt) attempts.get(key).push(job);
+  }
+  for (const records of attempts.values()) {
+    if (new Set(records.map(job => JSON.stringify(job))).size !== 1) throw Error('Conflicting execution records');
+    const job = records[0], previous = latest.get(job.name)?.[0], time = Date.parse(job.runStartedAt);
+    if (!previous || time > Date.parse(previous.runStartedAt)) latest.set(job.name, [job]);
+    else if (time === Date.parse(previous.runStartedAt)) latest.get(job.name).push(job);
+  }
+  return [...latest.values()].map(records => {
+    if (records.length !== 1) throw Error('Ambiguous execution order');
+    return records[0];
+  }).sort((a,b) => Date.parse(b.runStartedAt) - Date.parse(a.runStartedAt) || a.name.localeCompare(b.name));
+}
+export function latestSuccessfulMain(jobs) {
+  return latestJobs(jobs.filter(job => job.main)).find(job => job.status === 'completed' && job.conclusion === 'success');
+}
+
 export function planSchedule({ targets, jobs, controller, force = false }) {
   const include = [], deferred = [];
   for (const target of targets) {
     const name = `full/v1/${controller}/${target.number ? `pr${target.number}` : 'main'}/${target.sha}`;
-    const matches = jobs.filter(job => job.name === name);
-    const reason = target.fork ? 'fork-independent-trusted-verification-required' : target.blocked || (!target.code && !force ? 'docs' : null) || (matches.some(job => job.status !== 'completed') ? 'running'
-      : !force && matches.some(job => job.conclusion === 'success') ? 'success' : null);
+    const latest = latestJobs(jobs.filter(job => job.name === name))[0];
+    const reason = target.fork ? 'fork-independent-trusted-verification-required' : target.blocked || (latest && latest.status !== 'completed' ? 'running'
+      : !force && latest?.conclusion === 'success' ? 'success' : !latest && !target.code && !force ? 'docs' : null);
     if (reason) deferred.push({ ...target, reason });
     else include.push({ ...target, name });
   }
@@ -28,7 +52,8 @@ export function verifyTarget({ root, target }) {
 export function requireFull({ target, controller, jobs }) {
   if (target.fork) throw Error('Fork requires independent trusted maintainer verification; native CI reports are not accepted');
   const name = `full/v1/${controller}/${target.number ? `pr${target.number}` : 'main'}/${target.sha}`;
-  if (target.blocked || !jobs.some(job => job.name === name && job.status === 'completed' && job.conclusion === 'success')) throw Error(`Current target lacks successful full evidence: ${name}`);
+  const latest = latestJobs(jobs.filter(job => job.name === name))[0];
+  if (target.blocked || latest?.status !== 'completed' || latest.conclusion !== 'success') throw Error(`Current target lacks successful full evidence: ${name}`);
   return { status: 'passed', target, name };
 }
 
@@ -48,7 +73,7 @@ async function onlyDocs(api, files, base, head) {
 export async function discoverTargets({ api, branch, repository, jobs = [] }) {
   const main = await api.get(`commits/${encodeURIComponent(branch)}`);
   const targets = [{ sha: main.sha, head: main.sha, base: '', number: 0, ref: branch, fork: false, code: true }];
-  const previous = jobs.find(job => job.main && job.conclusion === 'success');
+  const previous = latestSuccessfulMain(jobs);
   if (previous) {
     const sha = previous.name.split('/').at(-1);
     const diff = await api.get(`compare/${sha}...${main.sha}`);
@@ -78,14 +103,21 @@ export function github(repository = process.env.GITHUB_REPOSITORY) {
 }
 
 export async function fullJobs(api) {
-  // Bounded history is conservative: old success outside this window causes a rerun.
-  const since = new Date(Date.now() - 7 * 86400000).toISOString();
-  const runs = await api.list(`actions/workflows/test-full.yml/runs?per_page=100&created=${encodeURIComponent('>=' + since)}`, 'workflow_runs');
+  // Enumerate all run metadata so a recently rerun old run is not lost to a
+  // created-at search filter. Only old, inactive metadata may avoid job downloads.
+  const since = Date.now() - 7 * 86400000;
+  const runs = await api.list('actions/workflows/test-full.yml/runs?per_page=100', 'workflow_runs');
   const jobs = [];
   for (const run of runs) {
     if (!['schedule', 'workflow_dispatch'].includes(run.event) || run.head_branch !== process.env.DEFAULT_BRANCH || run.id === Number(process.env.GITHUB_RUN_ID)) continue;
+    if (run.status === 'completed' && Date.parse(run.updated_at) < since && Date.parse(run.run_started_at) < since) continue;
+    const attempt = await api.get(`actions/runs/${run.id}/attempts/${run.run_attempt}`);
+    if (attempt.id !== run.id || attempt.run_attempt !== run.run_attempt || !Number.isFinite(Date.parse(attempt.run_started_at))) throw Error('Incomplete run attempt identity/time');
     for (const job of await api.list(`actions/runs/${run.id}/attempts/${run.run_attempt}/jobs?per_page=100`, 'jobs')) {
-      jobs.push({ ...job, conclusion: run.status === 'completed' && run.conclusion !== 'success' ? run.conclusion : job.conclusion, runId: run.id, runAttempt: run.run_attempt, main: job.name.split('/')[3] === 'main', testedSha: job.name.split('/').at(-1), controllerSha: run.head_sha });
+      jobs.push({ ...job, status: attempt.status === 'completed' ? job.status : attempt.status,
+        conclusion: attempt.status !== 'completed' ? null : attempt.conclusion !== 'success' ? attempt.conclusion : job.conclusion,
+        runId: run.id, runAttempt: run.run_attempt, runStartedAt: attempt.run_started_at,
+        main: job.name.split('/')[3] === 'main', testedSha: job.name.split('/').at(-1), controllerSha: run.head_sha });
     }
   }
   return jobs;
@@ -129,7 +161,7 @@ async function main() {
   }
   if (command === 'baseline') {
     if (!argument) throw Error('baseline requires an output file');
-    const job = jobs.find(job => job.main && job.status === 'completed' && job.conclusion === 'success' && job.name.startsWith(`full/v1/${controller}/`));
+    const job = latestSuccessfulMain(jobs.filter(job => job.name.startsWith(`full/v1/${controller}/`)));
     if (!job) { console.log('No trusted full main index; fallback full'); return; }
     const artifacts = await api.list(`actions/runs/${job.runId}/artifacts?per_page=100`, 'artifacts');
     const artifact = attemptArtifact(artifacts, `test-index-${job.testedSha}`, job.runAttempt);
