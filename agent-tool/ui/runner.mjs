@@ -45,6 +45,124 @@ async function startPreview(directory, children) {
   return { child, url, receipts };
 }
 
+async function checkBatchToolbar(page, directory, item) {
+  const checks = [], samples = [];
+  const record = (target, actual) => checks.push({ ruleId: 'UI-BEHAVIOR', target, expected: true, actual, status: actual ? 'passed' : 'failed' });
+  await page.getByRole('button', { name: '全部项目', exact: true }).click();
+  await page.getByRole('button', { name: '批量管理', exact: true }).click();
+  await page.evaluate(() => document.fonts.ready);
+  const all = page.getByRole('checkbox', { name: '选择本页', exact: true });
+  const boxes = page.getByRole('checkbox', { name: /^选择项目：/ });
+  for (const hidden of [false, true]) {
+    if (hidden) {
+      await page.evaluate(async () => {
+        const projects = (await chrome.runtime.sendMessage({ type: 'alchemy:projects', limit: 24 })).value.items;
+        await chrome.runtime.sendMessage({ type: 'alchemy:set-project-hidden', ids: [projects[0].id], hidden: true });
+      });
+      await page.getByRole('button', { name: '包含隐藏项目', exact: true }).filter({ visible: true }).click();
+      await page.getByRole('button', { name: '恢复所选', exact: true }).waitFor();
+    }
+    for (const view of ['卡片视图', '列表视图']) {
+      await page.getByRole('button', { name: view, exact: true }).click();
+      await all.uncheck();
+      let baseline;
+      for (const count of [0, 1, 10, 24, 0]) {
+        if (count === 24) await all.check();
+        else if (!count) await all.uncheck();
+        else for (let index = 0; index < count; index++) await boxes.nth(index).check();
+        await page.evaluate(async () => { document.querySelector('.workspace-library-content').scrollTop = 0; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); });
+        const sample = await page.locator('.history-toolbar').evaluate(node => {
+          const rect = element => { const r = element.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; };
+          const controls = [...node.querySelectorAll('label,button')];
+          const texts = controls.map(element => {
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), lines = [];
+            while (walker.nextNode()) if (walker.currentNode.textContent.trim()) {
+              const range = document.createRange(); range.selectNodeContents(walker.currentNode);
+              lines.push(...[...range.getClientRects()].map(r => r.y));
+            }
+            return new Set(lines.map(y => Math.round(y))).size <= 1;
+          });
+          return {
+            geometry: [...rect(node), ...rect(document.querySelector('.workspace-library-content')), ...controls.flatMap(rect)],
+            singleLine: texts.every(Boolean),
+            contained: controls.every(element => { const r = element.getBoundingClientRect(), bar = node.getBoundingClientRect(); return r.left >= bar.left - 1 && r.right <= bar.right + 1 && element.scrollWidth <= element.clientWidth + 1; }),
+            transparent: [...node.querySelectorAll('.text-button')].every(element => getComputedStyle(element).backgroundColor === 'rgba(0, 0, 0, 0)'),
+            noOverflow: document.documentElement.scrollWidth <= innerWidth,
+            checked: document.querySelectorAll('[aria-label^="选择项目："]:checked').length,
+          };
+        });
+        baseline ||= sample.geometry;
+        const label = `${hidden ? '含隐藏' : '可见'} / ${view} / ${count}项`;
+        record(label + ' 选择准确', sample.checked === count);
+        record(label + ' 文字完整单行且动作不溢出', sample.singleLine && sample.contained && sample.noOverflow);
+        record(label + ' 文字动作无填充底色', sample.transparent);
+        record(label + ' 选择不移动操作栏、按钮和内容区', sample.geometry.every((value, index) => Math.abs(value - baseline[index]) < 1));
+        samples.push({ label, ...sample });
+        if (view === '卡片视图' && [0, 24].includes(count)) {
+          const key = `${hidden ? 'hidden' : 'visible'}-${count}`;
+          const path = join(directory, `${item.id}-${key}.png`);
+          await page.screenshot({ path });
+          (item.evidence.toolbar ||= {})[key] = path;
+        }
+      }
+    }
+  }
+  await boxes.first().focus(); await page.keyboard.press('Space');
+  const hide = page.getByRole('button', { name: '隐藏所选', exact: true });
+  // A second visible project enables the hide action without changing any real data.
+  await boxes.nth(1).check();
+  await page.keyboard.press('Tab'); await hide.focus();
+  record('文字动作保留键盘焦点提示', await hide.evaluate(node => node.matches(':focus-visible') && getComputedStyle(node).outlineStyle !== 'none'));
+  item.toolbarSamples = samples;
+  return checks;
+}
+
+async function checkBatchKeyboard(page, screenshot, allAccepted) {
+  const activate = async locator => { await locator.focus(); await page.keyboard.press('Enter'); };
+  await activate(page.getByRole('button', { name: '全部项目', exact: true }));
+  await activate(page.getByRole('button', { name: '批量管理', exact: true }));
+  await page.getByRole('checkbox', { name: '选择本页', exact: true }).focus();
+  await page.keyboard.press('Space');
+  const trigger = page.getByRole('button', { name: '批量完整复刻', exact: true });
+  await activate(trigger);
+  const dialog = page.locator('dialog:visible');
+  await dialog.waitFor();
+  const startLabel = `启动 ${allAccepted ? 4 : 3} 个项目`;
+  await page.getByRole('button', { name: startLabel, exact: true }).waitFor();
+  const checks = [];
+  const record = (target, actual) => checks.push({ ruleId: 'UI-BEHAVIOR', target, expected: true, actual, status: actual ? 'passed' : 'failed' });
+  record('keyboard open places focus in modal', await dialog.evaluate(node => node.contains(document.activeElement)));
+  let backgroundControlFocused = false, browserBoundaryStops = 0;
+  for (let index = 0; index < 12; index++) {
+    await page.keyboard.press('Tab');
+    const focus = await dialog.evaluate(node => ({ inside: node.contains(document.activeElement), browserBoundary: document.activeElement === document.body && node.matches(':modal') }));
+    if (focus.browserBoundary) browserBoundaryStops++;
+    else if (!focus.inside) backgroundControlFocused = true;
+  }
+  checks.push({ ruleId: 'UI-BEHAVIOR', target: 'Tab cannot focus background controls', expected: { backgroundControlFocused: false }, actual: { backgroundControlFocused, browserBoundaryStops }, status: backgroundControlFocused ? 'failed' : 'passed' });
+  record('batch dialog remains inside viewport', await dialog.evaluate(node => { const rect = node.getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && node.scrollWidth <= node.clientWidth; }));
+  await page.screenshot({ path: screenshot, fullPage: true });
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'hidden' });
+  record('Escape returns focus to batch trigger', await trigger.evaluate(node => node === document.activeElement));
+  await page.keyboard.press('Enter');
+  await dialog.waitFor();
+  const start = page.getByRole('button', { name: startLabel, exact: true });
+  await activate(start);
+  await page.getByRole('button', { name: '查看任务', exact: true }).waitFor();
+  record('Enter clears only accepted selections', await page.getByRole('checkbox', { name: /^选择项目：/ }).evaluateAll((nodes, count) => nodes.filter(node => node.checked).length === count, allAccepted ? 0 : 2));
+  if (allAccepted) {
+    record('all accepted returns focus to usable task action or library heading', await page.evaluate(() => {
+      const element = document.activeElement;
+      return element?.matches('button:not(:disabled)') && element.textContent?.trim() === '查看任务' || element?.matches('h1,h2,h3') && element.textContent?.includes('全部项目');
+    }));
+    await page.keyboard.press('Tab');
+    record('Tab continues from successful batch submission', await page.evaluate(() => document.activeElement !== document.body && document.activeElement?.checkVisibility() && !document.activeElement?.matches(':disabled')));
+  }
+  record('workspace has no horizontal overflow', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  return checks;
+}
+
 async function ready(page, scenario) {
   await page.waitForSelector(scenario.surface === 'workspace' ? '.canvas-workspace' : '.quick-workspace');
   await page.evaluate(() => document.fonts.ready);
@@ -132,7 +250,12 @@ async function runVerify({ coverage = false, scenario: id, scenarioIds, build = 
       page.on('pageerror', error => item.errors.push(error.message.slice(0, 500)));
       try {
         await page.goto(preview.url + scenario.path);
-        if (scenario.flowKeyboardCase) {
+        if (scenario.batchToolbar) {
+          item.checks.push(...await checkBatchToolbar(page, directory, item));
+        } else if (scenario.batchKeyboard) {
+          item.evidence.batchDialog = join(directory, scenario.id + '-dialog.png');
+          item.checks.push(...await checkBatchKeyboard(page, item.evidence.batchDialog, scenario.batchAllAccepted));
+        } else if (scenario.flowKeyboardCase) {
           item.checks.push(...await checkEndToEndKeyboard(page, scenario));
         } else if (scenario.keyboardCase) {
           item.checks.push(...await checkImageOrderKeyboard(page, scenario));

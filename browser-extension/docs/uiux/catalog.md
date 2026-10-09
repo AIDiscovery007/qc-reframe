@@ -32,6 +32,21 @@
 
 | ID | 表面 / 视口 | 状态 | 检查 |
 | --- | --- | --- | --- |
+| batch-toolbar-360 | workspace 360×1034 | /workspace.html?state=library&count=24 | batchToolbar |
+| batch-toolbar-650 | workspace 650×1034 | /workspace.html?state=library&count=24 | batchToolbar |
+| batch-toolbar-651 | workspace 651×1034 | /workspace.html?state=library&count=24 | batchToolbar |
+| batch-toolbar-877 | workspace 877×1034 | /workspace.html?state=library&count=24 | batchToolbar |
+| batch-toolbar-1440 | workspace 1440×1034 | /workspace.html?state=library&count=24 | batchToolbar |
+| batch-recreate-mixed | workspace 1440×1000 | /workspace.html?state=library&count=4&batchRecreateRegression=mixed | batchRecreateRegression |
+| batch-recreate-retry | workspace 1440×1000 | /workspace.html?state=library&count=4&batchRecreateRegression=retry | batchRecreateRegression |
+| batch-recreate-late | workspace 1440×1000 | /workspace.html?state=library&count=4&batchRecreateRegression=late&batchPreviewDelay=1500 | batchRecreateRegression |
+| batch-recreate-narrow | workspace 360×740 | /workspace.html?state=library&count=4&batchRecreateRegression=narrow | batchRecreateRegression |
+| batch-recreate-keyboard | workspace 360×740 | /workspace.html?state=library&count=4&batchRecreateRegression=keyboard | batchRecreateRegression |
+| batch-recreate-history | workspace 1440×1000 | /workspace.html?state=library&count=4&batchRecreateRegression=history | batchRecreateRegression |
+| batch-recreate-hidden | workspace 1440×1000 | /workspace.html?state=library&count=4&batchRecreateRegression=hidden | batchRecreateRegression |
+| batch-recreate-all-accepted | workspace 1440×1000 | /workspace.html?state=library&count=4&batchRecreateRegression=all-accepted | batchRecreateRegression |
+| batch-recreate-preflight-hidden | workspace 1440×1000 | /workspace.html?state=library&count=4&batchRecreateRegression=preflight-hidden&batchPreviewDelay=1500 | batchRecreateRegression |
+| batch-recreate-retry-hidden | workspace 1440×1000 | /workspace.html?state=library&count=4&batchRecreateRegression=retry-hidden | batchRecreateRegression |
 | workspace-wide | workspace 1440×1000 | /workspace.html?state=alignment | UI-LAYOUT-CANVAS, UI-IMAGE-PREVIEW |
 | workspace-prompt | workspace 1440×1000 | /workspace.html?state=alignment / prompt | UI-LAYOUT-CANVAS, UI-IMAGE-PREVIEW |
 | workspace-narrow | workspace 600×900 | /workspace.html?state=alignment | UI-LAYOUT-CANVAS, UI-IMAGE-PREVIEW |

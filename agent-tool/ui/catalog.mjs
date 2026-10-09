@@ -25,6 +25,16 @@ export const components = [
 
 const wide = { width: 1440, height: 1000 };
 export const scenarios = [
+  ...[360, 650, 651, 877, 1440].map(width => ({
+    id: `batch-toolbar-${width}`, surface: 'workspace', path: '/workspace.html?state=library&count=24',
+    viewport: { width, height: 1034 }, regression: 'batchToolbar', batchToolbar: true, rules: [],
+  })),
+  ...['mixed', 'retry', 'late', 'narrow', 'keyboard', 'history', 'hidden', 'all-accepted', 'preflight-hidden', 'retry-hidden'].map(flow => ({
+    id: `batch-recreate-${flow}`, surface: 'workspace',
+    path: `/workspace.html?state=library&count=4&batchRecreateRegression=${flow}${['late', 'preflight-hidden'].includes(flow) ? '&batchPreviewDelay=1500' : ''}`,
+    viewport: ['narrow', 'keyboard'].includes(flow) ? { width: 360, height: 740 } : wide,
+    regression: 'batchRecreateRegression', batchKeyboard: ['keyboard', 'all-accepted'].includes(flow), batchAllAccepted: flow === 'all-accepted', rules: [],
+  })),
   { id: 'workspace-wide', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: wide, rules: ['UI-LAYOUT-CANVAS', 'UI-IMAGE-PREVIEW'] },
   { id: 'workspace-prompt', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: wide, prepare: 'prompt', rules: ['UI-LAYOUT-CANVAS', 'UI-IMAGE-PREVIEW'] },
   { id: 'workspace-narrow', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: { width: 600, height: 900 }, rules: ['UI-LAYOUT-CANVAS', 'UI-IMAGE-PREVIEW'] },

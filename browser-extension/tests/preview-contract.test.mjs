@@ -106,7 +106,7 @@ test("root preview serves built entries, gallery images and browser regression s
     assert.equal(response.headers.get("content-type"), type);
     assert.ok((await response.arrayBuffer()).byteLength > 100);
   }
-  for (const name of ["settings-recovery", "generation-actions", "auto-style", "creation-context", "image-order"]) {
+  for (const name of ["batch-recreate", "settings-recovery", "generation-actions", "auto-style", "creation-context", "image-order"]) {
     const response = await fetch(`${baseURL}/${name}-regression.js`);
     assert.equal(response.status, 200, name);
     assert.match(response.headers.get("content-type"), /javascript/);
@@ -137,4 +137,23 @@ test("order preview preserves explicit input and task order without rewriting le
   assert.equal(started.currentSelection.inputs.style.referenceIndex, 1);
   const after = await send({ type: 'alchemy:project', id: projectId });
   assert.equal(after.jobs.find(item => item.id === history.id).referenceIndex, undefined);
+});
+
+
+test("batch fixture returns explicit eligibility, partial acceptance and independent cancellation", async () => {
+  const runtime = preview("?state=library&count=4");
+  const page = (await runtime.sendMessage({type: 'alchemy:projects', limit: 24})).value;
+  const projects = page.items.map(item => ({projectId:item.id,inputRevision:item.inputRevision}));
+  const preflight = (await runtime.sendMessage({type:'alchemy:batch-preview',projects})).value;
+  assert.equal(preflight.items.filter(item=>item.eligible).length,3);
+  assert.match(preflight.items[3].error,/参考图缺失/);
+  const request={type:'alchemy:batch-start',requestId:crypto.randomUUID(),projects:projects.slice(0,3),language:'en',aspectRatio:{width:3,height:2}};
+  const batch=(await runtime.sendMessage(request)).value;
+  assert.deepEqual(Array.from(batch.items,item=>item.status),['running','queued','rejected']);
+  assert.equal((await runtime.sendMessage(request)).value.id,batch.id);
+  assert.equal((await runtime.sendMessage({type:'alchemy:batches'})).value.length,1);
+  const stopped=(await runtime.sendMessage({type:'alchemy:batch-cancel',id:batch.id})).value;
+  assert.deepEqual(Array.from(stopped.items,item=>item.status),['running','cancelled','rejected']);
+  const cancelled=(await runtime.sendMessage({type:'alchemy:batch-cancel',id:batch.id,projectId:projects[0].projectId})).value;
+  assert.equal(cancelled.items[0].status,'cancelled');
 });

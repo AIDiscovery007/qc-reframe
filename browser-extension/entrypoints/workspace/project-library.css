@@ -9,6 +9,12 @@
 .workspace-library-toolbar .text-button { font-size: 10px; white-space: nowrap; }
 .workspace-project-search { width: 190px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; background: var(--surface-muted); font: inherit; font-size: 11px; }
 .workspace-project-library .history-toolbar { margin: 16px 0 0; }
+.workspace-project-library .history-toolbar > label { flex: none; white-space: nowrap; }
+.workspace-project-library .history-management-actions { flex-wrap: wrap; min-inline-size: 0; gap: 8px 16px; }
+.workspace-project-library .history-management-actions > button { flex: none; inline-size: auto; white-space: nowrap; }
+.workspace-project-library .history-management-actions .text-button { background: transparent; }
+.workspace-project-library .history-selection-count { min-inline-size: 4ch; font-variant-numeric: tabular-nums; text-align: end; }
+.workspace-project-library .history-toolbar :is(button, input):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .workspace-project-library .history-notice:empty { display: none; }
 .workspace-project-library .history-notice:not(:empty) { margin-bottom: 20px; }
 .workspace-project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 28px; }
@@ -60,3 +66,11 @@
  .workspace-project-list .workspace-project-open { gap: 10px; }
  .workspace-project-list .workspace-project-actions button { padding: 8px; }
 }
+
+.batch-recreate .batch-options { display: flex; flex-wrap: wrap; gap: 16px; }
+.batch-recreate .batch-options > label { flex: 1; min-width: 120px; }
+.batch-checks { list-style: none; padding: 0; margin: 16px 0; max-height: 240px; overflow: auto; }
+.batch-checks li { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; overflow-wrap: anywhere; }
+.batch-checks li > * { min-width: 0; }
+.batch-checks span { color: var(--muted); }
+.batch-recreate .dialog-content { overflow: auto; }

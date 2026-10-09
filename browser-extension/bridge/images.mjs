@@ -127,8 +127,9 @@ export async function createImageStore(dataDir, recordsDir = dataDir) {
       // All referencing records are committed before removing any old image.
       for (const file of obsolete) await rm(file, { force: true });
     },
-    async collect() {
-      const used = new Set();
+    async collect(extraAssets = []) {
+      const used = new Set(extraAssets);
+      for (const asset of used) path(asset);
       try {
         for (const { entries } of await records()) {
           for (const [owner, key, prefix] of entries) {

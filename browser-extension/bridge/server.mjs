@@ -1,3 +1,4 @@
+import { createBatchStore, batchActive } from "./batches.mjs";
 import { referencePosition, savedReferenceIndex } from "./image-order.mjs";
 import { createSessionStore, sessionIds } from "./sessions.mjs";
 import { prepareRestart } from "./restart.mjs";
@@ -5,7 +6,7 @@ import { createTaskFeed } from "./task-feed.mjs";
 import { createTaskRecords } from "./task-records.mjs";
 import { createTaskRuntime } from "./task-runtime.mjs";
 import { createServer } from "node:http";
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile, lstat } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -158,7 +159,7 @@ export async function createBridge({
     await writeFile(tokenPath, token, { mode: 0o600 });
   }
   const taskFeed = createTaskFeed();
-  let projects;
+  let projects, batches;
   const records = await createTaskRecords({ dataDir: paths.records, onCommit: (job, committed) => {
     projects?.updateJob(job);
     taskFeed.update(committed);
@@ -192,14 +193,12 @@ export async function createBridge({
   const saveSubjects = (subjects) => Promise.all(subjects.map(async ({ id, role, detail, bytes, extension }) => ({
     id, role, detail, subjectAsset: await images.put({ bytes, extension }),
   })));
-  projects = await createProjectStore({ dataDir: paths.records, legacyDir: dataDir, jobs, images, saveJob: save, readReference: async (id) => decodeImage(await storedImage(jobs.get(id))) });
+  projects = await createProjectStore({ dataDir: paths.records, legacyDir: dataDir, jobs, images, saveJob: save, batchBusy: id => !!batches?.hasProject(id), onBatchCleanup: () => batches.reload(), readReference: async (id) => decodeImage(await storedImage(jobs.get(id))) });
   for (const job of jobs.values()) taskFeed.update(job);
-  await images.collect();
-  await thumbnails.collect();
   const gallery = createGalleryStore({ projects, images });
   const runtime = createTaskRuntime({ save, onProgress: job => projects.updateJob(job),
-    onIdle: () => collectIdleImages(), onFailure: (settings, error) => models.invalidate(settings, error) });
-  const codexBusy = () => runtime.busy || models.busy || sessions.busy;
+    onIdle: async () => { kickBatches(); await collectIdleImages(); }, onFailure: (settings, error) => models.invalidate(settings, error) });
+  const codexBusy = () => runtime.busy || !!batches?.active.length || models.busy || sessions.busy;
   let mutationTail = Promise.resolve();
   let collectionPending = false;
   const acquireMutation = async () => {
@@ -213,7 +212,7 @@ export async function createBridge({
     if (!collectionPending) return;
     const release = await acquireMutation();
     try {
-      if (!runtime.count && records.canCollect) { await images.collect(); await thumbnails.collect(); collectionPending = false; }
+      if (!runtime.count && records.canCollect) { await images.collect(batches?.assets); await thumbnails.collect(); collectionPending = false; }
     }
     catch (error) { console.error("回收图片失败:", error.message); }
     finally { release(); }
@@ -282,10 +281,255 @@ export async function createBridge({
     });
     return job;
   };
+  const startJob = async (body, { readSessions, assertSessionRequestActive, frozen } = {}) => {
+    if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+    if (models.busy) throw bad("正在验证模型，请稍候", 409);
+    if (body.generation !== undefined) {
+      if (!body.generation || typeof body.generation !== "object" || Array.isArray(body.generation) || Object.keys(body.generation).some(key => !["language", "aspectRatio"].includes(key))) throw bad("无效自动生图参数");
+      validateGenerationOptions(body.generation);
+      if (body.mode === "style" && !body.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
+      try { await readFile(generationSkillPath); } catch { throw bad("找不到 imagegen 技能，请设置 IMAGEGEN_SKILL_PATH", 503); }
+    }
+    if (!["style", "recreate", "reenact", "multi-reenact", "session"].includes(body.mode)) throw bad("无效逆向模式");
+    const submittedInstruction = body.instruction ?? body.reenact?.basePrompt;
+    if (body.instruction === null || (submittedInstruction !== undefined && typeof submittedInstruction !== "string")) throw bad("任务指令必须是文本");
+    if (submittedInstruction?.length > 20000) throw bad("任务指令最多 20000 字符");
+    const instruction = submittedInstruction?.trim();
+    let selectedSessions;
+    if (body.mode === "session") {
+      if (body.reenact !== undefined || body.subjectImage !== undefined || body.subjects !== undefined) throw bad("会话创作只使用一张参考图，不接受主体图");
+      if (!instruction) throw bad("请填写会话创作目标");
+      const ids = sessionIds(body.sessionIds, true);
+      try { selectedSessions = await readSessions(signal => sessions.metadata(ids, signal)); }
+      catch (error) { throw error.status ? error : bad("无法读取所选会话，请刷新后重试", 503); }
+      if (models.busy) throw bad("正在验证模型，请稍候", 409);
+    } else if (body.sessionIds !== undefined) throw bad("当前模式不接受会话输入");
+    const { bytes, extension } = decodeImage(body.image);
+    let project;
+    if (body.projectId !== undefined) {
+      if (typeof body.projectId !== "string" || !/^[a-f0-9]{64}$/.test(body.projectId)) throw bad("项目编号无效");
+      project = projects.summary(body.projectId);
+      if (!project) throw bad("项目不存在", 404);
+      if (body.inputRevision !== undefined && (!Number.isSafeInteger(body.inputRevision) || body.inputRevision < 0)) throw bad("项目输入版本无效");
+      if (body.inputRevision !== undefined && body.inputRevision !== project.inputRevision && !frozen) throw bad("项目输入已在其他窗口更新，请重新打开项目", 409);
+      const source = body.referenceJobId === undefined ? project : jobs.get(body.referenceJobId);
+      if (!source || (body.referenceJobId !== undefined && source.projectId !== project.id)) throw bad("历史参考图不属于当前项目");
+      const sourceBytes = frozen ? bytes : body.referenceJobId === undefined ? await images.read(source.imageAsset) : decodeImage(await storedImage(source)).bytes;
+      if (!frozen && !bytes.equals(sourceBytes)) throw bad("参考图与项目不一致，请重新选择项目");
+    } else if (body.referenceJobId !== undefined || body.inputRevision !== undefined) throw bad("请提供项目编号");
+    let subject, reenact, decodedSubjects;
+    const multi = body.mode === "multi-reenact";
+    if (multi) {
+      if (!body.reenact || !instruction)
+        throw bad("多图重演需要任务指令，最多 20000 字符");
+      decodedSubjects = decodeSubjects(body.reenact.subjects, bytes.length);
+      reenact = { basePrompt: instruction };
+    } else if (body.mode === "reenact" || (body.mode === "style" && body.reenact !== undefined)) {
+      if (!body.reenact || !instruction)
+        throw bad("双图任务需要主体图和任务指令");
+      subject = decodeImage(body.reenact.subjectImage);
+      // Keep the paired images within the extension's storage quota.
+      if (bytes.length > 4 * 1024 * 1024 || subject.bytes.length > 2 * 1024 * 1024)
+        throw bad("参考图最多 4 MB，主体图最多 2 MB，请压缩后重试");
+      const promptSourceJobId = body.reenact.promptSourceJobId;
+      if (promptSourceJobId !== undefined) {
+        const source = jobs.get(promptSourceJobId);
+        if (!source?.result || source.status !== "completed") throw bad("参考 Prompt 的来源任务不存在或尚未完成");
+        if (!bytes.equals(decodeImage(await storedImage(source)).bytes))
+          throw bad("参考图与 Prompt 的来源不一致，请重新选择历史记录");
+      }
+      reenact = { basePrompt: instruction, ...(promptSourceJobId ? { promptSourceJobId } : {}) };
+    }
+    const referenceIndex = referencePosition(body.referenceIndex, decodedSubjects?.length ?? (subject ? 1 : 0), 0);
+    try {
+      await readFile(skillPath);
+    } catch {
+      throw bad("找不到 Alchemy 技能，请设置 ALCHEMY_SKILL_PATH", 503);
+    }
+    const modelSettings = frozen?.modelSettings || models.selection();
+    const sourceUrl = sourceUrlFor(body.sourceUrl);
+    if (selectedSessions) assertSessionRequestActive();
+    project ||= await projects.register({ bytes, extension }, { sourceUrl, capture: body.capture });
+    const imageAsset = await images.put({ bytes, extension });
+    const currentJobId = project.inputVersions?.[body.mode] ?? projects.get(project.id).jobs.find((job) => job.mode === body.mode)?.id;
+    const historical = body.referenceJobId !== undefined && body.referenceJobId !== currentJobId;
+    const subjectAsset = subject ? await images.put(subject) : undefined;
+    if (multi) reenact.subjects = await saveSubjects(decodedSubjects);
+    if (selectedSessions) assertSessionRequestActive();
+    const id = frozen?.jobId || randomUUID();
+    runtime.reserve(id, project.id);
+    const imagePath = images.path(imageAsset);
+    const subjectImagePath = subjectAsset ? images.path(subjectAsset) : undefined;
+    const job = {
+      id,
+      projectId: project.id,
+      imageAsset,
+      ...(subjectAsset ? { subjectAsset } : {}),
+      mode: body.mode,
+      referenceIndex,
+      model: modelSettings.model,
+      reasoningEffort: modelSettings.reasoningEffort,
+      status: "running",
+      stage: "正在连接本机 Codex…",
+      createdAt: new Date().toISOString(),
+      sourceUrl,
+      capture: body.capture === "screenshot" ? "screenshot" : "original",
+      ...(instruction !== undefined ? { instruction } : {}),
+      ...(reenact ? { reenact } : {}),
+      ...(body.generation ? { autoGeneration: { ...body.generation, status: "pending" } } : {}),
+      ...(selectedSessions ? { sessionContext: { sources: selectedSessions } } : {}),
+    };
+    try {
+      await save(job);
+      if (imageAsset === project.imageAsset && !historical && (!frozen || body.inputRevision === project.inputRevision)) await projects.selectInputVersion(project.id, job);
+      else if (project.inputVersions?.[body.mode] === undefined && jobs.has(currentJobId)) await projects.selectInputVersion(project.id, jobs.get(currentJobId), true);
+    } catch (error) {
+      Object.assign(job, { status: "failed", stage: "任务保存失败", error: "任务未启动，请重试" });
+      if (job.autoGeneration) Object.assign(job.autoGeneration, { status: "failed", error: job.error });
+      await save(job).catch((failure) => console.error("保存失败任务状态失败:", failure.message));
+      projects.updateJob(job);
+      runtime.release(id);
+      throw error;
+    }
+    let promptSnapshot;
+    void runtime.run(job, job, { modelSettings, onSettled: body.generation ? async ({ signal }) => {
+      const release = await acquireMutation();
+      try {
+        if (job.autoGeneration.status !== "pending") return;
+        if (job.status !== "completed" || signal.aborted) {
+          Object.assign(job.autoGeneration, { status: job.status === "cancelled" || signal.aborted ? "cancelled" : "failed", error: job.error });
+        } else {
+          try {
+            await startGeneration(job, body.generation, { modelSettings, promptResult: promptSnapshot, automatic: true, signal });
+            return;
+          } catch (error) { Object.assign(job.autoGeneration, { status: "failed", error: error.message }); }
+        }
+        await save(job);
+      } finally { release(); }
+    } : undefined, completedStage: "逆向完成", failedStage: "逆向失败",
+      execute: async ({ signal, progress }) => {
+        let sessionContext;
+        if (selectedSessions) {
+          progress({ stage: "正在读取所选会话…" });
+          sessionContext = await sessions.capture(selectedSessions, { jobId: id, signal });
+          signal.throwIfAborted();
+          const { sources, hash, capturedAt, messageCount, attachmentCount } = sessionContext;
+          job.sessionContext = { sources, snapshotId: id, hash, capturedAt, messageCount, attachmentCount };
+          await save(job);
+        }
+        signal.throwIfAborted();
+        const result = await agent({ sessionContext, imagePath, subjectImagePath,
+          subjectImagePaths: reenact?.subjects?.map((item) => images.path(item.subjectAsset)),
+          subjects: reenact?.subjects, referenceIndex, basePrompt: reenact?.basePrompt, instruction: job.instruction,
+          mode: job.mode, skillPath, cwd: root, signal, modelSettings, onProgress: progress });
+        promptSnapshot = structuredClone(result);
+        return { result };
+      },
+    });
+    return job;
+  };
   let deletionFailed = false;
   let shuttingDown = false;
   let cliStarting = false;
   const cliBusy = () => cliStarting || cli.busy;
+  batches = await createBatchStore(join(paths.records, 'batches.json'), ids => { taskFeed.touch(); projects.touch(ids); });
+  const batchItems = batch => batch.items.map(({ snapshot, ...item }) => {
+    const job = item.jobId && jobs.get(item.jobId);
+    if (!job) { delete item.jobId; return item; }
+    if (item.status !== 'running') return item;
+    const generation = job.generations?.find(value => value.id === job.autoGeneration?.generationId);
+    return { ...item, stage: generation?.stage || (job.status === 'completed' && job.autoGeneration?.status === 'pending' ? '正在准备自动生图…' : job.stage), ...(generation ? { generationId: generation.id } : {}) };
+  });
+  const publicBatch = (batch, visible = () => true) => ({ id: batch.id, createdAt: batch.createdAt, language: batch.language,
+    ...(batch.aspectRatio ? { aspectRatio: batch.aspectRatio } : {}), model: batch.modelSettings.model,
+    items: batchItems(batch).filter(item => visible(item.projectId)) });
+  const validateBatchProjects = body => {
+    if (!Array.isArray(body.projects) || !body.projects.length || body.projects.length > 100 || body.projects.some(item =>
+      !item || typeof item.projectId !== 'string' || !/^[a-f0-9]{64}$/.test(item.projectId) || !Number.isSafeInteger(item.inputRevision) || item.inputRevision < 0)) throw bad('请选择 1–100 个有效项目和输入版本');
+    if (new Set(body.projects.map(item => item.projectId)).size !== body.projects.length) throw bad('批量任务包含重复项目');
+    return body.projects.map(({ projectId, inputRevision }) => ({ projectId, inputRevision }));
+  };
+  const inspectBatchProject = async item => {
+    const project = projects.summary(item.projectId);
+    if (!project) throw bad('项目不存在', 404);
+    if (item.inputRevision !== project.inputRevision) throw bad('项目输入已更新，请重新预检', 409);
+    if (batches.hasProject(project.id) || projects.get(project.id).jobs.some(job => runtime.has(job.id) || job.status === 'running' || job.generations?.some(generation => runtime.has(generation.id) || generation.status === 'running'))) throw bad('项目已有任务，请等待完成', 409);
+    const input = projects.input(project.id, 'recreate');
+    await storedImage(project);
+    if (input.instruction !== undefined && (typeof input.instruction !== 'string' || input.instruction.length > 20000)) throw bad('项目任务指令无效');
+    return { imageAsset: project.imageAsset, instruction: input.instruction, referenceIndex: 0, sourceUrl: project.sourceUrl, capture: project.capture, inputRevision: project.inputRevision };
+  };
+  const cancelJob = async job => {
+    if (job.autoGeneration?.status === 'pending') {
+      job.autoGeneration.status = 'cancelled';
+      if (job.status === 'running') await runtime.cancel(job); else await save(job);
+    } else if (job.autoGeneration?.status === 'started') {
+      const generation = job.generations?.find(item => item.id === job.autoGeneration.generationId);
+      if (generation) await runtime.cancel(job, generation);
+    } else await runtime.cancel(job);
+  };
+  let batchPumpPending = false, batchPumpAgain = false, batchesClosed = false;
+  const kickBatches = () => {
+    if (batchesClosed) return;
+    if (batchPumpPending) { batchPumpAgain = true; return; }
+    batchPumpPending = true;
+    setImmediate(async () => {
+      const release = await acquireMutation();
+      try {
+        if (batchesClosed || shuttingDown || deletionFailed) return;
+        for (const batch of [...batches.all]) {
+          const next = structuredClone(batch);
+          let changed = false;
+          for (const item of next.items) {
+            if (item.status !== 'running') continue;
+            const job = jobs.get(item.jobId);
+            if (runtime.has(item.jobId)) continue;
+            if (!job) {
+              Object.assign(item, { status: 'failed', stage: '启动失败', error: '任务未能创建，请重新发起' });
+              changed = true; continue;
+            }
+            if (job.generations?.some(generation => runtime.has(generation.id))) continue;
+            const generation = job.generations?.find(value => value.id === job.autoGeneration?.generationId);
+            item.status = generation?.status || (job.autoGeneration?.status === 'cancelled' ? 'cancelled' : 'failed');
+            item.stage = generation?.stage || (job.status === 'completed' ? item.status === 'cancelled' ? '已取消' : '自动生图失败' : job.stage);
+            item.error = generation?.error || job.autoGeneration?.error || job.error;
+            if (generation) item.generationId = generation.id;
+            changed = true;
+          }
+          if (changed) await batches.put(next);
+        }
+        if (cliBusy() || models.busy || runtime.reading || sessions.busy) return;
+        for (const batch of [...batches.all].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+          for (const candidate of batch.items) {
+            if (candidate.status !== 'queued') continue;
+            if (projects.get(candidate.projectId)?.jobs.some(job => runtime.has(job.id) || job.generations?.some(generation => runtime.has(generation.id)))) continue;
+            if (runtime.count >= 2 || batches.active.filter(item => item.status === 'running').length >= 2) return;
+            const next = structuredClone(batches.all.find(value => value.id === batch.id));
+            const item = next.items.find(value => value.projectId === candidate.projectId);
+            item.status = 'running'; item.stage = '正在准备完整复刻…';
+            await batches.put(next);
+            try {
+              await startJob({ projectId: item.projectId, inputRevision: item.snapshot.inputRevision, mode: 'recreate',
+                image: await storedImage(item.snapshot), instruction: item.snapshot.instruction, referenceIndex: item.snapshot.referenceIndex,
+                sourceUrl: item.snapshot.sourceUrl, capture: item.snapshot.capture,
+                generation: { language: next.language, ...(next.aspectRatio ? { aspectRatio: next.aspectRatio } : {}) } },
+              { frozen: { modelSettings: next.modelSettings, jobId: item.jobId } });
+            } catch (error) {
+              item.status = 'failed'; item.stage = '启动失败'; item.error = error.message;
+              await batches.put(next);
+            }
+          }
+        }
+      } catch (error) { console.error('批量任务调度失败:', error.message); }
+      finally {
+        batchPumpPending = false; release();
+        if (batchPumpAgain) { batchPumpAgain = false; kickBatches(); }
+      }
+    });
+  };
+  await images.collect(batches.assets);
+  await thumbnails.collect();
+
   const server = createServer(async (req, res) => {
     let releaseMutation, sessionReadController, sessionReadTimer;
     const abortSessionRead = () => sessionReadController?.abort(bad("会话请求已取消", 499));
@@ -422,8 +666,8 @@ export async function createBridge({
           ready: Boolean(skill),
           serviceReady: true, skillReady: Boolean(skill), cli: cliSummary,
           compatibility: compatibility.snapshot(),
-          active: runtime.count + Number(models.busy) + Number(cliBusy()),
-          visibleActive: runtime.visibleCount(id => showHidden || !projects.isHidden(id)) + Number(models.busy) + Number(cliBusy()),
+          active: runtime.count + batches.active.filter(item => item.status === "queued").length + Number(models.busy) + Number(cliBusy()),
+          visibleActive: runtime.visibleCount(id => showHidden || !projects.isHidden(id)) + batches.active.filter(item => item.status === "queued" && (showHidden || !projects.isHidden(item.projectId))).length + Number(models.busy) + Number(cliBusy()),
           hiddenProjectIds: projects.hiddenProjectIds,
           cliBusy: cliBusy(),
           modelBusy: models.busy,
@@ -546,6 +790,66 @@ export async function createBridge({
         }
         return;
       }
+      if (req.method === 'GET' && path === '/batches') {
+        validateQuery(['includeHidden']);
+        const showHidden = includeHidden();
+        const visible = id => !!projects.summary(id) && (showHidden || !projects.isHidden(id));
+        let recent = 0;
+        json(200, [...batches.all].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(batch => publicBatch(batch, visible))
+          .filter(batch => batch.items.length && (batch.items.some(batchActive) || recent++ < 30)));
+        return;
+      }
+      if (req.method === 'POST' && (path === '/batches/preview' || path === '/batches')) {
+        const body = await readBody(req), selected = validateBatchProjects(body);
+        const allowed = path.endsWith('/preview') ? ['projects'] : ['projects', 'requestId', 'language', 'aspectRatio'];
+        if (Object.keys(body).some(key => !allowed.includes(key))) throw bad('批量启动仅支持完整复刻和自动生图');
+        let requestHash, existing;
+        if (path === '/batches') {
+          if (typeof body.requestId !== 'string' || !/^[\w-]{1,100}$/.test(body.requestId)) throw bad('批量请求编号无效');
+          validateGenerationOptions(body);
+          requestHash = createHash('sha256').update(JSON.stringify({ projects: selected, language: body.language, ...(body.aspectRatio ? { aspectRatio: { width: body.aspectRatio.width, height: body.aspectRatio.height } } : {}) })).digest('hex');
+          existing = batches.all.find(batch => batch.requestId === body.requestId);
+          if (existing) {
+            if (existing.requestHash !== requestHash) throw bad('同一批量请求编号不能用于不同输入或选项', 409);
+            json(202, publicBatch(existing)); return;
+          }
+        }
+        if (cliBusy()) throw bad('Codex 正在升级，请等待完成。', 409);
+        if (models.busy) throw bad('正在验证模型，请稍候', 409);
+        const modelSettings = models.selection();
+        await Promise.all([requireFeature('reverse'), requireFeature('generation'), readFile(skillPath), readFile(generationSkillPath)]);
+        const items = [];
+        for (const selectedItem of selected) {
+          const title = projects.summary(selectedItem.projectId)?.title || '项目不存在';
+          try {
+            const snapshot = await inspectBatchProject(selectedItem);
+            items.push({ ...selectedItem, title, eligible: true, snapshot });
+          } catch (error) { items.push({ ...selectedItem, title, eligible: false, error: error.message }); }
+        }
+        if (path.endsWith('/preview')) { json(200, { model: modelSettings.model, items: items.map(({ snapshot, ...item }) => item) }); return; }
+        const batch = { id: randomUUID(), requestId: body.requestId, requestHash, createdAt: new Date().toISOString(), modelSettings,
+          language: body.language, ...(body.aspectRatio ? { aspectRatio: body.aspectRatio } : {}),
+          items: items.map(({ eligible, inputRevision, ...item }) => ({ ...item, status: eligible ? 'queued' : 'rejected', stage: eligible ? '等待启动' : '未受理', ...(eligible ? { jobId: randomUUID() } : {}) })) };
+        await batches.put(batch);
+        json(202, publicBatch(batch)); return;
+      }
+      const batchCancelMatch = /^\/batches\/([\da-f-]{36})\/cancel$/.exec(path);
+      if (req.method === 'POST' && batchCancelMatch) {
+        const batch = batches.all.find(value => value.id === batchCancelMatch[1]);
+        if (!batch) throw bad('批量任务不存在', 404);
+        const body = await readBody(req);
+        if (Object.keys(body).some(key => key !== 'projectId') || (body.projectId !== undefined && !batch.items.some(item => item.projectId === body.projectId))) throw bad('请选择该批次中的项目');
+        const next = structuredClone(batch);
+        for (const item of next.items) {
+          if (body.projectId ? item.projectId !== body.projectId : item.status !== 'queued') continue;
+          if (item.status === 'running') {
+            const job = jobs.get(item.jobId);
+            if (job) await cancelJob(job);
+            else Object.assign(item, { status: 'cancelled', stage: '已取消' });
+          } else if (item.status === 'queued') Object.assign(item, { status: 'cancelled', stage: '已取消' });
+        }
+        await batches.put(next); json(200, publicBatch(next)); return;
+      }
       if (req.method === "POST" && path === "/projects/visibility") {
         const { ids, hidden } = await readBody(req);
         if (!Array.isArray(ids) || !ids.length || ids.length > 1000 || ids.some((id) => typeof id !== "string" || !/^[a-f0-9]{64}$/.test(id)) || typeof hidden !== "boolean")
@@ -563,12 +867,12 @@ export async function createBridge({
           throw bad("请选择有效项目");
         const unique = [...new Set(ids)];
         const history = unique.flatMap((id) => projects.get(id)?.jobs || []);
-        if (history.some((job) => job.status === "running" || runtime.has(job.id) || job.generations?.some((item) => item.status === "running" || runtime.has(item.id))))
+        if (unique.some(id => batches.hasProject(id)) || history.some((job) => job.status === "running" || runtime.has(job.id) || job.generations?.some((item) => item.status === "running" || runtime.has(item.id))))
           throw bad("所选项目仍在逆向或生图，请完成或取消任务后再删除", 409);
         try {
           const deletedIds = await projects.remove(unique);
           taskFeed.touch();
-          if (!runtime.count && records.canCollect) { await images.collect(); await thumbnails.collect(); }
+          if (!runtime.count && records.canCollect) { await images.collect(batches?.assets); await thumbnails.collect(); }
           else collectionPending = true;
           json(200, { deletedIds });
         }
@@ -620,7 +924,7 @@ export async function createBridge({
         await projects.saveInput(project.id, { image, mode: body.mode, input, referenceJobId: body.referenceJobId, expectedRevision: body.expectedRevision });
         collectionPending = true;
         if (!runtime.count && records.canCollect) {
-          try { await images.collect(); await thumbnails.collect(); collectionPending = false; }
+          try { await images.collect(batches?.assets); await thumbnails.collect(); collectionPending = false; }
           catch (error) { console.error("回收图片失败:", error.message); }
         }
         taskFeed.touch();
@@ -783,14 +1087,7 @@ export async function createBridge({
           return;
         }
         if (req.method === "POST" && idMatch[2] === "/cancel") {
-          if (job.autoGeneration?.status === "pending") {
-            job.autoGeneration.status = "cancelled";
-            if (job.status === "running") await runtime.cancel(job);
-            else await save(job);
-          } else if (job.autoGeneration?.status === "started") {
-            const generation = job.generations?.find(item => item.id === job.autoGeneration.generationId);
-            if (generation) await runtime.cancel(job, generation);
-          } else await runtime.cancel(job);
+          await cancelJob(job);
           json(200, job);
           return;
         }
@@ -801,152 +1098,7 @@ export async function createBridge({
       }
       if (req.method !== "POST" || path !== "/jobs")
         throw bad("Not found", 404);
-      if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-      if (models.busy) throw bad("正在验证模型，请稍候", 409);
-      const body = submittedJob;
-      if (body.generation !== undefined) {
-        if (!body.generation || typeof body.generation !== "object" || Array.isArray(body.generation) || Object.keys(body.generation).some(key => !["language", "aspectRatio"].includes(key))) throw bad("无效自动生图参数");
-        validateGenerationOptions(body.generation);
-        if (body.mode === "style" && !body.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
-        try { await readFile(generationSkillPath); } catch { throw bad("找不到 imagegen 技能，请设置 IMAGEGEN_SKILL_PATH", 503); }
-      }
-      if (!["style", "recreate", "reenact", "multi-reenact", "session"].includes(body.mode)) throw bad("无效逆向模式");
-      const submittedInstruction = body.instruction ?? body.reenact?.basePrompt;
-      if (body.instruction === null || (submittedInstruction !== undefined && typeof submittedInstruction !== "string")) throw bad("任务指令必须是文本");
-      if (submittedInstruction?.length > 20000) throw bad("任务指令最多 20000 字符");
-      const instruction = submittedInstruction?.trim();
-      let selectedSessions;
-      if (body.mode === "session") {
-        if (body.reenact !== undefined || body.subjectImage !== undefined || body.subjects !== undefined) throw bad("会话创作只使用一张参考图，不接受主体图");
-        if (!instruction) throw bad("请填写会话创作目标");
-        const ids = sessionIds(body.sessionIds, true);
-        try { selectedSessions = await readSessions(signal => sessions.metadata(ids, signal)); }
-        catch (error) { throw error.status ? error : bad("无法读取所选会话，请刷新后重试", 503); }
-        if (models.busy) throw bad("正在验证模型，请稍候", 409);
-      } else if (body.sessionIds !== undefined) throw bad("当前模式不接受会话输入");
-      const { bytes, extension } = decodeImage(body.image);
-      let project;
-      if (body.projectId !== undefined) {
-        if (typeof body.projectId !== "string" || !/^[a-f0-9]{64}$/.test(body.projectId)) throw bad("项目编号无效");
-        project = projects.summary(body.projectId);
-        if (!project) throw bad("项目不存在", 404);
-        if (body.inputRevision !== undefined && (!Number.isSafeInteger(body.inputRevision) || body.inputRevision < 0)) throw bad("项目输入版本无效");
-        if (body.inputRevision !== undefined && body.inputRevision !== project.inputRevision) throw bad("项目输入已在其他窗口更新，请重新打开项目", 409);
-        const source = body.referenceJobId === undefined ? project : jobs.get(body.referenceJobId);
-        if (!source || (body.referenceJobId !== undefined && source.projectId !== project.id)) throw bad("历史参考图不属于当前项目");
-        const sourceBytes = body.referenceJobId === undefined ? await images.read(source.imageAsset) : decodeImage(await storedImage(source)).bytes;
-        if (!bytes.equals(sourceBytes)) throw bad("参考图与项目不一致，请重新选择项目");
-      } else if (body.referenceJobId !== undefined || body.inputRevision !== undefined) throw bad("请提供项目编号");
-      let subject, reenact, decodedSubjects;
-      const multi = body.mode === "multi-reenact";
-      if (multi) {
-        if (!body.reenact || !instruction)
-          throw bad("多图重演需要任务指令，最多 20000 字符");
-        decodedSubjects = decodeSubjects(body.reenact.subjects, bytes.length);
-        reenact = { basePrompt: instruction };
-      } else if (body.mode === "reenact" || (body.mode === "style" && body.reenact !== undefined)) {
-        if (!body.reenact || !instruction)
-          throw bad("双图任务需要主体图和任务指令");
-        subject = decodeImage(body.reenact.subjectImage);
-        // Keep the paired images within the extension's storage quota.
-        if (bytes.length > 4 * 1024 * 1024 || subject.bytes.length > 2 * 1024 * 1024)
-          throw bad("参考图最多 4 MB，主体图最多 2 MB，请压缩后重试");
-        const promptSourceJobId = body.reenact.promptSourceJobId;
-        if (promptSourceJobId !== undefined) {
-          const source = jobs.get(promptSourceJobId);
-          if (!source?.result || source.status !== "completed") throw bad("参考 Prompt 的来源任务不存在或尚未完成");
-          if (!bytes.equals(decodeImage(await storedImage(source)).bytes))
-            throw bad("参考图与 Prompt 的来源不一致，请重新选择历史记录");
-        }
-        reenact = { basePrompt: instruction, ...(promptSourceJobId ? { promptSourceJobId } : {}) };
-      }
-      const referenceIndex = referencePosition(body.referenceIndex, decodedSubjects?.length ?? (subject ? 1 : 0), 0);
-      try {
-        await readFile(skillPath);
-      } catch {
-        throw bad("找不到 Alchemy 技能，请设置 ALCHEMY_SKILL_PATH", 503);
-      }
-      const modelSettings = models.selection();
-      const sourceUrl = sourceUrlFor(body.sourceUrl);
-      if (selectedSessions) assertSessionRequestActive();
-      project ||= await projects.register({ bytes, extension }, { sourceUrl, capture: body.capture });
-      const imageAsset = await images.put({ bytes, extension });
-      const currentJobId = project.inputVersions?.[body.mode] ?? projects.get(project.id).jobs.find((job) => job.mode === body.mode)?.id;
-      const historical = body.referenceJobId !== undefined && body.referenceJobId !== currentJobId;
-      const subjectAsset = subject ? await images.put(subject) : undefined;
-      if (multi) reenact.subjects = await saveSubjects(decodedSubjects);
-      if (selectedSessions) assertSessionRequestActive();
-      const id = randomUUID();
-      runtime.reserve(id, project.id);
-      const imagePath = images.path(imageAsset);
-      const subjectImagePath = subjectAsset ? images.path(subjectAsset) : undefined;
-      const job = {
-        id,
-        projectId: project.id,
-        imageAsset,
-        ...(subjectAsset ? { subjectAsset } : {}),
-        mode: body.mode,
-        referenceIndex,
-        model: modelSettings.model,
-        reasoningEffort: modelSettings.reasoningEffort,
-        status: "running",
-        stage: "正在连接本机 Codex…",
-        createdAt: new Date().toISOString(),
-        sourceUrl,
-        capture: body.capture === "screenshot" ? "screenshot" : "original",
-        ...(instruction !== undefined ? { instruction } : {}),
-        ...(reenact ? { reenact } : {}),
-        ...(body.generation ? { autoGeneration: { ...body.generation, status: "pending" } } : {}),
-        ...(selectedSessions ? { sessionContext: { sources: selectedSessions } } : {}),
-      };
-      try {
-        await save(job);
-        if (imageAsset === project.imageAsset && !historical) await projects.selectInputVersion(project.id, job);
-        else if (project.inputVersions?.[body.mode] === undefined && jobs.has(currentJobId)) await projects.selectInputVersion(project.id, jobs.get(currentJobId), true);
-      } catch (error) {
-        Object.assign(job, { status: "failed", stage: "任务保存失败", error: "任务未启动，请重试" });
-        if (job.autoGeneration) Object.assign(job.autoGeneration, { status: "failed", error: job.error });
-        await save(job).catch((failure) => console.error("保存失败任务状态失败:", failure.message));
-        projects.updateJob(job);
-        runtime.release(id);
-        throw error;
-      }
-      json(202, job);
-      let promptSnapshot;
-      void runtime.run(job, job, { modelSettings, onSettled: body.generation ? async ({ signal }) => {
-        const release = await acquireMutation();
-        try {
-          if (job.autoGeneration.status !== "pending") return;
-          if (job.status !== "completed" || signal.aborted) {
-            Object.assign(job.autoGeneration, { status: job.status === "cancelled" || signal.aborted ? "cancelled" : "failed", error: job.error });
-          } else {
-            try {
-              await startGeneration(job, body.generation, { modelSettings, promptResult: promptSnapshot, automatic: true, signal });
-              return;
-            } catch (error) { Object.assign(job.autoGeneration, { status: "failed", error: error.message }); }
-          }
-          await save(job);
-        } finally { release(); }
-      } : undefined, completedStage: "逆向完成", failedStage: "逆向失败",
-        execute: async ({ signal, progress }) => {
-          let sessionContext;
-          if (selectedSessions) {
-            progress({ stage: "正在读取所选会话…" });
-            sessionContext = await sessions.capture(selectedSessions, { jobId: id, signal });
-            signal.throwIfAborted();
-            const { sources, hash, capturedAt, messageCount, attachmentCount } = sessionContext;
-            job.sessionContext = { sources, snapshotId: id, hash, capturedAt, messageCount, attachmentCount };
-            await save(job);
-          }
-          signal.throwIfAborted();
-          const result = await agent({ sessionContext, imagePath, subjectImagePath,
-            subjectImagePaths: reenact?.subjects?.map((item) => images.path(item.subjectAsset)),
-            subjects: reenact?.subjects, referenceIndex, basePrompt: reenact?.basePrompt, instruction: job.instruction,
-            mode: job.mode, skillPath, cwd: root, signal, modelSettings, onProgress: progress });
-          promptSnapshot = structuredClone(result);
-          return { result };
-        },
-      });
+      json(202, await startJob(submittedJob, { readSessions, assertSessionRequestActive }));
     } catch (error) {
       if (!res.headersSent && !res.destroyed)
         json(error.status || 500, {
@@ -958,10 +1110,12 @@ export async function createBridge({
       clearTimeout(sessionReadTimer);
       res.off("close", abortSessionRead);
       releaseMutation?.();
+      kickBatches();
     }
   });
   server.on("close", () => {
     void sessions.close?.();
+    batchesClosed = true;
     taskFeed.close();
     cli.close();
     models.close();

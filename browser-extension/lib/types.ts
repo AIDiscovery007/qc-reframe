@@ -92,6 +92,12 @@ export type ImageThumbnail = {
 export type Project = ProjectSummary & { jobs: Job[] };
 export type ProjectPage = { items: ProjectSummary[]; total: number; page: number; pageSize: number; revision: string };
 export type AspectRatio = { width: number; height: number };
+export type BatchProject = { projectId: string; inputRevision: number };
+export type BatchPreview = { model: string; items: (BatchProject & { title: string; eligible: boolean; error?: string })[] };
+export type Batch = {
+  id: string; createdAt: string; language: "zh" | "en"; aspectRatio?: AspectRatio; model: string;
+  items: { projectId: string; title: string; status: "queued" | "running" | "completed" | "failed" | "cancelled" | "rejected"; stage: string; error?: string; jobId?: string; generationId?: string }[];
+};
 export type Generation = {
   referenceIndex?: number;
   id: string;

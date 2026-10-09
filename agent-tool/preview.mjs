@@ -50,7 +50,7 @@ const job = {
 };
 
 // Receipts travel over the parent IPC channel, never through page-controlled state.
-const regressions = Object.fromEntries(['settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
+const regressions = Object.fromEntries(['batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
   .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
 const previewSources = ['agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs', 'browser-extension/lib/operation-policy.ts', 'browser-extension/bridge/image-order.mjs'];
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -278,6 +278,11 @@ const server = createServer(async (req, res) => {
           if(chained)Object.assign(saved.autoGeneration,{status:'started',generationId:generation.id});
           return generation;
         };
+        // Fixed response fixtures only: real queue scheduling belongs to bridge tests.
+        const batches=[], batchRequests=new Map();
+        let batchReplyLost=false;
+        const batchAllAccepted=previewOptions.get('batchRecreateRegression')==='all-accepted';
+        const batchItems=request=>request.projects.map(item=>({projectId:item.projectId,inputRevision:item.inputRevision,title:projects.find(p=>p.id===item.projectId)?.title||'已删除项目',eligible:batchAllAccepted||item.projectId!==projects[3]?.id,...(!batchAllAccepted&&item.projectId===projects[3]?.id?{error:'参考图缺失'}:{})}));
         const service={service:'qc-alchemy',version:'0.3.2',managed:previewOptions.get('restart')!=='manual',canRestart:!['old','manual'].includes(previewOptions.get('restart')),instanceId:'preview-first'};
         let restartingUntil=0;
         const cli={detectedAt:new Date().toISOString(),checkedAt:new Date().toISOString(),installed:true,version:'0.100.0',latestVersion:'0.101.0',executable:'/example/bin/codex',source:'npm',canUpdate:true,updateAvailable:true,command:'npm install -g @openai/codex@latest',instructions:{message:'升级后确认 Reframe 使用的 CLI 路径。',loginCommand:"'/example/bin/codex' login"},compatibility:{features:Object.fromEntries(['models','reverse','generation','sessions'].map(key=>[key,{status:'supported'}]))}};
@@ -307,6 +312,38 @@ const server = createServer(async (req, res) => {
         },id:'preview',getManifest:()=>({name:'QC-Reframe preview',version:'0.1.18'}),onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)},sendMessage:async(message)=>{
           const operation=operationFor(message?.type);
           if(operation&&!allowsOperation(operation,requestSource))return {error:'无效请求'};
+          if(message.type==='alchemy:batch-preview') {
+            const items=batchItems(message);
+            await new Promise(resolve=>setTimeout(resolve,Number(previewOptions.get('batchPreviewDelay'))||0));
+            return {ok:true,value:{items,model:models.selected}};
+          }
+          if(message.type==='alchemy:batch-start') {
+            let batch=batchRequests.get(message.requestId);
+            if(!batch) {
+              batch={id:crypto.randomUUID(),createdAt:new Date().toISOString(),language:message.language,aspectRatio:message.aspectRatio,model:models.selected,
+                items:message.projects.map((item,index)=>({projectId:item.projectId,title:projects.find(p=>p.id===item.projectId)?.title||'已删除项目',status:index===0?'running':index===1||batchAllAccepted?'queued':'rejected',stage:index===0?'正在逆向':index===1||batchAllAccepted?'排队中':'未受理',...(index>1&&!batchAllAccepted?{error:'项目输入已变化，请重新检查'}:{})}))};
+              const running=batch.items[0];
+              if(running){running.jobId='batch-preview-'+batch.id;projects.find(p=>p.id===running.projectId)?.jobs.unshift({...structuredClone(job),id:running.jobId,projectId:running.projectId,mode:'recreate',status:'running',stage:'正在逆向',result:undefined,generations:[]});}
+              if(running&&previewOptions.get('batchRecreateRegression')==='history') {
+                const saved=findJob(running.jobId), createdAt=new Date().toISOString();
+                Object.assign(running,{status:'completed',stage:'图片已生成',generationId:'batch-auto-image'});
+                Object.assign(saved,{status:'completed',stage:'逆向完成',result:structuredClone(job.result),generations:[
+                  {id:'batch-auto-image',createdAt,status:'completed',stage:'图片已生成',language:'en',extension:'png'},
+                  {id:'batch-manual-image',createdAt,status:'running',stage:'手动生图进行中',language:'en'}]});
+              }
+              batches.push(batch);batchRequests.set(message.requestId,batch);
+            }
+            await new Promise(resolve=>setTimeout(resolve,Number(previewOptions.get('batchStartDelay'))||100));
+            if(['retry','retry-hidden'].includes(previewOptions.get('batchRecreateRegression'))&&!batchReplyLost){batchReplyLost=true;throw new Error('示例：响应丢失，请重试');}
+            return {ok:true,value:structuredClone(batch)};
+          }
+          if(message.type==='alchemy:batches')return {ok:true,value:structuredClone(batches.map(batch=>({...batch,items:batch.items.filter(item=>showHiddenProjects||!projects.find(p=>p.id===item.projectId)?.hidden)})).filter(batch=>batch.items.length))};
+          if(message.type==='alchemy:batch-cancel') {
+            const batch=batches.find(item=>item.id===message.id);
+            for(const item of batch.items)if(message.projectId?item.projectId===message.projectId&&['queued','running'].includes(item.status):item.status==='queued')Object.assign(item,{status:'cancelled',stage:'已取消'});
+            for(const item of batch.items)if(item.jobId&&item.status==='cancelled'){const saved=findJob(item.jobId);if(saved)Object.assign(saved,{status:'cancelled',stage:'已取消'});}
+            return {ok:true,value:structuredClone(batch)};
+          }
           if(message.type.startsWith('alchemy:reminder-')) {
             const preferences=JSON.parse(localStorage.getItem('preview-reminders')||'{"sound":false,"tone":"calm","volume":30}');
             if(preferences.tone==='soft')preferences.tone='calm';
@@ -553,6 +590,8 @@ const server = createServer(async (req, res) => {
       );
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('settingsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/settings-recovery-regression.js"></script></body>'));
+    if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('batchRecreateRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/batch-recreate-regression.js"></script></body>'));
     if (['/workspace.html','/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('endToEndRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/end-to-end-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('generationActionsRegression'))

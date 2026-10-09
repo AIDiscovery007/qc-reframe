@@ -310,6 +310,26 @@ export default defineBackground(() => {
       }
       case "alchemy:sessions-list":
         return bridge("/sessions/list", token, { searchTerm: message.searchTerm, cursor: message.cursor, archived: message.archived, scope: message.scope }, signal);
+      case "alchemy:batches":
+        return bridge(`/batches${showHiddenProjects ? "?includeHidden=true" : ""}`, token);
+      case "alchemy:batch-preview":
+      case "alchemy:batch-start": {
+        if (!Array.isArray(message.projects) || !message.projects.length || message.projects.length > 24 ||
+          message.projects.some((item: any) => !item || typeof item.projectId !== "string" || !/^[a-f0-9]{64}$/.test(item.projectId) || !Number.isSafeInteger(item.inputRevision) || item.inputRevision < 0) ||
+          new Set(message.projects.map((item: any) => item.projectId)).size !== message.projects.length) throw new Error("无效批量项目");
+        const projects = message.projects.map(({ projectId, inputRevision }: { projectId: string; inputRevision: number }) => ({ projectId, inputRevision }));
+        if (message.type === "alchemy:batch-preview") return bridge("/batches/preview", token, { projects }, signal);
+        const { requestId, language, aspectRatio } = message;
+        if (typeof requestId !== "string" || !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(requestId) || !["zh", "en"].includes(language) ||
+          (aspectRatio !== undefined && (!aspectRatio || ![aspectRatio.width, aspectRatio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000) || aspectRatio.width / aspectRatio.height < 1 / 20 || aspectRatio.width / aspectRatio.height > 20))) throw new Error("无效批量参数");
+        const batch = await bridge("/batches", token, { requestId, projects, language, ...(aspectRatio ? { aspectRatio: { width: aspectRatio.width, height: aspectRatio.height } } : {}) }, signal);
+        void reminders.wake();
+        return batch;
+      }
+      case "alchemy:batch-cancel":
+        if (typeof message.id !== "string" || !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(message.id) ||
+          (message.projectId !== undefined && (typeof message.projectId !== "string" || !/^[a-f0-9]{64}$/.test(message.projectId)))) throw new Error("无效批量任务");
+        return bridge(`/batches/${message.id}/cancel`, token, message.projectId ? { projectId: message.projectId } : {}, signal);
       case "alchemy:sessions-index":
         return bridge("/sessions/index", token, { action: message.action }, signal);
       case "alchemy:update-project-input": {

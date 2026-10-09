@@ -1,3 +1,4 @@
+import { removeBatchProjects } from "./batches.mjs";
 import { savedReferenceIndex } from "./image-order.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir, writeFile, rename, rm } from "node:fs/promises";
@@ -14,7 +15,7 @@ const inputFor = (job) => {
 };
 
 // Finish interrupted deletions before legacy jobs can recreate their projects.
-export async function recoverProjectDeletion(dataDir, legacyDir = dataDir) {
+export async function recoverProjectDeletion(dataDir, legacyDir = dataDir, onBatchCleanup) {
   const path = join(dataDir, ".project-deletion.json");
   let files;
   try { files = JSON.parse(await readFile(path, "utf8")); }
@@ -22,11 +23,13 @@ export async function recoverProjectDeletion(dataDir, legacyDir = dataDir) {
   if (!Array.isArray(files) || files.some((file) => typeof file !== "string" ||
     !/^(?:project-[a-f0-9]{64}|[a-f0-9-]{36}(?:-subject|-session-context)?|[\w-]+-generated)[.](?:json|png|jpeg|webp)$/.test(file)))
     throw new Error("项目删除记录无效，已停止清理");
+  await removeBatchProjects(join(dataDir, "batches.json"), files.filter(file => /^project-[a-f0-9]{64}\.json$/.test(file)).map(file => file.slice(8, -5)));
+  await onBatchCleanup?.();
   for (const file of files) await rm(join(file.endsWith(".json") ? dataDir : legacyDir, file), { force: true });
   await rm(path);
 }
 
-export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, readReference, images, saveJob }) {
+export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, readReference, images, saveJob, batchBusy = () => false, onBatchCleanup }) {
   const records = new Map();
   const pending = new Map();
   const indexedJobs = new Map();
@@ -155,7 +158,7 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
       }
     }
     const item = { id: project.id, hidden: project.hidden, title: history.find((job) => job.result?.title)?.result.title || "未命名模板项目", createdAt: project.createdAt, updatedAt, sourceUrl: project.sourceUrl, capture: project.capture, jobCount: history.length,
-      busy: history.some((job) => job.status === "running" || job.generations?.some((item) => item.status === "running")), modes,
+      busy: batchBusy(project.id) || history.some((job) => job.status === "running" || job.generations?.some((item) => item.status === "running")), modes,
       revision: revisions.get(project.id) || `${epoch}:0`, inputRevision: project.inputRevision || 0, inputVersions: project.inputVersions || {}, ...(project.imageAsset ? { imageAsset: project.imageAsset } : {}), ...(cover ? { cover } : {}) };
     summaries.set(project.id, item);
     return item;
@@ -239,7 +242,7 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
       const journal = join(dataDir, ".project-deletion.json");
       await writeFile(`${journal}.tmp`, JSON.stringify(files), { mode: 0o600 });
       await rename(`${journal}.tmp`, journal);
-      await recoverProjectDeletion(dataDir, legacyDir);
+      await recoverProjectDeletion(dataDir, legacyDir, onBatchCleanup);
       for (const job of history) { jobs.delete(job.id); jobProjects.delete(job.id); }
       for (const id of ids) {
         records.delete(id);
@@ -256,6 +259,13 @@ export async function createProjectStore({ dataDir, legacyDir = dataDir, jobs, r
         (!query || `${item.title} ${item.sourceUrl}`.toLocaleLowerCase().includes(query)));
       page = Math.min(page, Math.max(1, Math.ceil(matching.length / limit)));
       return { items: matching.slice((page - 1) * limit, page * limit), total: matching.length, page, pageSize: limit, revision: revision() };
+    },
+    touch(ids) { for (const id of ids) if (records.has(id)) invalidate(id); },
+    input(id, mode) {
+      const project = records.get(id);
+      if (!project) return;
+      const job = projectJobs(id).find(job => job.mode === mode && (project.inputVersions?.[mode] === undefined || job.id === project.inputVersions[mode]));
+      return structuredClone(project.inputs?.[mode] || (job ? inputFor(job) : {}));
     },
     summary(id) {
       const project = records.get(id);

@@ -33,3 +33,8 @@
 .task-status-dot { display:inline-block;width:6px;height:6px; }
 
 .task-center .task-image-open { padding: 0; border: 0; border-radius: 5px; background: none; }
+
+.batch-tasks { margin-bottom: 24px; }
+.batch-tasks > ul { list-style: none; margin: 12px 0 0; padding: 0; }
+.batch-task-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.batch-task-heading small { display: block; color: var(--muted); }

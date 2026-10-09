@@ -2,18 +2,20 @@ import { showMotionDialog } from "../../lib/motion-dialog";
 import { createPortal } from "react-dom";
 import { logo } from "../../lib/brand";
 import { useEffect, useRef, useState } from "react";
-import type { ProjectSummary } from "../../lib/types";
+import type { Batch, ProjectSummary } from "../../lib/types";
+import BatchRecreate from "./BatchRecreate";
 import ProjectItem from "./ProjectItem";
 import Icon from "./Icon";
 import HiddenProjectsToggle from "./HiddenProjectsToggle";
 
-export default function ProjectHistory({ projects, busy, onOpen, onDelete, workspace = false, searchTarget, page, total, pageSize, search, status, loading, loadError, onPage, onSearch, onStatus, onRetry, showHidden, onSetHidden, onToggleHidden }: {
+export default function ProjectHistory({ projects, busy, onOpen, onDelete, workspace = false, searchTarget, page, total, pageSize, search, status, loading, loadError, onPage, onSearch, onStatus, onRetry, showHidden, hiddenProjectIds, onSetHidden, onToggleHidden, batchDisabled = false, onTasks }: {
+  batchDisabled?: boolean; onTasks?(): void;
   page: number; total: number; pageSize: number; search: string; loading: boolean; loadError: string;
   status?: "unstarted"; onStatus(value: "unstarted" | undefined): void;
   onPage(page: number): void; onSearch(value: string): void; onRetry(): void;
   projects: ProjectSummary[]; busy: boolean; onOpen(project: ProjectSummary): void;
   onDelete(ids: string[]): Promise<void>;
-  showHidden: boolean; onSetHidden(ids: string[], hidden: boolean): Promise<string[]>; onToggleHidden(): void;
+  showHidden: boolean; hiddenProjectIds: string[]; onSetHidden(ids: string[], hidden: boolean): Promise<string[]>; onToggleHidden(): void;
   workspace?: boolean; searchTarget?: HTMLElement | null;
 }) {
   const [managing, setManaging] = useState(false);
@@ -22,6 +24,8 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
     catch { return "grid"; }
   });
   const [selected, setSelected] = useState<string[]>([]);
+  const [batchProjects, setBatchProjects] = useState<ProjectSummary[]>();
+  const [batchStarted, setBatchStarted] = useState(false);
   const [pending, setPending] = useState<ProjectSummary[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -30,6 +34,8 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
   const cancel = useRef<HTMLButtonElement>(null);
   const selectAll = useRef<HTMLInputElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const taskButton = useRef<HTMLButtonElement>(null);
+  const restoreBatchFocus = useRef(false);
   const visible = projects;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const unavailable = busy || loading || !!loadError;
@@ -41,7 +47,12 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
     try { localStorage.setItem("reframe:project-view", value); }
     catch { /* Keep switching available when browser storage is unavailable. */ }
   };
-  useEffect(() => { setSelected([]); setNotice(""); }, [page, search, status, showHidden]);
+  useEffect(() => { setSelected([]); setNotice(""); setBatchProjects(undefined); setBatchStarted(false); }, [page, search, status, showHidden]);
+  useEffect(() => {
+    if (batchProjects || !restoreBatchFocus.current) return;
+    restoreBatchFocus.current = false;
+    (taskButton.current || heading.current)?.focus({ preventScroll: true });
+  }, [batchProjects, batchStarted]);
   const eligible = visible;
   const checked = eligible.filter((project) => selected.includes(project.id));
   useEffect(() => {
@@ -54,6 +65,16 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
     return closeDialog;
   }, [pending]);
   const confirm = (items: ProjectSummary[]) => { setError(""); setNotice(""); setPending(items); };
+  const started = (batch: Batch) => {
+    restoreBatchFocus.current = true;
+    const accepted = batch.items.filter(item => item.status !== "rejected").map(item => item.projectId);
+    setSelected(ids => ids.filter(id => !accepted.includes(id)));
+    setNotice(`已受理 ${accepted.length} 个项目`);
+    setError(batch.items.filter(item => item.status === "rejected" && (showHidden || !hiddenProjectIds.includes(item.projectId))).map(item => `${item.title}：${item.error || "未受理"}`).join("；"));
+    setBatchStarted(accepted.length > 0);
+    setBatchProjects(undefined);
+    onRetry();
+  };
   const remove = async () => {
     try {
       await onDelete(pending.map((project) => project.id));
@@ -106,16 +127,18 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
       <label><input ref={selectAll} className="project-checkbox" type="checkbox" checked={!!eligible.length && checked.length === eligible.length}
         disabled={unavailable || !eligible.length} onChange={(event) => setSelected(event.target.checked ? eligible.map((project) => project.id) : [])} />选择本页</label>
       <div className="history-management-actions">
+      {workspace && <button className="primary" disabled={unavailable || batchDisabled || !checked.length} onClick={() => setBatchProjects([...checked])}>批量完整复刻</button>}
       <button className="text-button" aria-busy={visibilityAction === true || undefined} disabled={unavailable || !checked.some(project => !project.hidden)} onClick={() => void setHidden(true)}>隐藏所选</button>
       {showHidden && <button className="text-button" aria-busy={visibilityAction === false || undefined} disabled={unavailable || !checked.some(project => project.hidden)} onClick={() => void setHidden(false)}>恢复所选</button>}
       <button className="text-button danger" disabled={unavailable || !checked.length || checked.some(project => project.busy)} onClick={() => confirm(checked)}>
-        <Icon name="trash" />删除所选{checked.length ? ` (${checked.length})` : ""}
+        <Icon name="trash" />删除所选<span className="history-selection-count">({checked.length})</span>
       </button>
       </div>
     </div>}
     </div>
     <div className={workspace ? "workspace-library-content" : undefined} tabIndex={workspace ? 0 : undefined} role={workspace ? "region" : undefined} aria-label={workspace ? "项目内容" : undefined}>
     <p className="history-notice" role="status">{notice}</p>
+    {batchStarted && onTasks && <button ref={taskButton} className="text-button" onClick={onTasks}>查看任务</button>}
     {error && !pending.length && <p className="error" role="alert">{error}</p>}
     {!loading && !loadError && !projects.length && !search.trim() && <p className="muted">{status ? "暂无待逆向项目。" : "暂无可见项目。"}</p>}
     {!loading && !loadError && !visible.length && !!search.trim() && <p className="muted">{status ? "没有找到匹配的待逆向项目。" : "没有找到匹配的项目。"}</p>}
@@ -128,6 +151,7 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
     </nav>}
     <div className={workspace ? listView ? "workspace-project-list" : "workspace-project-grid" : "project-page-items"} role={workspace ? "list" : undefined} aria-label={workspace ? "项目" : undefined} aria-busy={loading} data-loading={loading}>{items}</div>
     </div>
+    {batchProjects && <BatchRecreate projects={batchProjects} showHidden={showHidden} hiddenProjectIds={hiddenProjectIds} onClose={() => setBatchProjects(undefined)} onStarted={started} />}
     <dialog ref={dialog} className={workspace ? "result-dialog modal dialog-small" : "delete-dialog"} aria-labelledby="delete-title" aria-describedby="delete-description"
       onCancel={(event) => { event.stopPropagation(); event.preventDefault(); if (!busy) setPending([]); }}
       onKeyDown={(event) => { if (event.key === "Escape") event.stopPropagation(); }}>

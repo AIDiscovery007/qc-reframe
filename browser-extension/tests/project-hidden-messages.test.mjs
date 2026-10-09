@@ -277,3 +277,41 @@ test("project path and version choices persist independently and expose no priva
     assert.match((await bg.send({ type: "alchemy:save-project-view", projectId, view })).error, /无效/);
   assert.equal(await bg.send({ type: "alchemy:project-views" }, { ...sender, id: "foreign" }), undefined);
 });
+
+test('user starts a batch from the workspace without changing the current selection', async () => {
+  // Given a saved selection, When the workspace checks and submits a batch, Then only batch endpoints are called.
+  const selection = { id: 'current-input', projectId: 'b'.repeat(64) };
+  const bg = background({ preferences: { token: 'private-token' }, selection });
+  const projects = [{ projectId, inputRevision: 3 }];
+  assert.equal((await bg.send({ type: 'alchemy:batch-preview', projects })).ok, true);
+  const body = { requestId: '11111111-1111-4111-8111-111111111111', projects, language: 'en', aspectRatio: { width: 3, height: 4 } };
+  assert.equal((await bg.send({ type: 'alchemy:batch-start', ...body })).ok, true);
+  assert.deepEqual(bg.calls.map(call => call.path), ['/batches/preview', '/batches']);
+  assert.deepEqual(bg.calls[1].body, body);
+  assert.deepEqual(bg.local.selection, selection);
+  assert.equal(bg.calls[1].token, 'private-token');
+});
+
+test('user batch operations reject web content and malformed requests before bridge access', async () => {
+  // Given a content-script sender or malformed input, When requesting batch work, Then no bridge request is sent.
+  const bg = background();
+  const valid = { requestId: '11111111-1111-4111-8111-111111111111', projects: [{ projectId, inputRevision: 0 }], language: 'zh' };
+  for (const type of ['alchemy:batch-preview', 'alchemy:batch-start', 'alchemy:batches', 'alchemy:batch-cancel'])
+    assert.equal(await bg.send({ type, ...valid }, contentSender), undefined);
+  for (const fields of [{ projects: [] }, { projects: [{ projectId: '../x', inputRevision: 0 }] }, { projects: [{ projectId, inputRevision: -1 }] }, { projects: Array(25).fill(valid.projects[0]) }, { requestId: '../x' }, { language: 'xx' }, { aspectRatio: { width: 0, height: 1 } }])
+    assert.match((await bg.send({ type: 'alchemy:batch-start', ...valid, ...fields })).error, /无效|有效/);
+  assert.match((await bg.send({ type: 'alchemy:batch-cancel', id: '../x' })).error, /无效/);
+  assert.equal(bg.calls.length, 0);
+});
+
+test('user batch list follows hidden-project scope and cancellation targets the explicit batch item', async () => {
+  // Given hidden projects enabled, When listing and cancelling, Then the trusted scope and explicit target reach the bridge.
+  const bg = background();
+  await bg.send({ type: 'alchemy:show-hidden-projects', show: true });
+  await bg.send({ type: 'alchemy:batches' });
+  assert.equal(bg.calls.at(-1).path, '/batches?includeHidden=true');
+  const id = '11111111-1111-4111-8111-111111111111';
+  await bg.send({ type: 'alchemy:batch-cancel', id, projectId });
+  assert.equal(bg.calls.at(-1).path, `/batches/${id}/cancel`);
+  assert.deepEqual(bg.calls.at(-1).body, { projectId });
+});
