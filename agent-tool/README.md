@@ -48,7 +48,7 @@
 - 索引完整性要求 Node 0 skip/todo、全部文件和场景执行、静态/类型/gate通过、前后来源一致。沿用现有gate的3项精确能力声明（两项只读图旋转不适用、原生picker能力缺口），逐项保留场景/规则/原因且场景固定核心；任何新增skip或整场景缺失都拒绝索引。完整指已登记可运行覆盖，不代表原生picker、真实模型或人工视觉验收通过。
 - `REFRAME_TEST_COVERAGE=1` 仅测试构建生成隐藏map，参与构建/证据指纹；普通构建与coverage构建不能混用，coverage模式禁止zip。测试不修改生产业务，不访问真实模型/账户/项目；启动本机合成预览、隔离浏览器及临时测试子进程，写构建和独享临时证据。SIGINT/SIGTERM终止当前进程并使结果失败；强杀可能留下临时目录，不能据残留文件认定成功。
 - `test-full.yml` 每小时第17分钟检查main和所有开放PR，固定SHA与merge双亲，只读worker执行。相同控制规则/准确SHA成功或在跑则推迟，失败/取消重试，手动dispatch可提前完整执行；纯说明变化沿轻量规则。API/分页失败明确失败，不是空计划成功。调度存在GitHub排队延迟，未宣称精确整点SLA。
-- fork只走原生pull_request完整路径和GitHub审批，主线定时任务报告它需要原生完整证据，不执行fork代码。合并前CLI读取其成功PR run及完整artifact中的实际mergeSHA；不会用schedule控制提交代替被测SHA。该CLI只检查证据，不设置远端分支保护，不代替独立review。
+- fork保留普通原生pull_request CI及GitHub审批，但其可修改的工作流/工具所生成的成功job和artifact不构成可信完整验收。主线调度不执行fork代码，明确defer为`fork-independent-trusted-verification-required`；`verify-full`对fork一律失败，必须由维护者另行独立可信验收。同仓PR仍核对受信任调度的准确被测SHA，不能用schedule控制提交替代。该CLI不设置远端分支保护，也不代替独立review。
 - 调度/证据CLI需要 `gh` 登录及 `GITHUB_REPOSITORY=owner/repo DEFAULT_BRANCH=main`，使用GitHub只读API；baseline子命令下载可信main artifact到指定临时文件，网络失败则full。artifact名称绑定成功run_attempt，重复项取当前attempt最新ID，旧失败attempt不串入。选测环境指纹核对实际Chromium/headless二进制、驱动、字体及配置文件内容和LANG/TZ等变量；字体以有序来源目录与相对文件名、内容摘要标识，跟随符号链接，不依赖安装根路径或mtime，真实内容变化仍失效回退full。本机evidence门禁继续使用原严格本机回执。它不发消息、不提交/推送/合并/发布。`verify-full` 必须使用当前可信默认分支的干净控制checkout（工具所在目录，而非调用者的PR工作目录），例如 `GITHUB_REPOSITORY=owner/repo DEFAULT_BRANCH=main node /absolute/trusted-main/agent-tool/test-schedule.mjs verify-full 12`；工具核验该checkout仍对应远端main，拒绝PR版本或脏控制器。`verify-full` 是检查时点的证据，真正合并前仍须确认head/base未推进。
 
 针对性验证：`node --test agent-tool/test-impact.test.mjs agent-tool/test-run.test.mjs agent-tool/test-schedule.test.mjs`，使用合成临时Git、真实Node覆盖及API边界fixture，不访问真实GitHub或启动产品浏览器。远端工作流须实际运行后才算CI通过。

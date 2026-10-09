@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, appendFileSync, unlinkSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { readFileSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { isDoc } from './ci.mjs';
 import { execFileSync } from 'node:child_process';
@@ -10,7 +9,7 @@ export function planSchedule({ targets, jobs, controller, force = false }) {
   for (const target of targets) {
     const name = `full/v1/${controller}/${target.number ? `pr${target.number}` : 'main'}/${target.sha}`;
     const matches = jobs.filter(job => job.name === name);
-    const reason = target.fork ? 'fork-native-full-required' : target.blocked || (!target.code && !force ? 'docs' : null) || (matches.some(job => job.status !== 'completed') ? 'running'
+    const reason = target.fork ? 'fork-independent-trusted-verification-required' : target.blocked || (!target.code && !force ? 'docs' : null) || (matches.some(job => job.status !== 'completed') ? 'running'
       : !force && matches.some(job => job.conclusion === 'success') ? 'success' : null);
     if (reason) deferred.push({ ...target, reason });
     else include.push({ ...target, name });
@@ -26,10 +25,10 @@ export function verifyTarget({ root, target }) {
   return target;
 }
 
-export function requireFull({ target, controller, jobs, native }) {
+export function requireFull({ target, controller, jobs }) {
+  if (target.fork) throw Error('Fork requires independent trusted maintainer verification; native CI reports are not accepted');
   const name = `full/v1/${controller}/${target.number ? `pr${target.number}` : 'main'}/${target.sha}`;
-  if (target.fork && !target.blocked && native?.event === 'pull_request' && native.head === target.head && native.status === 'completed' && native.conclusion === 'success' && native.jobPassed && native.report?.commit === target.sha && native.report.status === 'passed' && native.report.mode === 'full' && native.report.deferred?.length === 0) return { status: 'passed', target, nativeRun: native.runId };
-  if (target.blocked || target.fork || !jobs.some(job => job.name === name && job.status === 'completed' && job.conclusion === 'success')) throw Error(`Current target lacks successful full evidence: ${name}`);
+  if (target.blocked || !jobs.some(job => job.name === name && job.status === 'completed' && job.conclusion === 'success')) throw Error(`Current target lacks successful full evidence: ${name}`);
   return { status: 'passed', target, name };
 }
 
@@ -97,26 +96,6 @@ export function attemptArtifact(artifacts, name, attempt) {
   return artifacts.filter(item => item.name === `${name}-attempt-${attempt}` && !item.expired).sort((a,b) => b.id-a.id)[0];
 }
 
-export async function nativeFull(api, target) {
-  const runs = await api.list(`actions/workflows/uiux.yml/runs?event=pull_request&head_sha=${target.head}&per_page=100`, 'workflow_runs');
-  for (const run of runs) {
-    if (run.event !== 'pull_request' || run.head_sha !== target.head || run.status !== 'completed' || run.conclusion !== 'success') continue;
-    const jobs = await api.list(`actions/runs/${run.id}/attempts/${run.run_attempt}/jobs?per_page=100`, 'jobs');
-    if (!jobs.some(job => job.name === 'uiux' && job.status === 'completed' && job.conclusion === 'success')) continue;
-    const artifacts = await api.list(`actions/runs/${run.id}/artifacts?per_page=100`, 'artifacts');
-    const artifact = attemptArtifact(artifacts, 'uiux-evidence', run.run_attempt);
-    if (!artifact) continue;
-    const directory = mkdtempSync(join(tmpdir(), 'reframe-native-evidence-'));
-    try {
-      const archive = join(directory, 'artifact.zip');
-      writeFileSync(archive, execFileSync('gh', ['api', `repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${artifact.id}/zip`], { maxBuffer: 256 * 1024 * 1024 }));
-      const report = JSON.parse(execFileSync('unzip', ['-p', archive, 'regression/report.json'], { maxBuffer: 32 * 1024 * 1024 }));
-      if (report.commit === target.sha) return { event: run.event, head: run.head_sha, status: run.status, conclusion: run.conclusion, jobPassed: true, runId: run.id, report };
-    } finally { rmSync(directory, {recursive:true,force:true}); }
-  }
-  return null;
-}
-
 const controllerRoot = fileURLToPath(new URL('../', import.meta.url));
 export function controllerId(root = controllerRoot) {
   const files = ['.github/workflows/test-full.yml', 'agent-tool/test-schedule.mjs', 'agent-tool/test-impact.mjs', 'agent-tool/test-run.mjs', 'agent-tool/test-policy.mjs', 'browser-extension/package-lock.json'];
@@ -169,13 +148,12 @@ async function main() {
     const controlSha = verifyController(controllerRoot, targets[0].sha);
     const target = targets.find(item => item.number === Number(argument));
     if (!target) throw Error('Current target not found');
-    const native = target.fork ? await nativeFull(api, target) : null;
     // Re-read after evidence lookup so a concurrently advancing PR cannot pass on an old tuple.
     const refreshed = await discoverTargets({ api, branch, repository: process.env.GITHUB_REPOSITORY });
     if (refreshed[0].sha !== controlSha) throw Error('Trusted main advanced during verification');
     const fresh = refreshed.find(item => item.number === target.number);
     if (!fresh || ['sha', 'head', 'base'].some(key => fresh[key] !== target[key])) throw Error('Target advanced during verification');
-    console.log(JSON.stringify(requireFull({ target, controller, jobs, native })));
+    console.log(JSON.stringify(requireFull({ target, controller, jobs })));
   } else if (command === 'plan') {
     const selected = argument ? targets.filter(item => item.number === Number(argument)) : targets;
     if (argument && !selected.length) throw Error('Requested target not found');

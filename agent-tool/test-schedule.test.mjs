@@ -27,7 +27,7 @@ test('user（维护者）保留fork审批边界、文档轻量和手动提前ful
   // When scheduled normally, then only actionable trusted code may be enqueued.
   let result = planSchedule({ targets, jobs, controller: 'policy' });
   assert.deepEqual(result.include, []);
-  assert.deepEqual(result.deferred.map(item => item.reason), ['fork-native-full-required', 'docs', 'merge-conflict', 'running']);
+  assert.deepEqual(result.deferred.map(item => item.reason), ['fork-independent-trusted-verification-required', 'docs', 'merge-conflict', 'running']);
   // When manually requested early, docs may run full but forks/blocked/running stay protected.
   result = planSchedule({ targets, jobs, controller: 'policy', force: true });
   assert.deepEqual(result.include.map(item => item.sha), ['docs']);
@@ -84,14 +84,21 @@ test('user（维护者）不会把schedule控制提交误认为实际被测main�
   } finally {if(old===undefined)delete process.env.DEFAULT_BRANCH;else process.env.DEFAULT_BRANCH=old;}
 });
 
-test('user（维护者）fork只接受原生PR审批后的当前完整证据，不能用选测或旧merge冒充', async () => {
-  // Given native pull_request success and its downloaded full artifact for the current merge.
+test('user（维护者）fork伪造成功报告或同名成功job仍须独立可信验收', async () => {
+  // Given a fork-controlled report claiming full success for the current merge,
+  // alongside a successful job copying the trusted scheduler's exact name.
   const {requireFull}=await import('./test-schedule.mjs');
   const current=target('merge',{number:1,head:'head',base:'base',fork:true});
   const native={event:'pull_request',head:'head',status:'completed',conclusion:'success',jobPassed:true,report:{commit:'merge',status:'passed',mode:'full',deferred:[]}};
-  // When verifying this evidence, then current full passes and every stale/partial/cancelled variant fails.
-  assert.equal(requireFull({target:current,controller:'policy',jobs:[],native}).status,'passed');
-  for(const change of [{conclusion:'cancelled'},{head:'old'},{event:'pull_request_target'},{report:{...native.report,mode:'selected'}},{report:{...native.report,commit:'old'}}]) assert.throws(()=>requireFull({target:current,controller:'policy',jobs:[],native:{...native,...change}}));
+  const jobs=[{name:'full/v1/policy/pr1/merge',status:'completed',conclusion:'success'}];
+  // When checking any combination, fork-supplied success is never automatic acceptance.
+  for (const evidence of [{jobs:[],native},{jobs},{jobs,native}]) {
+    assert.throws(()=>requireFull({target:current,controller:'policy',...evidence}),/Fork requires independent trusted maintainer verification/);
+  }
+  // Then even a manual schedule request defers this fork for independent verification.
+  const plan=planSchedule({targets:[current],jobs,controller:'policy',force:true});
+  assert.deepEqual(plan.include,[]);
+  assert.equal(plan.deferred[0].reason,'fork-independent-trusted-verification-required');
 });
 
 test('user（维护者）可执行或符号链接文档不会被定时调度误判为纯说明', async () => {
@@ -106,9 +113,9 @@ test('user（维护者）可执行或符号链接文档不会被定时调度误�
 test('user（维护者）重跑成功只读取该attempt的最新artifact，旧失败证据不能串入', async () => {
   // Given repeated artifacts from attempts 1 and 2, including two entries in the current attempt.
   const {attemptArtifact}=await import('./test-schedule.mjs');
-  const artifacts=[{id:1,name:'uiux-evidence-attempt-1'},{id:2,name:'uiux-evidence-attempt-2'},{id:3,name:'uiux-evidence-attempt-2'},{id:4,name:'uiux-evidence-attempt-2',expired:true}];
+  const artifacts=[{id:1,name:'test-index-target-attempt-1'},{id:2,name:'test-index-target-attempt-2'},{id:3,name:'test-index-target-attempt-2'},{id:4,name:'test-index-target-attempt-2',expired:true}];
   // When selecting attempt 2, then only its newest available artifact qualifies.
-  assert.equal(attemptArtifact(artifacts,'uiux-evidence',2).id,3);
-  assert.equal(attemptArtifact(artifacts,'uiux-evidence',3),undefined);
-  assert.throws(()=>attemptArtifact(artifacts,'uiux-evidence',undefined));
+  assert.equal(attemptArtifact(artifacts,'test-index-target',2).id,3);
+  assert.equal(attemptArtifact(artifacts,'test-index-target',3),undefined);
+  assert.throws(()=>attemptArtifact(artifacts,'test-index-target',undefined));
 });
