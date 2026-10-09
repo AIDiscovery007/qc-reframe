@@ -22,7 +22,7 @@ export async function check({ changed = true, base = 'HEAD' } = {}) {
 
 export function gate(options = {}) { return validationWindow('gate', () => runGate(options)); }
 
-async function runGate({ tier = 'quick', base = 'HEAD', build = true, baselineDirectory, reason = 'final-validation', progress = () => {} } = {}) {
+async function runGate({ coverage = false, tier = 'quick', base = 'HEAD', build = true, baselineDirectory, reason = 'final-validation', progress = () => {} } = {}) {
   if (!['quick', 'browser', 'full'].includes(tier)) throw new Error('未知门禁层级 ' + tier);
   const directory = await mkdtemp(join(tmpdir(), 'reframe-ui-gate-'));
   const result = { schemaVersion: 2, startedAt: new Date().toISOString(), reason, timing: { waitMs: 0, phases: {} }, tier, base, status: 'failed', steps: [], scope: 'Browser tiers conservatively run every registered scenario; no incomplete dependency graph is used to omit checks.', directory };
@@ -40,7 +40,7 @@ async function runGate({ tier = 'quick', base = 'HEAD', build = true, baselineDi
       initialEnvironment = await evidenceEnvironment();
       const { verify } = await import('./runner.mjs');
       phaseStart = performance.now();
-      const preview = await verify({ build, progress, reason });
+      const preview = await verify({ build, progress, reason, coverage });
       result.timing.phases.previewMs = Math.round(performance.now() - phaseStart);
       result.steps.push({ id: 'preview', ...preview });
       if (interruptions) throw new Error('门禁已取消，不启动后续检查');

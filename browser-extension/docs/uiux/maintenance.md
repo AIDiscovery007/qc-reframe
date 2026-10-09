@@ -7,7 +7,7 @@
 1. 明确意图、表面和允许差异，修改实际token/组件/布局；检查所有消费者的继承作用域。
 2. 同步catalog的来源、关系与场景。改变几何规则时同步probe的独立期望及正反例；不能直接以当前测量作为正确答案。
 3. `node agent-tool/ui.mjs sync`并复核目录差异。运行`change --files PATH … --reason "设计依据" --output /absolute/proposed.json`创建记录，不覆盖历史记录。
-4. 开发期先`prepare`一次，再用`plan --files PATH …`获取建议；当前自动缩减仅支持单独的`image-viewer.css`（6视口＋3风险），其他及混合/重复输入均显式不确定、回退全量，规则来源不是完整业务影响图。执行者仍可结合风险人工选择`verify --scenarios ID … --no-build --reason TEXT`定向反馈，并前置键盘/失败恢复及共享消费者复核。定稿后运行一次完整必要`gate --tier browser --no-build --reason final-validation`，来源变化则重新验证；适用视觉基线时选择full一次。用`inspect --scenario ID --no-build`定位失败，先读规则/期望/实际，再看祖先rect、computed style和截图。`change --record FILE`检验来源hash与规则/场景映射未变化。
+4. 开发期用 `node agent-tool/test-run.mjs plan --index /absolute/test-index.json` 查看统一选测与回退原因；`run` 保留构建、类型、静态、核心＋受影响＋新改测试，缺可信映射则完整。定向 `verify --scenarios ID … --no-build --reason TEXT` 仍可用于快速诊断，不冒充完整证据。每小时集中完整回归及合并前准确SHA检查见[工具索引](../../../agent-tool/README.md#文件级选测与集中回归)。用 `inspect --scenario ID --no-build` 读取规则/期望/实际、祖先rect、样式和截图；`change --record FILE` 检查来源与映射。
 5. 在变更记录的evidence中附实际报告路径、结果和验证边界，交监工复核。视觉变化另外提出候选，逐场景由人类审阅后接受。`reviewStatus: proposed`不能作为已批准证据。
 6. 后续来源或场景映射变化需创建新提案/重新审阅。历史记录作为历史证据保存，不要求旧记录永远匹配新源码。
 
@@ -17,9 +17,9 @@
 - `gate --tier browser`：再运行所有登记预览状态/几何/行为、隔离真实扩展；生成视觉候选便于复核，但不声称像素验收。
 - `gate --tier full`：再要求3个核心场景像素比较通过；缺基线、环境/fixture失配或差异均失败。
 
-`--base REF`指定增量基准，默认HEAD并包含工作区与未跟踪文件。CI使用PR base SHA；无可用基准时使用Git空树比较，不能静默退回HEAD漏检；最终browser/full门禁始终全量，不从不完整影响图推断可跳过；开发计划只改变反馈顺序和定向场景。错误退出1、参数错误退出2；所有报告记录具体失败和证据路径。
+`--base REF`指定增量基准，默认HEAD并包含工作区与未跟踪文件。CI使用PR base SHA；无可用基准时使用Git空树比较，不能静默退回HEAD漏检；独立browser/full门禁始终覆盖全部登记场景；高频CI选测另由统一test-run入口执行，部分结果不能充当完整门禁。错误退出1、参数错误退出2；所有报告记录具体失败和证据路径。
 
-CI按基线/require_visual一次选择browser或full，full已包含browser，不串联重跑；使用同一构建运行compile、产品测试及串行工具自测。CI首次运行上传Linux候选且明确标出视觉待审阅。下载artifact后先看候选HTML、来源与环境，再依次执行三个明确场景的`accept`，基线目录使用`browser-extension/docs/uiux/visual-baselines/linux`。任一Linux manifest入库后CI自动启用完整视觉检查，另可手动require_visual强制检查；不能只接受一个场景就宣称全部通过。macOS基线放`visual-baselines/darwin`，本地full显式传`--baseline-dir`。CI/操作系统升级导致环境不兼容时重新审阅，不放宽阈值。
+CI经文档分类后进入统一选测，集中完整回归按基线/require_visual一次选择browser或full，full已包含browser，不串联重跑；同一coverage构建用于类型、产品与工具验证。CI首次运行上传Linux候选且明确标出视觉待审阅。下载artifact后先看候选HTML、来源与环境，再依次执行三个明确场景的`accept`，基线目录使用`browser-extension/docs/uiux/visual-baselines/linux`。任一Linux manifest入库后CI自动启用完整视觉检查，另可手动require_visual强制检查；不能只接受一个场景就宣称全部通过。macOS基线放`visual-baselines/darwin`，本地full显式传`--baseline-dir`。CI/操作系统升级导致环境不兼容时重新审阅，不放宽阈值。
 
 CI任务需在远端实际运行后才能认定CI通过；分支保护/必需检查设置由仓库维护者配置。该实施不自动推送、发布或更改远端策略。
 
@@ -35,6 +35,6 @@ CI任务需在远端实际运行后才能认定CI通过；分支保护/必需检
 
 ## 有效证据与轻量交付
 
-执行者交付最终gate路径及工具返回的`evidenceSha256`。监工以`evidence --report FILE --sha256 DIGEST`核验来源、环境、完整覆盖、附件和限制后复用同一份有效浏览器结果，再按风险独立补验；不能仅根据passed或重新计算待审摘要认定可信。证据仅本机24小时内有效，检查范围与失效条件见[工具索引](../../../agent-tool/README.md#开发反馈最终证据与耗时)。产品和工具自测分别提供结果，不从浏览器回执推断通过；视觉待审阅始终保留。
+执行者交付最终gate路径及工具返回的`evidenceSha256`。监工以`evidence --report FILE --sha256 DIGEST`核验来源（test-run生成的coverage报告使用`REFRAME_TEST_COVERAGE=1 node agent-tool/ui.mjs evidence --report FILE --sha256 DIGEST`，普通构建不加该环境变量）、环境、完整覆盖、附件和限制后复用同一份有效浏览器结果，再按风险独立补验；不能仅根据passed或重新计算待审摘要认定可信。证据仅本机24小时内有效，检查范围与失效条件见[工具索引](../../../agent-tool/README.md#开发反馈最终证据与耗时)。产品和工具自测分别提供结果，不从浏览器回执推断通过；视觉待审阅始终保留。
 
 共享验证窗口由工具锁及团队协调共同保护；直接npm构建不受锁控制。源码、fixture、检查器、产物或环境变化必须重新判定，不能为了减少重跑绕过指纹。日志只记录本轮变化、报告路径/可信摘要、未覆盖项、复核结论及耗时；阶段等待和重跑原因单列，无实测值写未知。小改动优先复用已有断言/场景，只有已有检查无法捕获风险时才扩充工具；不得删除必要断言、隐藏skip、放宽视觉阈值或自动接受基线提速。

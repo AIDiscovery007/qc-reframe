@@ -1,6 +1,11 @@
 import { defineConfig } from "wxt";
 
+if (process.env.REFRAME_TEST_COVERAGE === "1" && process.argv.includes("zip")) {
+  throw new Error("Coverage source maps must not enter release ZIPs; unset REFRAME_TEST_COVERAGE.");
+}
+
 export default defineConfig({
+  vite: () => ({ build: { sourcemap: process.env.REFRAME_TEST_COVERAGE === "1" ? "hidden" : false } }),
   modules: ["@wxt-dev/module-react"],
   manifest: {
     name: "QC-Reframe · 图片风格逆向",

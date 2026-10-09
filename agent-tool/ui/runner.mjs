@@ -24,9 +24,11 @@ async function startPreview(directory, children) {
   const asset = join(directory, 'synthetic.png');
   await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><rect width="600" height="800" fill="#efe9de"/><circle cx="300" cy="320" r="150" fill="#569399"/><path d="M100 650H500V700H100Z" fill="#bd6c50"/></svg>')).png().toFile(asset);
   const child = spawn(process.execPath, [resolve(root, 'agent-tool/preview.mjs')], {
-    cwd: root, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: root, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     env: { ...process.env, PREVIEW_PORT: '0', PREVIEW_INPUT_IMAGE: asset, PREVIEW_RESULT_IMAGE: asset },
   });
+  const receipts = [];
+  child.on('message', message => { if (message.type === 'script-receipt') receipts.push(message); });
   children.add(child);
   const url = await new Promise((resolvePromise, reject) => {
     let output = '';
@@ -40,7 +42,7 @@ async function startPreview(directory, children) {
     child.once('error', error => { clearTimeout(timeout); reject(error); });
     child.once('exit', code => { clearTimeout(timeout); reject(new Error(`预览退出 (${code}): ${output}`)); });
   });
-  return { child, url };
+  return { child, url, receipts };
 }
 
 async function ready(page, scenario) {
@@ -81,7 +83,8 @@ async function ready(page, scenario) {
 
 export function verify(options = {}) { return validationWindow('verify', () => runVerify(options)); }
 
-async function runVerify({ scenario: id, scenarioIds, build = true, fault, inspect = false, reason = 'development', progress = () => {} } = {}) {
+async function runVerify({ coverage = false, scenario: id, scenarioIds, build = true, fault, inspect = false, reason = 'development', progress = () => {} } = {}) {
+  if (coverage && process.env.REFRAME_TEST_COVERAGE !== '1') throw new Error('Browser coverage requires REFRAME_TEST_COVERAGE=1 and a matching coverage build');
   if (id && !scenarios.some(scenario => scenario.id === id)) throw new Error(`未知场景 ${id}`);
   if (fault && !faults[fault]) throw new Error(`未知故障 ${fault}`);
   if (fault && id && id !== faults[fault].scenario) throw new Error(`故障 ${fault} 只能用于 ${faults[fault].scenario}`);
@@ -122,6 +125,7 @@ async function runVerify({ scenario: id, scenarioIds, build = true, fault, inspe
       await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
       const page = await context.newPage();
       page.setDefaultTimeout(15000);
+      if (coverage) await page.coverage.startJSCoverage({ resetOnNavigation: false, reportAnonymousScripts: true });
       // Behavior fixtures use Date.now for IDs/timeouts; preserve their real clock.
       if (!scenario.regression) await page.clock.setFixedTime(new Date('2026-10-07T00:00:00Z'));
       const item = { id: scenario.id, surface: scenario.surface, viewport: scenario.viewport, path: scenario.path, checks: [], diagnostics: [], errors: [], evidence: {}, reproduction: `node agent-tool/ui.mjs ${inspect ? 'inspect' : 'verify'} --scenario ${scenario.id}${fault ? ' --fault ' + fault : ''}` };
@@ -171,6 +175,10 @@ async function runVerify({ scenario: id, scenarioIds, build = true, fault, inspe
         await context.tracing.stop({ path: trace });
         item.evidence.trace = trace;
       } else await context.tracing.stop();
+      if (coverage) {
+        const { mapBrowserCoverage } = await import('../test-impact.mjs');
+        item.execution = await mapBrowserCoverage(await page.coverage.stopJSCoverage(), { root, buildDirectory, origin: preview.url, receipts: preview.receipts });
+      }
       await context.close();
       item.durationMs = Math.round(performance.now() - scenarioStart);
       report.scenarios.push(item);

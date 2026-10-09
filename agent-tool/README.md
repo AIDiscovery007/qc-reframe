@@ -21,11 +21,37 @@
 
 `ci.mjs` 仅依赖 Node 内置模块与 Git，不需要安装扩展依赖。从仓库根目录运行，读取 `GITHUB_EVENT_NAME`、`GITHUB_EVENT_PATH`（事件 JSON）及 push 的 `GITHUB_SHA`。`classify` 输出 `docs` 或 `full`、理由、提交与路径；设置 `GITHUB_OUTPUT` / `GITHUB_STEP_SUMMARY` 时追加分类输出和摘要。`docs` 重新验证分类、执行 `git diff --check` 和仓库链接检查，失败非零退出。
 
-- 轻量白名单：根 `README.md`、`GLOSSARY.md`、`AGENTS.md`、`Contribution.md`；插件根 `README.md`、`AGENTS.md`；`browser-extension/docs/` 下的 `FEATURES.md`、`architecture.md`、`INSTALL_WITH_CODEX.md`；`.agents/roles/`、`agent-logs/`、`browser-extension/docs/releases/` 的直属 `.md` 普通非执行文件。其他路径一律完整验证，包括工具说明、UIUX规范/基线、画廊、源码、依赖与CI自身。
-- PR比较 merge-base→head 的累计差异；push比较 before→sha。改名检查两端，删除仍参与分类；空差异、未知事件、基准不可读、非普通文件或Git错误均回退完整验证，手动触发始终完整。`full` 分类表示运行原验证流水线，其中视觉层级仍由既有基线/手动参数决定。
+- 轻量白名单：根 `README.md`、`GLOSSARY.md`、`AGENTS.md`、`Contribution.md`；插件根 `README.md`、`AGENTS.md`；`browser-extension/docs/` 下的 `FEATURES.md`、`architecture.md`、`INSTALL_WITH_CODEX.md`；`.agents/roles/`、`agent-logs/`、`browser-extension/docs/releases/` 的直属 `.md` 普通非执行文件。其他路径进入统一代码验证入口，包括工具说明、UIUX规范/基线、画廊、源码、依赖与CI自身。
+- PR比较 merge-base→head 的累计差异；push比较 before→sha。改名检查两端，删除仍参与分类；空差异、未知事件、基准不可读、非普通文件或Git错误均回退代码验证，手动触发始终完整。这里的 `full` 只是“非 docs”分类；最终范围由下述 `test-run` 决定，视觉层级仍由既有基线/手动参数决定。
 - 文档检查读取提交中的文件，不读取未跟踪工作区文件作为有效目标。检查变更文档内的相对文件/目录链接及图片路径，也扫描其他白名单文档中因删除/改名新失效的入链；未修改文档原有断链不追溯阻断。支持仓库常用行内链接和引用定义、角括号及URL编码路径；忽略代码示例、协议URL、绝对机器路径及纯锚点，不联网、不验证标题锚点或完整CommonMark/HTML语法。
-- 轻量路径只执行checkout、Node准备、分类和文档检查，不恢复npm缓存、不安装依赖/Chromium、不构建、不启动UI门禁、不上传UI产物。完整路径的缓存、门禁、产品及工具测试保留；只在完整路径已准备报告目录时上传证据。
+- 轻量路径只执行checkout、Node准备、分类和文档检查，不恢复npm缓存、不安装依赖/Chromium、不构建、不启动UI门禁、不上传UI产物。代码路径保留缓存、构建、类型、静态、产品/工具与浏览器验证；已准备报告目录时上传证据。
 - 副作用：脚本启动只读Git子进程，只向stdout及显式GitHub输出文件写入；不访问账户、真实项目数据、模型或网络，不启动服务器/浏览器。`node --test agent-tool/ci.test.mjs` 在OS临时目录创建、提交、改名和删除合成Git文件，结束自动清理；无需产品构建。
+
+## 文件级选测与集中回归
+
+统一入口从仓库根运行：
+
+| 命令 | 用途与输出 |
+| --- | --- |
+| `node agent-tool/test-run.mjs plan --index /absolute/test-index.json` | 只读来源/影响分析；输出 selected、deferred、fallback，不构建、不启动测试。 |
+| `node agent-tool/test-run.mjs run --index /absolute/test-index.json --base REF --output /absolute/new-directory` | 构建一次、类型检查、核心＋关联旧测试＋新增/修改测试；索引缺失或不可靠则完整。输出 report.json、逐测试日志、各阶段与场景耗时。 |
+| `node agent-tool/test-run.mjs run --full --base REF --output /absolute/new-directory` | 完整产品/工具测试及完整 browser gate；`--visual` 额外要求已审阅平台视觉基线。完整成功且来源干净稳定才输出 test-index.json。 |
+| `node agent-tool/test-schedule.mjs plan [PR编号或0]` | 只读 GitHub main/open PR/job 状态，输出待跑和推迟原因；0代表main。 |
+| `node agent-tool/test-schedule.mjs verify-full PR编号` | 重读当前 head/base/test-merge，核验准确版本完整成功；旧SHA、失败、取消、未完成不通过。 |
+
+`test-run`（含plan）前置条件是扩展 npm 依赖和 Playwright Chromium 已安装，plan只读取二进制/字体指纹，不启动浏览器。`--no-build` 仅复用同模式有效指纹；`--base` 缺失默认 HEAD，CI 不确定基准使用空树保守检查。输出目录须独享；本地未提交源码可以完整验证，但不发布可复用提交索引。
+
+- 每个 Node 测试文件在单独进程/覆盖目录实际执行；浏览器按既有 scenario ID 独立采集，再用 hidden sourcemap 映射实际执行范围。loaded bundle 的源码集合另记为保守依赖，不冒称执行。原始 Node 覆盖在本地 evidence/node/node-N，CI artifact 省略其冗大的原始JSON，保留日志、逐项映射与报告。
+- CSS/assets、worker/background、匿名VM、readFile、重设环境/脱离的子进程无法单凭覆盖证明无影响。除5个已审阅直接导入的 Node 测试外，其他及未来新增测试默认关联全部初始可靠源码；缺map/未知浏览器执行也补保守依赖。经审阅的预览执行域不启动生产bridge，只有运行工具、全部前端/fixture、依赖等源码指纹严格匹配test-policy中已审阅摘要时，才排除task-runtime/task-records的未知page依赖；实际执行/映射到的关系始终保留。任一域内变化自动失效并恢复保守全量，维护者重新审阅导入与执行边界后才可更新摘要，不自动学习接受。第一阶段减少bridge变更的不相关浏览器场景，Node范围仍保守。
+- 预览进程经父子 IPC 为实际发出的 `/preview.js` 与六类 regression 脚本登记 URL、body SHA256 和仓库来源摘要。采集器核对 coverage.source 与当前来源后才标记 harness，并保留 operation-policy、image-order 等序列化产品依赖；产品bundle也须与磁盘实际内容一致才可使用source map；相同 URL 换内容、来源漂移、脚本文本缺失、无登记或匿名嵌套 eval 仍为 unknown。报告 attribution 保存 scriptId、内容摘要、分类及理由，不按 sourceURL 名称或 Playwright 前缀忽略脚本，也不宣称 anonymous 已清零。
+- 初始可靠源码仅 `generation-session.ts`、`operation-policy.ts`、`bridge/task-runtime.mjs`、`bridge/task-records.mjs`。首次完整索引只采集，两次完整采集的关联测试集合完全相等且非空才标记shadow通过；集合缩小或扩大均回退full。高频CI实际消费该标记；未知混合、改名/删除/新增源码、依赖/工具/构建变化、7天过期、跨环境、非祖先/来源不符一律full。新改测试必跑；全部工具测试、声明核心与隔离MV3检查必跑，selected不是完整回归证据。
+- 索引完整性要求 Node 0 skip/todo、全部文件和场景执行、静态/类型/gate通过、前后来源一致。沿用现有gate的3项精确能力声明（两项只读图旋转不适用、原生picker能力缺口），逐项保留场景/规则/原因且场景固定核心；任何新增skip或整场景缺失都拒绝索引。full与selected共用浏览器场景、必需断言、三项例外及扩展16项检查/隔离/来源校验；selected按准确应跑集合验证，缺场景、失败断言或未声明skip均失败。报告保留skippedChecks的原始actual与原因；skipped计整场景跳过，不能掩盖断言跳过。完整指已登记可运行覆盖，不代表原生picker、真实模型或人工视觉验收通过。
+- `REFRAME_TEST_COVERAGE=1` 仅测试构建生成隐藏map，参与构建/证据指纹；普通构建与coverage构建不能混用，coverage模式禁止zip。测试不修改生产业务，不访问真实模型/账户/项目；启动本机合成预览、隔离浏览器及临时测试子进程，写构建和独享临时证据。SIGINT/SIGTERM终止当前进程并使结果失败；强杀可能留下临时目录，不能据残留文件认定成功。
+- `test-full.yml` 每小时第17分钟检查main和所有开放PR，固定SHA与merge双亲，只读worker执行。同一控制规则/准确SHA只认最新执行：先归并同run的最高attempt，再按attempt实际开始时间比较不同run；最新成功或在跑则推迟，失败/取消重试，旧成功不能覆盖新状态。attempt未结束时所有目标均不得提前验收；结束后各目标按自身job状态与结论判定，其他目标失败不否定成功目标。调度、验收、baseline与文档比较共用此判定；时间或记录有歧义则明确失败。手动dispatch可提前完整执行；纯说明变化仅在无该目标准确执行记录时走轻量，已有失败/取消须重试，在跑须等待，不能被docs分支覆盖。完整分页枚举run元数据，再对活跃或最近7天更新/开始的run读取指定attempt及jobs，避免按创建日期遗漏旧run近期重跑；时序来自[GitHub attempt API](https://docs.github.com/en/rest/actions/workflow-runs#get-a-workflow-run-attempt)，不假定API返回顺序。API/分页失败明确失败，不是空计划成功。调度存在GitHub排队延迟，未宣称精确整点SLA。
+- fork保留普通原生pull_request CI及GitHub审批，但其可修改的工作流/工具所生成的成功job和artifact不构成可信完整验收。主线调度不执行fork代码，明确defer为`fork-independent-trusted-verification-required`；`verify-full`对fork一律失败，必须由维护者另行独立可信验收。同仓PR仍核对受信任调度的准确被测SHA，不能用schedule控制提交替代。该CLI不设置远端分支保护，也不代替独立review。
+- 调度/证据CLI需要 `gh` 登录及 `GITHUB_REPOSITORY=owner/repo DEFAULT_BRANCH=main`，使用GitHub只读API；baseline子命令仅从每个SHA最新执行仍成功的可信main记录下载artifact到指定临时文件；同SHA后续失败/取消/在跑会淘汰旧index，网络失败则full。artifact名称绑定成功run_attempt，重复项取当前attempt最新ID，旧失败attempt不串入。选测环境指纹核对实际Chromium/headless二进制、驱动、字体及配置文件内容和LANG/TZ等变量；字体以有序来源目录与相对文件名、内容摘要标识，跟随符号链接，不依赖安装根路径或mtime，真实内容变化仍失效回退full。本机evidence门禁继续使用原严格本机回执。它不发消息、不提交/推送/合并/发布。`verify-full` 必须使用当前可信默认分支的干净控制checkout（工具所在目录，而非调用者的PR工作目录），例如 `GITHUB_REPOSITORY=owner/repo DEFAULT_BRANCH=main node /absolute/trusted-main/agent-tool/test-schedule.mjs verify-full 12`；工具核验该checkout仍对应远端main，拒绝PR版本或脏控制器。`verify-full` 是检查时点的证据，真正合并前仍须确认head/base未推进。
+
+针对性验证：`node --test agent-tool/test-impact.test.mjs agent-tool/test-run.test.mjs agent-tool/test-schedule.test.mjs`，使用合成临时Git、真实Node覆盖及API边界fixture，不访问真实GitHub或启动产品浏览器。远端工作流须实际运行后才算CI通过。
 
 ## 界面预览
 
@@ -48,12 +74,11 @@
 | 命令 | 用途 / 输出 |
 | --- | --- |
 | `node agent-tool/ui.mjs prepare [--no-build]` | 唯一 UI 构建/指纹准备入口；默认构建，`--no-build` 只核对已有产物。单独构建不能建立 UI 证据。 |
-| `node agent-tool/ui.mjs plan --files PATH …` | 开发期建议；当前自动缩减仅支持单独的 `image-viewer.css`（6视口＋3风险），其他或混合/重复输入显式不确定并回退全量。可人工结合风险选择开发验证，不取代最终门禁。 |
 | `node agent-tool/ui.mjs evidence --report FILE --sha256 DIGEST [--reason TEXT]` | 只读核验执行者交付时的摘要、完整覆盖、附件、当前来源及同机环境；输出可复用范围与未覆盖项，不接受视觉基线。 |
 | `node agent-tool/ui.mjs context --files PATH …` | 按仓库相对路径找规则与候选场景；未知依赖回退全部；`--json` 含组件与变量。 |
 | `node agent-tool/ui.mjs check [--changed] [--base REF]` | AST 检查装载、变量、颜色及目录同步；`--changed` 比较 HEAD（或指定 ref）到当前工作区，含未跟踪文件。变量消费者仍全量检查。 |
 | `node agent-tool/ui.mjs sync [--check]` | 从 catalog 与实际 CSS 生成索引；`--check` 只比较、不修改。 |
-| `node agent-tool/ui.mjs verify [--scenario ID \| --scenarios ID …] [--no-build] [--reason TEXT]` | 默认构建并检查全部登记场景；显式列表仅为开发反馈，报告标注覆盖；`--no-build` 验证源码/产物指纹后复用构建。 |
+| `node agent-tool/ui.mjs verify [--scenario ID \| --scenarios ID …] [--no-build] [--reason TEXT]` | 默认构建并检查全部登记场景；显式列表提供定向反馈，报告标注覆盖；CI选测由 `test-run` 统一决定；`--no-build` 验证源码/产物指纹后复用构建。 |
 | `node agent-tool/ui.mjs inspect --scenario ID [--no-build]` | 同一采样器，额外保留成功场景的祖先测量与 trace。 |
 
 所有命令支持 `--json`，浏览器进度写 stderr。退出码0表示已登记检查通过（允许警告），1表示失败，2表示参数错误。`verify --fault canvas-padding|quick-height|image-offset --no-build` 注入已知错误，**预期退出1**，不改产品文件；默认自动选择该故障的适用场景。
@@ -72,7 +97,6 @@
 
 ```sh
 node agent-tool/ui.mjs prepare
-node agent-tool/ui.mjs plan --files browser-extension/entrypoints/popup/image-viewer.css
 # 按 plan 建议显式选择；独立复核关键键盘、失败恢复与共享消费者后再定稿
 node agent-tool/ui.mjs verify --scenarios example-image-viewer-portrait end-to-end-keyboard-popup-failure --no-build --reason development-risk-review
 node agent-tool/ui.mjs gate --tier browser --no-build --reason final-validation --json
@@ -105,7 +129,7 @@ node agent-tool/ui.mjs evidence --report /absolute/gate.json --sha256 DIGEST --r
 
 新命令沿用exit0成功、exit1失败/未覆盖、exit2参数错误。候选生成成功表示材料可审阅，不代表视觉验收通过；`gate browser`也不包含视觉批准。OS临时目录统一保存报告，CI设置TMPDIR后归档，扩展profile正常清理但证据保留。
 
-[GitHub workflow](../.github/workflows/uiux.yml)在PR及main/master push保留同一个 `UIUX infrastructure / uiux` 检查，先按下述明确白名单分流。纯说明文档只做轻量检查；其他改动和手动触发仍运行完整验证流水线。完整流水线在初始Linux基线缺失时明确列出待审阅并上传候选；指定workflow_dispatch的require_visual或存在Linux基线manifest后运行视觉full层级，缺少任一核心场景即失败。仓库分支保护须由维护者将此job设为必需检查；本地文件存在不能证明远端CI执行或分支保护已启用。Mac与Linux基线分目录，不能互相冒用。
+[GitHub workflow](../.github/workflows/uiux.yml)在PR及main/master push保留同一个 `UIUX infrastructure / uiux` 检查，先按文档白名单分流。纯说明文档只做轻量检查；其他改动进入上方统一分级入口的选测/保守回退，手动及fork运行完整回归。完整流水线在初始Linux基线缺失时明确列出待审阅并上传候选；指定workflow_dispatch的require_visual或存在Linux基线manifest后运行视觉full层级，缺少任一核心场景即失败。仓库分支保护须由维护者将此job设为必需检查；本地文件存在不能证明远端CI执行或分支保护已启用。Mac与Linux基线分目录，不能互相冒用。
 
 详细设计变更、到期例外与首次基线流程见[维护指南](../browser-extension/docs/uiux/maintenance.md)。
 
@@ -128,3 +152,5 @@ npm --prefix browser-extension test
 聚焦验证：`node --test browser-extension/tests/agent-tool.test.mjs browser-extension/tests/preview-contract.test.mjs`。覆盖两个调用目录、预览静态资源与生产消息契约、参数拒绝、临时索引清理以及隔离 CLI 的协议/进程回收。
 
 新增或迁移工具须同步本索引、调用入口与必要行为验证，记录依赖、输入输出、副作用和适用边界。安装/服务管理 `browser-extension/scripts/manage.mjs` 与构建图标 `browser-extension/scripts/icons.mjs` 属于产品运行/构建链，保留原位。
+
+coverage报告复核须显式沿用模式：`REFRAME_TEST_COVERAGE=1 node agent-tool/ui.mjs evidence --report /absolute/gate.json --sha256 TRUSTED_DIGEST`。普通命令按normal模式检查，不会自动信任报告切换模式；模式不符应失败。
