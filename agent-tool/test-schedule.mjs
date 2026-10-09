@@ -115,7 +115,7 @@ export async function fullJobs(api) {
     if (attempt.id !== run.id || attempt.run_attempt !== run.run_attempt || !Number.isFinite(Date.parse(attempt.run_started_at))) throw Error('Incomplete run attempt identity/time');
     for (const job of await api.list(`actions/runs/${run.id}/attempts/${run.run_attempt}/jobs?per_page=100`, 'jobs')) {
       jobs.push({ ...job, status: attempt.status === 'completed' ? job.status : attempt.status,
-        conclusion: attempt.status !== 'completed' ? null : attempt.conclusion !== 'success' ? attempt.conclusion : job.conclusion,
+        conclusion: attempt.status === 'completed' ? job.conclusion : null,
         runId: run.id, runAttempt: run.run_attempt, runStartedAt: attempt.run_started_at,
         main: job.name.split('/')[3] === 'main', testedSha: job.name.split('/').at(-1), controllerSha: run.head_sha });
     }

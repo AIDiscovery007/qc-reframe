@@ -199,6 +199,36 @@ test('user（维护者）旧run近期重跑不会被创建日期过滤，未结�
   } finally { if(original===undefined)delete process.env.DEFAULT_BRANCH;else process.env.DEFAULT_BRANCH=original; }
 });
 
+test('user（维护者）已结束matrix只重试失败目标，未结束attempt不能提前验收成功目标', async t => {
+  const { fullJobs, requireFull, latestSuccessfulMain } = await import('./test-schedule.mjs');
+  const original = process.env.DEFAULT_BRANCH; process.env.DEFAULT_BRANCH = 'main';
+  try {
+    for (const status of ['completed', 'in_progress']) await t.test(status, async () => {
+      // Given one matrix attempt with successful main/PR2 workers and a failed PR1 worker.
+      const run = { id: 9877, run_attempt: 2, event: 'schedule', head_branch: 'main', head_sha: 'control', status, conclusion: status === 'completed' ? 'failure' : null, run_started_at: new Date().toISOString() };
+      const targets = [target('main'), target('merge1', { number: 1 }), target('merge2', { number: 2 })];
+      const workers = targets.map(item => ({ name: `full/v1/policy/${item.number ? `pr${item.number}` : 'main'}/${item.sha}`, status: 'completed', conclusion: item.number === 1 ? 'failure' : 'success' }));
+      const api = {
+        get: async path => { assert.equal(path, 'actions/runs/9877/attempts/2'); return run; },
+        list: async path => {
+          if (path === 'actions/workflows/test-full.yml/runs?per_page=100') return [run];
+          assert.equal(path, 'actions/runs/9877/attempts/2/jobs?per_page=100'); return workers;
+        },
+      };
+      // When actual API mapping feeds scheduling, baseline selection and full acceptance.
+      const jobs = await fullJobs(api), plan = planSchedule({ targets, jobs, controller: 'policy' });
+      // Then completed targets keep their own outcomes; an unfinished attempt accepts none.
+      assert.deepEqual(plan.include.map(item => item.sha), status === 'completed' ? ['merge1'] : []);
+      assert.deepEqual(plan.deferred.map(item => item.reason), status === 'completed' ? ['success', 'success'] : ['running', 'running', 'running']);
+      assert.equal(latestSuccessfulMain(jobs)?.testedSha, status === 'completed' ? 'main' : undefined);
+      for (const item of targets) {
+        if (status === 'completed' && item.number !== 1) assert.equal(requireFull({ target: item, jobs, controller: 'policy' }).status, 'passed');
+        else assert.throws(() => requireFull({ target: item, jobs, controller: 'policy' }), /lacks successful full evidence/);
+      }
+    });
+  } finally { if (original === undefined) delete process.env.DEFAULT_BRANCH; else process.env.DEFAULT_BRANCH = original; }
+});
+
 test('user（维护者）main被后续失败否定后不能借旧成功跳过源码或下载旧索引', async () => {
   // Given the current main SHA has an old success followed by failure.
   const {discoverTargets,latestSuccessfulMain}=await import('./test-schedule.mjs');
