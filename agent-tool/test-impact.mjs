@@ -72,7 +72,7 @@ export async function publishIndex({ output, commit, environment, before, after,
     for (const source of reliable) {
       const old = previous.tests.filter(item => [...item.executed, ...item.dependencies].includes(source)).map(item => item.id);
       const current = tests.filter(item => [...item.executed, ...item.dependencies].includes(source)).map(item => item.id);
-      if (old.length && current.length && current.every(id => old.includes(id))) shadow.push(source);
+      if (old.length && current.length === old.length && current.every(id => old.includes(id))) shadow.push(source);
     }
   }
   const index = { schema: 1, status: 'passed', complete: true, createdAt: new Date().toISOString(), commit, environment, files: after, shadow, tests, boundaries: ['file/scenario granularity, not individual assertions', 'page coverage excludes service workers/background', 'anonymous VM, file reads, detached or env-reset subprocesses need conservative dependencies', 'CSS/assets and unknown source paths require full'] };

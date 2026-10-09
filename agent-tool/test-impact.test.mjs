@@ -86,6 +86,34 @@ test('user（开发者）只有成功完整且来源稳定的采集可以刷新�
   }
 });
 
+test('user（开发者）关联测试集合缩小或扩大时回退全量，只有完全相等才启用shadow', async t => {
+  const { publishIndex, selectTests } = await import('./test-impact.mjs');
+  const f = await fixture(t);
+  const ids = ['a.test.mjs', 'b.test.mjs', 'other.test.mjs'];
+  const records = linked => ids.map(id => ({ id, status: 'passed', skipped: 0, todo: 0, executed: linked.includes(id) ? ['known.mjs'] : [], dependencies: [] }));
+  const input = { output: join(f.root, 'index.json'), commit: 'abc', environment: 'fixture', before: { 'known.mjs': 'hash' }, after: { 'known.mjs': 'hash' }, expected: ids, validations: { static: true, types: true, gate: true }, reliable: ['known.mjs'] };
+  for (const [name, before, after, stable] of [
+    ['shrink', ids.slice(0, 2), ids.slice(0, 1), false],
+    ['expand', ids.slice(0, 1), ids.slice(0, 2), false],
+    ['equal', ids.slice(0, 2), ids.slice(0, 2), true],
+    ['empty', [], [], false],
+  ]) {
+    await t.test(name, async () => {
+      // Given two complete successful collections with the same test inventory.
+      const previous = await publishIndex({ ...input, tests: records(before) });
+      // When the source's associations change, or remain equal despite record ordering.
+      const index = await publishIndex({ ...input, previous, tests: records(after).reverse() });
+      const selection = selectTests({ index, environment: 'fixture', changes: [{ status: 'M', file: 'known.mjs' }], tests: ids, core: [], reliable: ['known.mjs'] });
+      // Then changed or empty mappings cannot defer tests on a later source edit.
+      assert.deepEqual(index.shadow, stable ? ['known.mjs'] : []);
+      assert.equal(selection.mode, stable ? 'selected' : 'full');
+      assert.deepEqual(selection.selected, stable ? after : ids);
+      assert.deepEqual(selection.deferred, stable ? ['other.test.mjs'] : []);
+      if (!stable) assert.equal(selection.fallback, 'unknown-or-unvalidated:known.mjs');
+    });
+  }
+});
+
 test('user（开发者）将browser执行范围映射回源码，缺map明确为未知', async t => {
   // Given one bundle with two source lines, only the first executed.
   const { mapBrowserCoverage } = await import('./test-impact.mjs');
