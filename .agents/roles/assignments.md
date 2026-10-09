@@ -7,4 +7,3 @@
 | [supervisor](supervisor.md) | [接任 Reframe 监工与持续迭代](codex://threads/01a11b7f-8b8e-7742-9d46-d4b80b6f604c) | 分工、复核、冲突整合及授权提交发布。 | 本机 `agent-logs/01a11b7f-8b8e-7742-9d46-d4b80b6f604c.md`；执行任务复核结论记入对应执行者日志。 |
 | [project-manager](project-manager.md) | [项目管理](codex://threads/01a0ff95-4f2e-77b3-af99-550a20b63407) | 协作准则、任职索引与阶段收尾。 | 本机 `agent-logs/01a0ff95-4f2e-77b3-af99-550a20b63407.md`；阶段收尾记入对应任务日志。 |
 | [uiux-engineer](uiux-engineer.md) | [梳理 Reframe UIUX 规范与工具](codex://threads/01a11556-7e12-7440-b956-f968b3a00034) | UIUX 规范、设计一致性与诊断工具实现维护。 | 本机 `agent-logs/01a11556-7e12-7440-b956-f968b3a00034.md` |
-| [executor](executor.md) | [批量启动项目探索](codex://threads/01a11fd2-e740-7a60-9c62-56e4945df453) | 批量完整复刻的方案、实现与验证。 | 本机 `agent-logs/01a11fd2-e740-7a60-9c62-56e4945df453.md` |
