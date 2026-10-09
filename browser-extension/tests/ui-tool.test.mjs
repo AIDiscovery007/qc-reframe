@@ -120,14 +120,16 @@ test('fingerprints are location-independent and detect same-size edits, renames 
   assert.notEqual(await fingerprint(first), renamed);
 });
 
-test('fixture fingerprint covers preview dependencies independently of product builds', async t => {
+test('user（开发者）预览与采集依赖变化会更新fixture指纹', async t => {
   const directory = await temporary(t);
-  const files = ['agent-tool/ui.mjs', 'agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs',
+  // Given an isolated copy of every declared preview/coverage dependency.
+  const files = ['agent-tool/test-impact.mjs', 'agent-tool/test-policy.mjs', 'agent-tool/test-run.mjs', 'agent-tool/ui.mjs', 'agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs',
     'browser-extension/bridge/image-order.mjs', 'browser-extension/tests/example.browser.js', 'browser-extension/docs/gallery/example/result.png'];
   for (const file of files) {
     await mkdir(join(directory, file, '..'), { recursive: true });
     await writeFile(join(directory, file), 'original');
   }
+  // When each dependency changes, then the fingerprint changes independently of product builds.
   const original = await fixtureState(directory);
   assert.deepEqual(original.files, [...files].sort());
   for (const file of files) {

@@ -1,4 +1,4 @@
-import { readFile, readdir, lstat } from 'node:fs/promises';
+import { readFile, readdir, lstat, realpath } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { release, homedir } from 'node:os';
@@ -14,6 +14,28 @@ export async function fileDigest(path) {
   return hash.digest('hex');
 }
 
+const fontDirectories = () => process.platform === 'darwin' ? ['/System/Library/Fonts', '/Library/Fonts', join(homedir(), 'Library/Fonts')] : ['/usr/share/fonts', '/usr/local/share/fonts', '/etc/fonts', join(homedir(), '.fonts'), join(homedir(), '.local/share/fonts'), join(homedir(), '.config/fontconfig')];
+
+// Portable selection identity: retain ordered roots and relative filenames, hash
+// actual font/config bytes (including symlink targets), never installation mtimes.
+export async function fontContentInventory(directories = fontDirectories()) {
+  const hash = createHash('sha256');
+  async function visit(path, name, ancestors = new Set()) {
+    const info = await lstat(path).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    hash.update(JSON.stringify(name));
+    if (!info) { hash.update('missing'); return; }
+    const actual = await realpath(path);
+    if (ancestors.has(actual)) throw Error('Cyclic font directory: ' + path);
+    if (info.isSymbolicLink()) { await visit(actual, name, ancestors); return; }
+    if (info.isFile()) { hash.update('file').update(await fileDigest(path)); return; }
+    if (!info.isDirectory()) throw Error('Unsupported font entry: ' + path);
+    hash.update('directory');
+    for (const file of (await readdir(path)).sort()) await visit(join(path, file), name + '/' + file, new Set([...ancestors, actual]));
+  }
+  for (const [index, directory] of directories.entries()) await visit(directory, String(index));
+  return hash.digest('hex');
+}
+
 async function fontInventory() {
   const hash = createHash('sha256');
   async function visit(path) {
@@ -21,8 +43,7 @@ async function fontInventory() {
     hash.update(path).update(info ? `${info.size}:${info.mtimeMs}` : 'missing');
     if (info?.isDirectory()) for (const name of (await readdir(path)).sort()) await visit(join(path, name));
   }
-  const directories = process.platform === 'darwin' ? ['/System/Library/Fonts', '/Library/Fonts', join(homedir(), 'Library/Fonts')] : ['/usr/share/fonts', '/usr/local/share/fonts', '/etc/fonts', join(homedir(), '.fonts'), join(homedir(), '.local/share/fonts'), join(homedir(), '.config/fontconfig')];
-  for (const directory of directories) await visit(directory);
+  for (const directory of fontDirectories()) await visit(directory);
   return hash.digest('hex');
 }
 
@@ -37,7 +58,7 @@ export async function evidenceState() {
   };
 }
 
-export async function evidenceEnvironment() {
+export async function evidenceEnvironment({ portableFonts = false } = {}) {
   const { chromium } = requireExtension('playwright');
   // Pinned Playwright exposes its registry through coreBundle; fail closed if that contract changes.
   const { registry } = requireExtension('playwright-core/lib/coreBundle');
@@ -46,7 +67,7 @@ export async function evidenceEnvironment() {
     platform: process.platform, arch: process.arch, osRelease: release(), node: process.version,
     playwright: requireExtension('playwright/package.json').version,
     chromium: await fileDigest(chromium.executablePath()), headlessShell: await fileDigest(headlessShell),
-    browserDriver: await fileDigest(requireExtension.resolve('playwright-core/lib/coreBundle')), fonts: await fontInventory(),
+    browserDriver: await fileDigest(requireExtension.resolve('playwright-core/lib/coreBundle')), fonts: await (portableFonts ? fontContentInventory() : fontInventory()),
     variables: Object.fromEntries(['LANG', 'LC_ALL', 'TZ', 'FONTCONFIG_FILE', 'FONTCONFIG_PATH', 'PLAYWRIGHT_BROWSERS_PATH'].map(key => [key, process.env[key] || ''])),
   };
 }
@@ -94,7 +115,7 @@ export function validateCoverage(report) {
       const rotationNA = ['example-image-viewer-result-short', 'example-image-viewer-result-popup'].includes(scene.id) && check.ruleId === 'UI-IMAGE-VIEWPORT' && check.target === 'rotation aspect ratio' && check.actual?.present === false;
       const nativePicker = scene.id === 'example-native-controls' && check.target === 'native select keyboard picker' && check.actual?.capability?.changed === false;
       if (check.status !== 'skipped' || !check.message || !(rotationNA || nativePicker)) throw new Error('失败或未经说明的跳过: ' + scene.id);
-      skips.push({ scenario: scene.id, target: check.target, reason: check.message });
+      skips.push({ scenario: scene.id, ruleId: check.ruleId, target: check.target, reason: check.message });
     }
   }
   const counts = { 'UI-EXTENSION-BUILD': 2, 'UI-EXTENSION-LOAD': 1, 'UI-EXTENSION-NETWORK': 2, 'UI-EXTENSION-POPUP': 2, 'UI-EXTENSION-CLOSED-SHADOW': 3, 'UI-EXTENSION-MENU': 2, 'UI-EXTENSION-FOCUS': 2, 'UI-EXTENSION-PAGE-ERROR': 1, 'UI-EXTENSION-CLEANUP': 1 };

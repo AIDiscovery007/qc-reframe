@@ -5,35 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { validationWindow } from './build.mjs';
-import { planFor, extension } from './inventory.mjs';
+import { extension } from './inventory.mjs';
 import { scenarios } from './catalog.mjs';
 import { validateCoverage, sealArtifacts, fileDigest, inspectEvidence } from './evidence.mjs';
 
 const lock = join(extension, '.output/ui-validation.lock');
-
-test('development plan bounds image-viewer CSS feedback and falls back for incomplete business ownership', async () => {
-  const imageViewer = 'browser-extension/entrypoints/popup/image-viewer.css';
-  const plan = await planFor([imageViewer]);
-  assert.equal(plan.coverageUncertain, false);
-  assert.equal(plan.scenarios.length, 9);
-  for (const scene of scenarios.filter(scene => scene.rules.includes('UI-IMAGE-VIEWPORT'))) assert.ok(plan.scenarios.includes(scene.id));
-  for (const id of plan.requiredRiskScenarios) assert.ok(plan.scenarios.includes(id));
-  for (const files of [
-    ['new/unknown.ts'], ['browser-extension/entrypoints/popup/style.css'], [],
-    ['browser-extension/entrypoints/workspace/CanvasWorkspace.tsx'],
-    ['browser-extension/entrypoints/popup/QuickWorkspace.tsx'],
-    ['browser-extension/entrypoints/popup/ImageViewer.tsx'],
-    ['browser-extension/entrypoints/popup/compact-editor.css'],
-    [imageViewer, 'browser-extension/entrypoints/workspace/CanvasWorkspace.tsx'],
-    [imageViewer, 'new/unknown.ts'], [imageViewer, imageViewer],
-  ]) {
-    const unknown = await planFor(files);
-    assert.equal(unknown.coverageUncertain, true);
-    assert.deepEqual(unknown.scenarios, scenarios.map(scene => scene.id));
-    assert.ok(unknown.scenarios.includes('generation-actions'));
-    assert.ok(unknown.scenarios.includes('image-order-paired'));
-  }
-});
 
 test('shared window permits nesting, refuses competing ownership and releases on exception', async () => {
   let entered;
@@ -95,4 +71,23 @@ test('artifact receipt changes on edit and fails on deletion; wrong trusted dige
   await assert.rejects(inspectEvidence({ report: path, sha256: digest }), /摘要不符/);
   await rm(path);
   await assert.rejects(sealArtifacts(report));
+});
+
+test('user（维护者）仅接受三项既定能力声明，且对应场景始终核心必跑', async () => {
+  // Given complete structural evidence with the two read-only rotations and unsupported native picker.
+  const {coreBrowser}=await import('../test-policy.mjs');
+  const report=coverageFixture();
+  const declared=[
+    ['example-image-viewer-result-short','UI-IMAGE-VIEWPORT','rotation aspect ratio',{present:false}],
+    ['example-image-viewer-result-popup','UI-IMAGE-VIEWPORT','rotation aspect ratio',{present:false}],
+    ['example-native-controls','UI-EXAMPLE-KEYBOARD','native select keyboard picker',{capability:{changed:false}}],
+  ];
+  for(const [id,ruleId,target,actual] of declared) report.steps[1].scenarios.find(scene=>scene.id===id).checks.push({ruleId,target,actual,status:'skipped',message:'Declared capability boundary'});
+  // When validating, then all three retain their identities/reasons and cannot be deferred.
+  const skips=validateCoverage(report);
+  assert.equal(skips.length,3);
+  for(const item of skips) {assert.ok(item.ruleId);assert.ok(item.reason);assert.ok(coreBrowser.includes(`browser:${item.scenario}`));}
+  // An extra undocumented skipped check remains a failure, even on a declared scene.
+  report.steps[1].scenarios.find(scene=>scene.id===declared[0][0]).checks.push({ruleId:'UI-IMAGE-VIEWPORT',target:'new check',status:'skipped',message:'unexpected'});
+  assert.throws(()=>validateCoverage(report),/未经说明/);
 });

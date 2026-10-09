@@ -1,0 +1,125 @@
+name: Complete regression
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'PR number, 0 for main, or empty for all open targets'
+        type: string
+        default: ''
+      require_visual:
+        description: Require reviewed visual baselines
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+concurrency:
+  group: reframe-full-controller
+  cancel-in-progress: false
+jobs:
+  plan:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Freeze trusted main and open PR targets
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REQUESTED_TARGET: ${{ inputs.target }}
+          ALLOW_FULL_BOOTSTRAP: '1'
+        run: node agent-tool/test-schedule.mjs plan "$REQUESTED_TARGET"
+  full:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    concurrency:
+      group: reframe-test-${{ matrix.sha }}
+      cancel-in-progress: false
+    steps:
+      - name: Trusted controller
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+      - name: Frozen same-repository target
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.sha }}
+          fetch-depth: 0
+          path: .candidate
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Verify exact checkout and merge parents
+        working-directory: .candidate
+        env:
+          TEST_TARGET: ${{ toJSON(matrix) }}
+        run: node "$GITHUB_WORKSPACE/.control/agent-tool/test-schedule.mjs" verify-target
+      - name: Retrieve trusted previous main mapping
+        working-directory: .control
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ALLOW_FULL_BOOTSTRAP: '1'
+        run: |
+          node agent-tool/test-schedule.mjs baseline "$RUNNER_TEMP/previous-index.json" || {
+            rm -f "$RUNNER_TEMP/previous-index.json"
+            echo 'Baseline unavailable; complete collection remains required.' >> "$GITHUB_STEP_SUMMARY"
+          }
+      - name: Prepare report directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/reframe-ui"
+          echo "TMPDIR=$RUNNER_TEMP/reframe-ui" >> "$GITHUB_ENV"
+      - run: npm ci
+        working-directory: .candidate/browser-extension
+      - run: npx playwright install --with-deps chromium
+        working-directory: .candidate/browser-extension
+      - name: Complete product, tool and browser regression
+        working-directory: .candidate
+        env:
+          REQUIRE_VISUAL: ${{ inputs.require_visual || false }}
+          TARGET_BASE: ${{ matrix.base }}
+        run: |
+          BASE="$TARGET_BASE"
+          if [ -z "$BASE" ]; then BASE=$(git hash-object -t tree /dev/null); fi
+          VISUAL=()
+          if [ "$REQUIRE_VISUAL" = 'true' ] || [ -n "$(find browser-extension/docs/uiux/visual-baselines/linux -name manifest.json -print -quit 2>/dev/null)" ]; then VISUAL=(--visual); fi
+          node agent-tool/test-run.mjs run --full --base "$BASE" --index "$RUNNER_TEMP/previous-index.json" --output "$TMPDIR/regression" "${VISUAL[@]}" > "$TMPDIR/result.json"
+      - name: Publish trusted main index only after complete success
+        if: success() && matrix.number == 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-index-${{ matrix.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/reframe-ui/regression/test-index.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Full evidence including failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-evidence-${{ matrix.number }}-${{ matrix.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/reframe-ui
+            !${{ runner.temp }}/reframe-ui/**/node-*/**/*.json
+          retention-days: 14

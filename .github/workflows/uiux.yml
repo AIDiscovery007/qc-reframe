@@ -11,16 +11,21 @@ on:
         default: false
 permissions:
   contents: read
+  actions: read
 jobs:
   uiux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
+    concurrency:
+      group: reframe-test-${{ github.sha }}
+      cancel-in-progress: false
     env:
       REQUIRE_VISUAL: ${{ inputs.require_visual || false }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Set up Node for classification
         uses: actions/setup-node@v6
         with:
@@ -31,7 +36,7 @@ jobs:
       - name: Check documentation diff and repository links
         if: steps.scope.outputs.mode == 'docs'
         run: node agent-tool/ci.mjs docs
-      - name: Enable existing npm cache for full validation
+      - name: Enable npm cache for code validation
         if: steps.scope.outputs.mode == 'full'
         uses: actions/setup-node@v6
         with:
@@ -50,25 +55,36 @@ jobs:
       - run: npx playwright install --with-deps chromium
         if: steps.scope.outputs.mode == 'full'
         working-directory: browser-extension
-      - name: One final browser or full gate
+      - name: Trusted controller for artifact retrieval
+        if: steps.scope.outputs.mode == 'full'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: .control
+          persist-credentials: false
+      - name: Retrieve trusted main mapping
+        working-directory: .control
+        if: steps.scope.outputs.mode == 'full'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ALLOW_FULL_BOOTSTRAP: '1'
+        run: |
+          node agent-tool/test-schedule.mjs baseline "$RUNNER_TEMP/previous-index.json" || {
+            rm -f "$RUNNER_TEMP/previous-index.json"
+            echo 'Baseline unavailable; conservative full fallback.' >> "$GITHUB_STEP_SUMMARY"
+          }
+      - name: Core, affected and new tests with conservative full fallback
         if: steps.scope.outputs.mode == 'full'
         env:
           UI_BASE: ${{ steps.scope.outputs.base }}
+          FORCE_FULL: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) }}
         run: |
-          if ! git rev-parse --verify "$UI_BASE^{commit}" >/dev/null 2>&1; then
-            UI_BASE=$(git hash-object -t tree /dev/null)
-          fi
-          echo "UI_BASE=$UI_BASE" >> "$GITHUB_ENV"
-          UI_TIER=browser
-          if [ "$REQUIRE_VISUAL" = "true" ] || [ -n "$(find browser-extension/docs/uiux/visual-baselines/linux -name manifest.json -print -quit 2>/dev/null)" ]; then
-            UI_TIER=full
-          fi
-          node agent-tool/ui.mjs gate --tier "$UI_TIER" --base "$UI_BASE" --baseline-dir browser-extension/docs/uiux/visual-baselines/linux --reason ci-final --json > "$TMPDIR/final-gate.json"
-      - run: npm run compile && npm test
-        if: steps.scope.outputs.mode == 'full'
-        working-directory: browser-extension
-      - run: node --test --test-concurrency=1 agent-tool/ci.test.mjs agent-tool/ui/*.test.mjs
-        if: steps.scope.outputs.mode == 'full'
+          if ! git rev-parse --verify "$UI_BASE^{commit}" >/dev/null 2>&1; then UI_BASE=$(git hash-object -t tree /dev/null); fi
+          EXTRA=()
+          if [ "$FORCE_FULL" = 'true' ]; then EXTRA+=(--full); fi
+          if [ "$REQUIRE_VISUAL" = 'true' ] || [ -n "$(find browser-extension/docs/uiux/visual-baselines/linux -name manifest.json -print -quit 2>/dev/null)" ]; then EXTRA+=(--visual); fi
+          node agent-tool/test-run.mjs run --base "$UI_BASE" --index "$RUNNER_TEMP/previous-index.json" --output "$TMPDIR/regression" "${EXTRA[@]}" > "$TMPDIR/result.json"
       - name: Initial visual review status
         if: ${{ steps.scope.outputs.mode == 'full' && !inputs.require_visual && hashFiles('browser-extension/docs/uiux/visual-baselines/linux/**/manifest.json') == '' }}
         run: echo 'Visual acceptance is pending human review of the uploaded Linux candidates. Browser gate does not claim pixel approval.' >> "$GITHUB_STEP_SUMMARY"
@@ -76,6 +92,8 @@ jobs:
         if: always() && steps.scope.outputs.mode == 'full' && steps.reports.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: uiux-evidence
-          path: ${{ runner.temp }}/reframe-ui
+          name: uiux-evidence-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/reframe-ui
+            !${{ runner.temp }}/reframe-ui/**/node-*/**/*.json
           retention-days: 14

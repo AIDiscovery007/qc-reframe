@@ -1,5 +1,6 @@
 // Visual QA of the built popup; this harness never invokes Codex.
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,6 +49,22 @@ const job = {
   result,
 };
 
+// Receipts travel over the parent IPC channel, never through page-controlled state.
+const regressions = Object.fromEntries(['settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
+  .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
+const previewSources = ['agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs', 'browser-extension/lib/operation-policy.ts', 'browser-extension/bridge/image-order.mjs'];
+const digest = value => createHash('sha256').update(value).digest('hex');
+const sourceHashes = process.send ? Object.fromEntries(await Promise.all([...new Set([...previewSources, ...Object.values(regressions)])]
+  .map(async file => [file, digest(await readFile(new URL('../' + file, import.meta.url)))]))) : {};
+async function sendScript(req, res, body, sources) {
+  if (process.send) await new Promise((done, reject) => process.send({ type: 'script-receipt',
+    url: new URL(req.url, `http://127.0.0.1:${server.address().port}`).href, sha256: digest(body),
+    sources: sources.map(file => ({ file, sha256: sourceHashes[file] })),
+  }, error => error ? reject(error) : done()));
+  res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+  res.end(body);
+}
+
 const server = createServer(async (req, res) => {
   try {
     if (req.headers.host !== `127.0.0.1:${server.address().port}`) {
@@ -58,34 +75,8 @@ const server = createServer(async (req, res) => {
     const path = new URL(req.url, "http://127.0.0.1").pathname;
     res.setHeader("Cache-Control", "no-store");
     if (galleryAsset(path, res)) return;
-    if (path === "/settings-recovery-regression.js") {
-      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("../browser-extension/tests/settings-recovery.browser.js", import.meta.url)));
-      return;
-    }
-    if (path === "/end-to-end-regression.js") {
-      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("../browser-extension/tests/end-to-end.browser.js", import.meta.url)));
-      return;
-    }
-    if (path === "/generation-actions-regression.js") {
-      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("../browser-extension/tests/generation-actions.browser.js", import.meta.url)));
-      return;
-    }
-    if (path === "/auto-style-regression.js") {
-      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("../browser-extension/tests/auto-style.browser.js", import.meta.url)));
-      return;
-    }
-    if (path === "/image-order-regression.js") {
-      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("../browser-extension/tests/image-order.browser.js", import.meta.url)));
-      return;
-    }
-    if (path === "/creation-context-regression.js") {
-      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("../browser-extension/tests/creation-context.browser.js", import.meta.url)));
+    if (regressions[path]) {
+      await sendScript(req, res, await readFile(new URL('../' + regressions[path], import.meta.url)), ['agent-tool/preview.mjs', regressions[path]]);
       return;
     }
     if (path === "/hover-preview") {
@@ -132,8 +123,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (path === "/preview.js") {
-      res.setHeader("Content-Type", "text/javascript; charset=utf-8");
-      res.end(`
+      await sendScript(req, res, `
         const state = new URLSearchParams(location.search).get('state') || 'result';
         const previewOptions = new URLSearchParams(location.search);
         const motion = previewOptions.get('motion');
@@ -525,7 +515,7 @@ const server = createServer(async (req, res) => {
           }
           return {error:'界面预览不会执行逆向，请在扩展中使用。'};
         }}};
-      `);
+      `, previewSources);
       return;
     }
     if (path === "/content-preview") {
