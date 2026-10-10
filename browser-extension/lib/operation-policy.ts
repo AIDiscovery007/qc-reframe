@@ -48,6 +48,7 @@ export const uiOperations: Readonly<Record<string, Operation>> = {
   "alchemy:start": connected,
   "alchemy:save-prompt": ui,
   "alchemy:generate": ui,
+  "alchemy:save-generation": ui,
   "alchemy:generation-cancel": ui,
   "alchemy:generation-reference": ui,
   "alchemy:generation-image": ui,

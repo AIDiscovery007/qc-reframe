@@ -204,11 +204,47 @@ test('user generates via Magpie without a supplier key or implicit size conversi
   assert.deepEqual(output.outputSize, { width: 2, height: 3 }); assert.deepEqual(output.bytes, png);
 });
 
-test('user cannot start unsupported Magpie references or explicit ratios', async () => {
-  // Given unverified capabilities, When input or ratio is requested, Then reject before file/network access.
-  for (const patch of [{ mode: 'style', imagePath: '/must-not-read' }, { aspectRatio: { width: 1, height: 1 } }]) {
-    await assert.rejects(runImageApi(options({ settings: { provider: 'magpie', baseUrl: 'http://localhost:3425', model: 'source/image-model' }, ...patch,
-      fetchImpl: async () => { assert.fail('unsupported request reached gateway'); },
-    })), /Magpie.*(完整复刻|默认尺寸)/);
+test('user rejects Magpie ratios and non-Magpie dimensions before file or network access', async () => {
+  // Given incompatible size options, When submitted, Then no filesystem input or network call is attempted.
+  for (const patch of [{ settings: { provider: 'magpie', baseUrl: 'http://localhost:3425', model: 'source/image' }, aspectRatio: { width: 1, height: 1 } }, { imageSize: { width: 640, height: 480 } }]) {
+    await assert.rejects(runImageApi(options({ ...patch, fetchImpl: async () => { assert.fail('invalid size reached gateway'); } })), /Magpie|尺寸/);
   }
+});
+
+for (const imageSize of [undefined, { width: 1200, height: 800 }]) test(`user sends ordered Magpie references with ${imageSize ? 'explicit pixels' : 'gateway default size'}`, async t => {
+  // Given ordered references and roles, When Magpie edits, Then all image[] parts remain ordered and size is exact or omitted.
+  const { paths, buffers } = await images(t);
+  await runImageApi(options({ settings: { provider: 'magpie', baseUrl: 'http://localhost:3425', model: 'source/image' }, mode: 'multi-reenact', imagePath: paths[0],
+    subjectImagePaths: paths.slice(1), subjects: [{ id: 'a', role: '人物', detail: '红帽' }, { id: 'b', role: '场景', detail: '树木' }], referenceIndex: 1, imageSize,
+    fetchImpl: async (url, init) => {
+      assert.equal(url, 'http://localhost:3425/v1/images/edits'); assert.equal(init.body.get('n'), '1');
+      assert.equal(init.body.get('size'), imageSize ? '1200x800' : null);
+      assert.match(init.body.get('prompt'), /图 2 为参考/); assert.match(init.body.get('prompt'), /红帽/);
+      assert.deepEqual(await Promise.all(init.body.getAll('image[]').map(async file => Buffer.from(await file.arrayBuffer()))), [buffers[1], buffers[0], buffers[2]]);
+      return result();
+    } }));
+});
+
+test('user sends explicit Magpie pixel dimensions unchanged in a text request', async () => {
+  // Given nonstandard pixel dimensions, When generating from text, Then the JSON size is WxH without ratio conversion.
+  await runImageApi(options({ settings: { provider: 'magpie', baseUrl: 'http://localhost:3425', model: 'source/image' }, imageSize: { width: 1337, height: 911 }, fetchImpl: async (url, init) => {
+    assert.equal(url, 'http://localhost:3425/v1/images/generations'); assert.equal(JSON.parse(init.body).size, '1337x911'); return result();
+  } }));
+});
+
+for (const imageSize of [null, { width: 0, height: 10 }, { width: 1.5, height: 1 }, { width: 10001, height: 1 }, { width: 10000, height: 4001 }, { width: 1, height: 1, extra: 1 }]) test('user cannot send invalid Magpie dimensions to the gateway', async () => {
+  // Given invalid pixels, When submitting, Then validation rejects before any billable request.
+  let calls = 0;
+  await assert.rejects(runImageApi(options({ settings: { provider: 'magpie', baseUrl: 'http://localhost:3425', model: 'source/image' }, imageSize,
+    fetchImpl: async () => { calls++; return result(); } })), /尺寸/);
+  assert.equal(calls, 0);
+});
+
+for (const response of [() => new Response('not found', { status: 404 }), () => new Response('unsupported', { status: 405 }), () => json({ data: [{ b64_json: Buffer.from('not image').toString('base64') }] })]) test('user sees a Magpie edit failure without silent text fallback or retry', async t => {
+  // Given an unsupported edit endpoint or non-image result, When editing, Then exactly one request fails without implicit retry.
+  const { paths } = await images(t); let calls = 0;
+  await assert.rejects(runImageApi(options({ settings: { provider: 'magpie', baseUrl: 'http://localhost:3425', model: 'source/image' }, mode: 'session', imagePath: paths[0], fetchImpl: async url => {
+    calls++; assert.equal(url, 'http://localhost:3425/v1/images/edits'); return response();
+  } })));
+  assert.equal(calls, 1);
 });

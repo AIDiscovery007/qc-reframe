@@ -44,6 +44,11 @@ export async function createTaskRecords({ dataDir, onCommit }) {
       interrupted = true;
     }
     for (const generation of job.generations || []) {
+      if (generation.resultSavePending && !generation.imageAsset) {
+        delete generation.resultSavePending;
+        Object.assign(generation, { status: "failed", stage: "图片保存中断", error: "本机服务已重启，未写入磁盘的图片无法恢复。提示词已保留；重新生成将再次请求模型。" });
+        interrupted = true;
+      }
       if (generation.status !== "running") continue;
       Object.assign(generation, { status: "failed", stage: "生图中断", error: "本机服务已重启，请重新生成图片" });
       interrupted = true;

@@ -1,3 +1,4 @@
+import { validImageSize } from '../lib/image-size.mjs';
 import { magpieBaseUrl, magpieHeaders } from './magpie.mjs';
 import { readFile, stat } from 'node:fs/promises';
 import sharp from 'sharp';
@@ -54,7 +55,7 @@ function decodeImage(data) {
   return Buffer.from(data, 'base64');
 }
 
-export async function runImageApi({ settings, mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt, aspectRatio, signal, onProgress, fetchImpl = fetch, timeoutMs = 300_000 }) {
+export async function runImageApi({ settings, mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt, aspectRatio, imageSize, signal, onProgress, fetchImpl = fetch, timeoutMs = 300_000 }) {
   const controller = new AbortController();
   const cancel = () => controller.abort();
   const timer = setTimeout(cancel, timeoutMs);
@@ -67,8 +68,8 @@ export async function runImageApi({ settings, mode, imagePath, subjectImagePath,
     if (!['openai', 'gemini', 'magpie'].includes(provider) || (!magpie && (typeof apiKey !== 'string' || !apiKey.trim())) || typeof model !== 'string' || !model.trim())
       throw failure('请先在设置中完整配置生图 API');
     const base = magpie ? magpieBaseUrl(baseUrl) : endpoint(baseUrl);
-    if (magpie && mode !== 'recreate') throw failure('Magpie 当前仅支持完整复刻的纯文生图，附图能力尚未开放');
-    if (magpie && aspectRatio !== undefined) throw failure('Magpie 当前使用网关默认尺寸，不支持指定比例');
+    if (magpie && aspectRatio !== undefined) throw failure('Magpie 使用像素尺寸，不接受宽高比例');
+    if (!validImageSize(imageSize) || (!magpie && imageSize !== undefined)) throw failure('像素尺寸仅用于 Magpie，宽高须为 1–10000 整数且总像素不超过 40000000');
     if (typeof prompt !== 'string' || !prompt.trim() || /\[SUBJECT\]/i.test(prompt)) throw failure('请先补充主体并重新逆向，再生成图片');
     if (aspectRatio && (!Number.isInteger(aspectRatio.width) || !Number.isInteger(aspectRatio.height) || aspectRatio.width < 1 || aspectRatio.height < 1 || aspectRatio.width > 10000 || aspectRatio.height > 10000))
       throw failure('生图宽高比例无效');
@@ -85,7 +86,7 @@ export async function runImageApi({ settings, mode, imagePath, subjectImagePath,
       if (subjects) text += `\n当前图片分工：${JSON.stringify(subjects.map(({ id, role, detail }, index) => ({ image: order.subjectNumbers[index], id, role, detail })))}`;
     }
     const ratio = aspectRatio ? aspectRatio.width / aspectRatio.height : 1;
-    const size = ratio > 1 ? '1536x1024' : ratio < 1 ? '1024x1536' : '1024x1024';
+    const size = magpie ? (imageSize ? `${imageSize.width}x${imageSize.height}` : undefined) : ratio > 1 ? '1536x1024' : ratio < 1 ? '1024x1536' : '1024x1024';
     const imageRatio = RATIOS.reduce((best, current) => {
       const value = entry => { const [w, h] = entry.split(':').map(Number); return Math.abs(Math.log(w / h / ratio)); };
       return value(current) < value(best) ? current : best;
@@ -103,11 +104,11 @@ export async function runImageApi({ settings, mode, imagePath, subjectImagePath,
       headers = magpie ? { ...magpieHeaders } : { Authorization: `Bearer ${apiKey}` };
       if (images.length) {
         body = new FormData();
-        body.set('model', model); body.set('prompt', text); body.set('n', '1'); body.set('size', size);
+        body.set('model', model); body.set('prompt', text); body.set('n', '1'); if (size) body.set('size', size);
         images.forEach(({ bytes, extension }, index) => body.append('image[]', new Blob([bytes], { type: `image/${extension}` }), `image-${index + 1}.${extension}`));
       } else {
         headers['Content-Type'] = 'application/json';
-        body = JSON.stringify({ model, prompt: text, n: 1, ...(magpie ? {} : { size }) });
+        body = JSON.stringify({ model, prompt: text, n: 1, ...(size ? { size } : {}) });
       }
     } else {
       url = `${base}/models/${encodeURIComponent(model.replace(/^models\//, ''))}:generateContent`;

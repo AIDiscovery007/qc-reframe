@@ -10,8 +10,76 @@ import { agentInput, parseResult } from "../bridge/agent.mjs";
 import { generationInput } from "../bridge/generation.mjs";
 import sharp from "sharp";
 
+for (const failure of ['image', 'record']) test(`user retries only local saving after generated ${failure} persistence fails`, async t => {
+  // Given completed model output, When the image or task commit fails, Then recovery saves the same result and never calls the model again.
+  const { default: fs } = await import('node:fs');
+  const { syncBuiltinESMExports } = await import('node:module');
+  const output = { bytes: await sharp({ create: { width: 2, height: 3, channels: 3, background: '#118877' } }).png().toBuffer(), extension: 'png' };
+  const pending = Promise.withResolvers();
+  let calls = 0;
+  const s = await setup(t, async () => ({ ...result, promptZh: 'a cat', promptEn: 'a cat' }), async () => { calls++; return pending.promise; });
+  const submitted = await (await s.request('/jobs', submit({ mode: 'recreate' }))).json();
+  await waitFor(s.request, submitted.id, 'completed');
+  await s.request(`/jobs/${submitted.id}/generations`, { method: 'POST', body: JSON.stringify({ language: 'en' }) });
+  const rename = fs.promises.rename;
+  let failed = false;
+  fs.promises.rename = async (source, target) => {
+    if (!failed && (failure === 'image' ? target.startsWith(join(s.dir, 'images') + '/') : target === join(s.dir, 'records', `${submitted.id}.json`))) {
+      const final = failure === 'image' || JSON.parse(await readFile(source, 'utf8')).generations?.at(-1)?.status === 'completed';
+      if (final) { failed = true; throw new Error('private storage error'); }
+    }
+    return rename(source, target);
+  };
+  syncBuiltinESMExports();
+  try {
+    pending.resolve(output);
+    const job = await waitGeneration(s.request, submitted.id, 'failed');
+    const generation = job.generations.at(-1);
+    assert.equal(generation.resultSavePending, true);
+    assert.equal((await s.request(`/jobs/${submitted.id}/generations`, { method: 'POST', body: '{"language":"en"}' })).status, 409);
+    assert.equal(calls, 1);
+    const recovered = await s.request(`/jobs/${submitted.id}/generations/${generation.id}/save`, { method: 'POST', body: '{}' });
+    assert.equal(recovered.status, 200);
+    const saved = await recovered.json();
+    assert.equal(saved.generations.length, 1);
+    assert.equal(saved.generations[0].status, 'completed');
+    assert.equal(saved.generations[0].resultSavePending, undefined);
+    const downloaded = await (await s.request(`/jobs/${submitted.id}/generations/${generation.id}/image`)).json();
+    assert.equal(downloaded.image, `data:image/png;base64,${output.bytes.toString('base64')}`);
+    assert.equal(calls, 1);
+  } finally { fs.promises.rename = rename; syncBuiltinESMExports(); pending.resolve(output); }
+});
+
 const image =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=";
+
+test('user cancellation during image persistence never publishes a late output', async t => {
+  // Given image storage in progress, When cancelled before commit, Then its late bytes do not become a displayed or recoverable result.
+  const { default: fs } = await import('node:fs');
+  const { syncBuiltinESMExports } = await import('node:module');
+  const output = { bytes: await sharp({ create: { width: 2, height: 4, channels: 3, background: '#886611' } }).png().toBuffer(), extension: 'png' };
+  const entering = Promise.withResolvers(), release = Promise.withResolvers();
+  const s = await setup(t, async () => ({ ...result, promptZh: 'a cat', promptEn: 'a cat' }), async () => output);
+  const job = await (await s.request('/jobs', submit({ mode: 'recreate' }))).json();
+  await waitFor(s.request, job.id, 'completed');
+  const rename = fs.promises.rename;
+  fs.promises.rename = async (source, target) => {
+    if (target.startsWith(join(s.dir, 'images') + '/')) { entering.resolve(); await release.promise; }
+    return rename(source, target);
+  };
+  syncBuiltinESMExports();
+  try {
+    const accepted = await (await s.request(`/jobs/${job.id}/generations`, { method: 'POST', body: '{"language":"en"}' })).json();
+    const id = accepted.generations[0].id;
+    await entering.promise;
+    assert.equal((await s.request(`/jobs/${job.id}/generations/${id}/cancel`, { method: 'POST', body: '{}' })).status, 200);
+    release.resolve();
+    const settled = await waitGeneration(s.request, job.id, 'cancelled');
+    assert.equal(settled.generations[0].imageAsset, undefined);
+    assert.equal(settled.generations[0].resultSavePending, undefined);
+    assert.equal((await s.request(`/jobs/${job.id}/generations/${id}/image`)).status, 409);
+  } finally { release.resolve(); fs.promises.rename = rename; syncBuiltinESMExports(); }
+});
 const result = {
   title: "测试",
   observations: ["观察"],

@@ -20,6 +20,7 @@
 
 | 组件 | 用法 | 源码 |
 | --- | --- | --- |
+| GenerationSizeFields | 原尺寸位置复用自动、像素预设/自定义与比例；像素和比例分别校验、分别提交。 | [browser-extension/entrypoints/popup/GenerationSizeFields.tsx](../../../browser-extension/entrypoints/popup/GenerationSizeFields.tsx) |
 | ImageGenerationSettings | 设置中的生图渠道、私有凭据及保存反馈。 | [browser-extension/entrypoints/popup/ImageGenerationSettings.tsx](../../../browser-extension/entrypoints/popup/ImageGenerationSettings.tsx) |
 | AgentCliSettings | 按管理目标读取CLI状态、安装与更新，不改变逆向Agent，迟到响应按目标隔离。 | [browser-extension/entrypoints/popup/AgentCliSettings.tsx](../../../browser-extension/entrypoints/popup/AgentCliSettings.tsx) |
 | AgentSettings | 设置中的原生 Agent 单选卡片，独立模型、失败保留与旧服务回退。 | [browser-extension/entrypoints/popup/AgentSettings.tsx](../../../browser-extension/entrypoints/popup/AgentSettings.tsx) |
@@ -35,6 +36,7 @@
 
 | ID | 表面 / 视口 | 状态 | 检查 |
 | --- | --- | --- | --- |
+| generation-readiness-popup-ready-delayed | popup 360×740 | /popup.html?state=alignment&mode=recreate&generationReadinessRegression=ready&quickDraftDelay=1000&generationDelay=60000 | generationReadinessRegression |
 | batch-toolbar-360 | workspace 360×1034 | /workspace.html?state=library&count=24 | batchToolbar |
 | batch-toolbar-650 | workspace 650×1034 | /workspace.html?state=library&count=24 | batchToolbar |
 | batch-toolbar-651 | workspace 651×1034 | /workspace.html?state=library&count=24 | batchToolbar |
@@ -108,6 +110,15 @@
 | automatic-connection-popup | popup 320×740 | /popup.html?state=empty&connectionRegression=1 | connectionRegression |
 | settings-recovery-narrow | workspace 320×740 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
 | settings-recovery | workspace 1440×1000 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
+| magpie-workflows-manual | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=manual&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-custom | workspace 360×740 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=custom&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-custom-invalid | workspace 360×740 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=custom-invalid&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-continuous | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=continuous&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-batch | workspace 1440×1000 | /workspace.html?state=library&count=4&mode=style&magpieWorkflowsRegression=batch&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-quick | popup 360×740 | /popup.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=quick&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-history | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=history&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-save-retry | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=save-retry&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-save-asset | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=save-asset&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
 | image-settings-wide | workspace 1440×1000 | /workspace.html?state=library&imageSettingsRegression=wide | imageSettingsRegression |
 | image-settings-narrow | workspace 360×740 | /workspace.html?state=library&imageSettingsRegression=narrow | imageSettingsRegression |
 | image-settings-legacy | workspace 1440×1000 | /workspace.html?state=library&imageSettingsRegression=legacy | imageSettingsRegression |

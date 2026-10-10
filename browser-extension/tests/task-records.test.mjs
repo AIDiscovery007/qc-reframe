@@ -6,6 +6,21 @@ import { join } from "node:path";
 import { createTaskRecords } from "../bridge/task-records.mjs";
 
 const jobFor = () => ({ id: "10000000-0000-0000-0000-000000000001", projectId: "project", status: "running", createdAt: "2026-01-01T00:00:00.000Z" });
+
+test('user sees which failed image saves remain recoverable after a service restart', async t => {
+  // Given one memory-only result and one stored image, When restarting, Then only the stored image offers local save recovery and neither is regenerated.
+  const dir = await directory(t), job = { ...jobFor(), status: 'completed', generations: [
+    { id: 'memory', status: 'failed', resultSavePending: true, prompt: 'unchanged' },
+    { id: 'disk', status: 'failed', resultSavePending: true, imageAsset: 'asset' },
+  ] };
+  await writeFile(join(dir, `${job.id}.json`), JSON.stringify(job));
+  const records = await createTaskRecords({ dataDir: dir, onCommit: () => {} });
+  const restored = records.jobs.get(job.id).generations;
+  assert.equal(restored[0].resultSavePending, undefined);
+  assert.match(restored[0].error, /重启.*未写入磁盘/);
+  assert.equal(restored[0].prompt, 'unchanged');
+  assert.deepEqual(restored[1], job.generations[1]);
+});
 async function directory(t) {
   const dir = await mkdtemp(join(tmpdir(), "reframe-task-records-"));
   t.after(() => rm(dir, { recursive: true, force: true }));

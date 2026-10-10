@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { creationContext, emptyCreationState, restoredQuickDraft } from '../lib/creation-context.ts';
+import { inheritedGenerationSize } from '../lib/generation-size.ts';
 import { createGenerationSession } from '../lib/generation-session.ts';
 
 const app = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
@@ -433,7 +434,7 @@ function callbackProps(source, component, names) {
 }
 
 function quickGenerationCallbacks(globals, job) {
-  const names = ['gatewayDefaultSize', 'onUpdate', 'onGenerationViewUpdate'];
+  const names = ['pixelSize', 'onUpdate', 'onGenerationViewUpdate'];
   const workspace = evaluate(`${extract(app, ['generationView', 'revealGeneratedImage'])}\nconst props = ${callbackProps(app, 'QuickWorkspace', names)};`, { magpie: false, ...globals }, ['props']).props;
   const result = evaluate(`const props = ${callbackProps(quick, 'QuickResult', names)};`, workspace, ['props']).props;
   const ast = ts.createSourceFile('QuickWorkspace.tsx', quick, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -444,17 +445,18 @@ function quickGenerationCallbacks(globals, job) {
   };
   visit(ast);
   assert.ok(options, 'QuickResult must use the shared generation session');
-  return evaluate(`const options = ${options};`, { ...result, job, lang: 'zh', subject: '', disabled: false, generation: job.generations?.at(-1) }, ['options']).options;
+  return evaluate(`const options = ${options};`, { ...result, inheritedGenerationSize, job, lang: 'zh', subject: '', disabled: false, generation: job.generations?.at(-1) }, ['options']).options;
 }
 
-test('quick Magpie submission omits historical ratios without changing history', () => {
+test('user quick Magpie submission omits historical ratios without changing history', () => {
+  // Given existing ratio history, When the user switches to Magpie, Then no ratio is sent or history mutated.
   for (const history of ['manual', 'automatic']) {
     const aspectRatio = { width: 3, height: 2 };
     const job = { id: 'job-A', mode: 'recreate', result: { promptZh: '完整提示词' },
       ...(history === 'manual' ? { generations: [{ id: 'old', aspectRatio }] } : { autoGeneration: { aspectRatio } }) };
     const before = JSON.stringify(job);
     const globals = { referenceContext: { current: {} }, selectionRevision: { current: 0 }, updateJob() {} };
-    assert.equal(quickGenerationCallbacks(globals, job).aspectRatio, aspectRatio);
+    assert.deepEqual(quickGenerationCallbacks(globals, job).aspectRatio, aspectRatio);
     assert.equal(quickGenerationCallbacks({ ...globals, magpie: true }, job).aspectRatio, undefined);
     assert.equal(JSON.stringify(job), before);
   }
@@ -499,3 +501,16 @@ for (const cancel of [false, true]) for (const navigation of ['unchanged', 'A-to
     dispose();
   });
 }
+
+
+test('user cannot change modes before restored inputs are ready and can change them without a text model afterwards', () => {
+  // Given delayed initialization, When either UI renders its mode picker, Then it is disabled until draft restoration completes.
+  for (const component of ['QuickWorkspace', 'CanvasWorkspace']) {
+    const props = callbackProps(app, component, ['modeDisabled']);
+    const read = state => evaluate(`const props = ${props};`, { savingMode: false, busy: false, draftReady: false, selectedModel: null, ...state }, ['props']).props.modeDisabled;
+    assert.equal(read({}), true);
+    // Given restored inputs without a text model, When selecting an existing mode, Then the picker remains available.
+    assert.equal(read({ draftReady: true }), false);
+    assert.equal(read({ draftReady: true, busy: true }), true);
+  }
+});

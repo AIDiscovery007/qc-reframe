@@ -1,3 +1,4 @@
+import { validImageSize } from '../lib/image-size.mjs';
 import { createBatchStore, batchActive } from "./batches.mjs";
 import { referencePosition, savedReferenceIndex } from "./image-order.mjs";
 import { createSessionStore, sessionIds } from "./sessions.mjs";
@@ -5,6 +6,7 @@ import { prepareRestart } from "./restart.mjs";
 import { createTaskFeed } from "./task-feed.mjs";
 import { createTaskRecords } from "./task-records.mjs";
 import { createTaskRuntime } from "./task-runtime.mjs";
+import { createGenerationOutputs } from "./generation-output.mjs";
 import { createServer } from "node:http";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile, lstat } from "node:fs/promises";
@@ -41,11 +43,18 @@ const bad = (message, status = 400) =>
 function validateGenerationOptions(body) {
   if (!["zh", "en"].includes(body.language)) throw bad("无效提示词语言");
   const { aspectRatio } = body;
+  if (!validImageSize(body.imageSize)) throw bad("像素尺寸宽高须为 1–10000 整数且总像素不超过 40000000");
   if (aspectRatio !== undefined && (!aspectRatio || typeof aspectRatio !== "object" || Array.isArray(aspectRatio)
     || Object.keys(aspectRatio).some(key => !["width", "height"].includes(key))
     || ![aspectRatio.width, aspectRatio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000)
     || aspectRatio.width / aspectRatio.height < 1 / 20 || aspectRatio.width / aspectRatio.height > 20))
     throw bad("宽高须为 1–10000 的整数，比例须在 1:20 至 20:1 之间");
+}
+
+function validateGenerationSize(body, settings) {
+  if (settings.imageProvider === "magpie") {
+    if (body.aspectRatio !== undefined) throw bad("Magpie 使用像素尺寸，不接受宽高比例");
+  } else if (body.imageSize !== undefined) throw bad("像素尺寸仅用于 Magpie 生图");
 }
 
 function sourceUrlFor(value) {
@@ -239,6 +248,7 @@ export async function createBridge({
   const gallery = createGalleryStore({ projects, images });
   const runtime = createTaskRuntime({ save, onProgress: job => projects.updateJob(job),
     onIdle: async () => { kickBatches(); await collectIdleImages(); }, onFailure: (settings, error) => settings?.imageProvider || settings?.codexGeneration ? Promise.resolve() : agents.modelStore(settings?.agent || "codex").invalidate(settings, error) });
+  const generationOutputs = createGenerationOutputs(images, { directory: join(dataDir, "generation-outputs"), recordsDir: paths.records });
   const codexBusy = () => runtime.busy || !!batches?.active.length || agents.busy || sessions.busy;
   let mutationTail = Promise.resolve();
   let collectionPending = false;
@@ -250,15 +260,17 @@ export async function createBridge({
     return release;
   };
   const collectIdleImages = async () => {
+    await generationOutputs.prune(jobs);
     if (!collectionPending) return;
     const release = await acquireMutation();
     try {
-      if (!runtime.count && records.canCollect) { await images.collect(batches?.assets); await thumbnails.collect(); collectionPending = false; }
+      if (!runtime.count && records.canCollect) { await images.collect([...(batches?.assets || []), ...generationOutputs.assets]); await thumbnails.collect(); collectionPending = false; }
     }
     catch (error) { console.error("回收图片失败:", error.message); }
     finally { release(); }
   };
   const startGeneration = async (job, body, { modelSettings, promptResult = job.result, automatic = false, signal } = {}) => {
+    if (job.generations?.some(item => item.resultSavePending)) throw bad("已有生成图片尚未保存，请先重试保存，避免重复请求模型。", 409);
     if (job.status !== "completed" || !job.result) throw bad("请先完成提示词逆向", 409);
     if (job.mode === "style" && !job.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
     if (!automatic && job.autoGeneration?.status === "pending") throw bad("这条提示词正在准备自动生图，请等待完成或取消", 409);
@@ -267,7 +279,7 @@ export async function createBridge({
     if (job.generations?.some((item) => item.status === "running" || runtime.has(item.id)))
       throw bad("这条提示词仍在生图，请等待完成或取消", 409);
     validateGenerationOptions(body);
-    const { aspectRatio } = body;
+    const { aspectRatio, imageSize } = body;
     if (job.mode === "recreate" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("完整复刻使用纯文生图，不接受主体图");
     if (job.mode === "session" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("会话创作不接受主体图");
     if (job.mode !== "multi-reenact" && body.subjects !== undefined) throw bad("此模式不接受多张主体图");
@@ -281,8 +293,7 @@ export async function createBridge({
       ? `\n\n用户指定的输出画面宽高比例：${aspectRatio.width}:${aspectRatio.height}（宽:高）。此比例要求优先于原提示词及参考图中的画幅要求。请调整构图和背景以适应该比例，保持主体自然比例，不拉伸或压缩主体。`
       : `\n\nUser-requested output aspect ratio: ${aspectRatio.width}:${aspectRatio.height} (width:height). This ratio takes priority over framing requirements in the original prompt and reference images. Adapt the composition and background to this ratio while preserving natural subject proportions; do not stretch or compress the subject.`;
     modelSettings ||= await generationSelection(signal);
-    if (modelSettings.imageProvider === "magpie" && (job.mode !== "recreate" || automatic || aspectRatio !== undefined))
-      throw bad("Magpie 当前仅支持完整复刻的手动文生图，尺寸使用网关默认；附图、连续生图和指定比例暂不可用。");
+    validateGenerationSize(body, modelSettings);
     const imagePath = job.mode === "recreate" ? undefined : await storedImage(job, false, true);
     const multi = job.mode === "multi-reenact";
     const decodedSubjects = multi ? decodeSubjects(body.subjects !== undefined ? body.subjects : await restoreSubjects(job.reenact?.subjects), (await images.read(job.imageAsset)).length) : undefined;
@@ -300,7 +311,7 @@ export async function createBridge({
     referencePosition(referenceIndex, subjects?.length ?? (subject ? 1 : 0));
     signal?.throwIfAborted();
     const controller = runtime.reserve(id, job.projectId);
-    const next = { id, referenceIndex, ...(modelSettings.imageProvider === "magpie" ? { sizeMode: "gateway-default" } : {}), provider: modelSettings.imageProvider || "codex", ...(modelSettings.imageProvider ? { baseUrl: modelSettings.baseUrl } : {}), model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: modelSettings.imageProvider ? "正在连接生图 API…" : "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
+    const next = { id, referenceIndex, ...(modelSettings.imageProvider === "magpie" ? { sizeMode: imageSize ? "explicit" : "gateway-default", ...(imageSize ? { imageSize: { ...imageSize } } : {}) } : {}), provider: modelSettings.imageProvider || "codex", ...(modelSettings.imageProvider ? { baseUrl: modelSettings.baseUrl } : {}), model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: modelSettings.imageProvider ? "正在连接生图 API…" : "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
     job.generations ||= [];
     job.generations.push(next);
     if (automatic) Object.assign(job.autoGeneration, { status: "started", generationId: id });
@@ -314,13 +325,18 @@ export async function createBridge({
     }
     if (signal?.aborted) { controller.abort(); Object.assign(next, { status: "cancelled", stage: "已取消" }); }
     void runtime.run(job, next, { modelSettings, completedStage: "图片已生成", failedStage: "生图失败",
+      onSaveFailure: () => { if (next.status !== "cancelled") generationOutputs.markPending(next); },
+      onSettled: () => generationOutputs.settled(next),
       execute: async ({ signal, progress }) => {
-        const output = await (modelSettings.imageProvider ? apiGenerator : generator)({ ...(modelSettings.imageProvider ? { settings: modelSettings, aspectRatio } : {}), mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt: next.negativePrompt,
+        const output = await (modelSettings.imageProvider ? apiGenerator : generator)({ ...(modelSettings.imageProvider ? { settings: modelSettings, aspectRatio, imageSize } : {}), mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt: next.negativePrompt,
           skillPath: generationSkillPath, cwd: root, signal, modelSettings, onProgress: progress });
         signal.throwIfAborted();
         if (!["png", "jpeg", "webp"].includes(output.extension)) throw new Error("生图返回了不支持的文件格式");
-        const imageAsset = await images.put(output);
-        return { extension: output.extension, imageAsset, revisedPrompt: output.revisedPrompt, ...(modelSettings.imageProvider === "magpie" ? { gatewayReportedModel: output.gatewayReportedModel, outputSize: output.outputSize } : {}) };
+        generationOutputs.remember(next, output);
+        const saved = { id: next.id, provider: next.provider };
+        try { await generationOutputs.write(saved, job.id); }
+        catch (error) { if (next.status === "running") generationOutputs.markPending(next); throw error; }
+        return saved;
       },
     });
     return job;
@@ -330,11 +346,12 @@ export async function createBridge({
     if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
     if (agents.busy) throw bad("正在验证模型，请稍候", 409);
     if (body.generation !== undefined) {
-      if (!body.generation || typeof body.generation !== "object" || Array.isArray(body.generation) || Object.keys(body.generation).some(key => !["language", "aspectRatio"].includes(key))) throw bad("无效自动生图参数");
-      if ((frozen?.generationModelSettings ? frozen.generationModelSettings.imageProvider || "codex" : imageSettings.view().provider) === "magpie") throw bad("Magpie 暂不支持连续生图，请先逆向，再手动生图。");
+      if (!body.generation || typeof body.generation !== "object" || Array.isArray(body.generation) || Object.keys(body.generation).some(key => !["language", "aspectRatio", "imageSize"].includes(key))) throw bad("无效自动生图参数");
       validateGenerationOptions(body.generation);
       if (body.mode === "style" && !body.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
       generationModelSettings = frozen?.generationModelSettings || await generationSelection(signal);
+      validateGenerationSize(body.generation, generationModelSettings);
+      body = { ...body, generation: structuredClone(body.generation) };
       await checkGeneration(generationModelSettings, signal);
     }
     if (!["style", "recreate", "reenact", "multi-reenact", "session"].includes(body.mode)) throw bad("无效逆向模式");
@@ -427,7 +444,7 @@ export async function createBridge({
       capture: body.capture === "screenshot" ? "screenshot" : "original",
       ...(instruction !== undefined ? { instruction } : {}),
       ...(reenact ? { reenact } : {}),
-      ...(body.generation ? { autoGeneration: { ...body.generation, status: "pending" } } : {}),
+      ...(body.generation ? { autoGeneration: { ...body.generation, provider: generationModelSettings.imageProvider || "codex", status: "pending" } } : {}),
       ...(selectedSessions ? { sessionContext: { sources: selectedSessions } } : {}),
     };
     try {
@@ -492,7 +509,7 @@ export async function createBridge({
     return { ...item, stage: generation?.stage || (job.status === 'completed' && job.autoGeneration?.status === 'pending' ? '正在准备自动生图…' : job.stage), ...(generation ? { generationId: generation.id } : {}) };
   });
   const publicBatch = (batch, visible = () => true) => ({ id: batch.id, createdAt: batch.createdAt, language: batch.language,
-    ...(batch.aspectRatio ? { aspectRatio: batch.aspectRatio } : {}), agent: batch.modelSettings.agent || "codex", model: batch.modelSettings.model,
+    ...(batch.aspectRatio ? { aspectRatio: batch.aspectRatio } : {}), ...(batch.imageSize ? { imageSize: batch.imageSize } : {}), provider: batch.generationModelSettings?.imageProvider || "codex", agent: batch.modelSettings.agent || "codex", model: batch.modelSettings.model,
     items: batchItems(batch).filter(item => visible(item.projectId)) });
   const validateBatchProjects = body => {
     if (!Array.isArray(body.projects) || !body.projects.length || body.projects.length > 100 || body.projects.some(item =>
@@ -532,15 +549,15 @@ export async function createBridge({
           const next = structuredClone(batch);
           let changed = false;
           for (const item of next.items) {
-            if (item.status !== 'running') continue;
             const job = jobs.get(item.jobId);
+            const generation = job?.generations?.find(value => value.id === job.autoGeneration?.generationId);
+            if (item.status !== 'running' && !(item.status === 'failed' && generation?.status === 'completed')) continue;
             if (runtime.has(item.jobId)) continue;
             if (!job) {
               Object.assign(item, { status: 'failed', stage: '启动失败', error: '任务未能创建，请重新发起' });
               changed = true; continue;
             }
             if (job.generations?.some(generation => runtime.has(generation.id))) continue;
-            const generation = job.generations?.find(value => value.id === job.autoGeneration?.generationId);
             item.status = generation?.status || (job.autoGeneration?.status === 'cancelled' ? 'cancelled' : 'failed');
             item.stage = generation?.stage || (job.status === 'completed' ? item.status === 'cancelled' ? '已取消' : '自动生图失败' : job.stage);
             item.error = generation?.error || job.autoGeneration?.error || job.error;
@@ -562,11 +579,11 @@ export async function createBridge({
             await batches.put(next);
             try {
               const generationModelSettings = batchGenerationSettings.get(next.id) || next.generationModelSettings;
-              if (generationModelSettings.imageProvider && !generationModelSettings.apiKey) throw bad("批次生图凭据快照已失效，请重新提交", 409);
+              if (["openai", "gemini"].includes(generationModelSettings.imageProvider) && !generationModelSettings.apiKey) throw bad("批次生图凭据快照已失效，请重新提交", 409);
               await startJob({ projectId: item.projectId, inputRevision: item.snapshot.inputRevision, mode: 'recreate',
                 image: await storedImage(item.snapshot), instruction: item.snapshot.instruction, referenceIndex: item.snapshot.referenceIndex,
                 sourceUrl: item.snapshot.sourceUrl, capture: item.snapshot.capture,
-                generation: { language: next.language, ...(next.aspectRatio ? { aspectRatio: next.aspectRatio } : {}) } },
+                generation: { language: next.language, ...(next.aspectRatio ? { aspectRatio: next.aspectRatio } : {}), ...(next.imageSize ? { imageSize: next.imageSize } : {}) } },
               { frozen: { modelSettings: next.modelSettings, generationModelSettings, jobId: item.jobId } });
             } catch (error) {
               item.status = 'failed'; item.stage = '启动失败'; item.error = error.message;
@@ -581,7 +598,8 @@ export async function createBridge({
       }
     });
   };
-  await images.collect(batches.assets);
+  await generationOutputs.recover(jobs, save);
+  await images.collect([...batches.assets, ...generationOutputs.assets]);
   await thumbnails.collect();
 
   const server = createServer(async (req, res) => {
@@ -905,13 +923,13 @@ export async function createBridge({
       }
       if (req.method === 'POST' && (path === '/batches/preview' || path === '/batches')) {
         const body = await readBody(req), selected = validateBatchProjects(body);
-        const allowed = path.endsWith('/preview') ? ['projects'] : ['projects', 'requestId', 'language', 'aspectRatio'];
+        const allowed = path.endsWith('/preview') ? ['projects'] : ['projects', 'requestId', 'language', 'aspectRatio', 'imageSize'];
         if (Object.keys(body).some(key => !allowed.includes(key))) throw bad('批量启动仅支持完整复刻和自动生图');
         let requestHash, existing;
         if (path === '/batches') {
           if (typeof body.requestId !== 'string' || !/^[\w-]{1,100}$/.test(body.requestId)) throw bad('批量请求编号无效');
           validateGenerationOptions(body);
-          requestHash = createHash('sha256').update(JSON.stringify({ projects: selected, language: body.language, ...(body.aspectRatio ? { aspectRatio: { width: body.aspectRatio.width, height: body.aspectRatio.height } } : {}) })).digest('hex');
+          requestHash = createHash('sha256').update(JSON.stringify({ projects: selected, language: body.language, ...(body.aspectRatio ? { aspectRatio: { width: body.aspectRatio.width, height: body.aspectRatio.height } } : {}), ...(body.imageSize ? { imageSize: { width: body.imageSize.width, height: body.imageSize.height } } : {}) })).digest('hex');
           existing = batches.all.find(batch => batch.requestId === body.requestId);
           if (existing) {
             if (existing.requestHash !== requestHash) throw bad('同一批量请求编号不能用于不同输入或选项', 409);
@@ -920,8 +938,8 @@ export async function createBridge({
         }
         if (cliBusy()) throw bad('Agent CLI 正在安装或更新，请等待完成。', 409);
         if (agents.busy) throw bad('正在验证模型，请稍候', 409);
-        if (imageSettings.view().provider === "magpie") throw bad("Magpie 暂不支持批量生图，请逐项手动生图。");
         const modelSettings = agents.selection(), generationModelSettings = await generationSelection(submission.signal);
+        validateGenerationSize(body, generationModelSettings);
         await Promise.all([...(agents.selected === "codex" ? [requireFeature('reverse')] : []), checkGeneration(generationModelSettings, submission.signal), readFile(skillPath)]);
         const items = [];
         for (const selectedItem of selected) {
@@ -934,7 +952,7 @@ export async function createBridge({
         submission.signal.throwIfAborted();
         if (path.endsWith('/preview')) { json(200, { model: modelSettings.model, items: items.map(({ snapshot, ...item }) => item) }); return; }
         const batch = { id: randomUUID(), requestId: body.requestId, requestHash, createdAt: new Date().toISOString(), modelSettings, generationModelSettings: Object.fromEntries(Object.entries(generationModelSettings).filter(([key]) => key !== "apiKey")),
-          language: body.language, ...(body.aspectRatio ? { aspectRatio: body.aspectRatio } : {}),
+          language: body.language, ...(body.aspectRatio ? { aspectRatio: body.aspectRatio } : {}), ...(body.imageSize ? { imageSize: { ...body.imageSize } } : {}),
           items: items.map(({ eligible, inputRevision, ...item }) => ({ ...item, status: eligible ? 'queued' : 'rejected', stage: eligible ? '等待启动' : '未受理', ...(eligible ? { jobId: randomUUID() } : {}) })) };
         batchGenerationSettings.set(batch.id, generationModelSettings);
         try { await batches.put(batch); }
@@ -979,8 +997,9 @@ export async function createBridge({
           throw bad("所选项目仍在逆向或生图，请完成或取消任务后再删除", 409);
         try {
           const deletedIds = await projects.remove(unique);
+          await generationOutputs.prune(jobs);
           taskFeed.touch();
-          if (!runtime.count && records.canCollect) { await images.collect(batches?.assets); await thumbnails.collect(); }
+          if (!runtime.count && records.canCollect) { await images.collect([...(batches?.assets || []), ...generationOutputs.assets]); await thumbnails.collect(); }
           else collectionPending = true;
           json(200, { deletedIds });
         }
@@ -1032,7 +1051,7 @@ export async function createBridge({
         await projects.saveInput(project.id, { image, mode: body.mode, input, referenceJobId: body.referenceJobId, expectedRevision: body.expectedRevision });
         collectionPending = true;
         if (!runtime.count && records.canCollect) {
-          try { await images.collect(batches?.assets); await thumbnails.collect(); collectionPending = false; }
+          try { await images.collect([...(batches?.assets || []), ...generationOutputs.assets]); await thumbnails.collect(); collectionPending = false; }
           catch (error) { console.error("回收图片失败:", error.message); }
         }
         taskFeed.touch();
@@ -1101,7 +1120,7 @@ export async function createBridge({
         json(200, job);
         return;
       }
-      const generationMatch = /^\/jobs\/([\da-f-]{36})\/generations(?:\/([\da-f-]{36})\/(image|reference|thumbnail|cancel|open|reveal))?$/.exec(path);
+      const generationMatch = /^\/jobs\/([\da-f-]{36})\/generations(?:\/([\da-f-]{36})\/(image|reference|thumbnail|cancel|open|reveal|save))?$/.exec(path);
       if (generationMatch) {
         const job = jobs.get(generationMatch[1]);
         if (!job) throw bad("任务不存在", 404);
@@ -1145,6 +1164,15 @@ export async function createBridge({
             catch (error) { throw bad(error.message, 503); }
             json(200, { ok: true });
           } else json(200, { image: `data:image/${generation.extension};base64,${bytes.toString("base64")}`, path: imagePath, width: metadata.autoOrient.width, height: metadata.autoOrient.height });
+          return;
+        }
+        if (req.method === "POST" && generationMatch[3] === "save") {
+          if (Object.keys(await readBody(req)).length) throw bad("重试保存不接受模型或图片参数");
+          if (!generation.resultSavePending || generation.status !== "failed" || runtime.has(generation.id)) throw bad("此图片没有待恢复的保存任务", 409);
+          runtime.reserve(generation.id, job.projectId);
+          try { await generationOutputs.retry(job, generation, save); }
+          finally { runtime.release(generation.id); }
+          json(200, job);
           return;
         }
         if (req.method === "POST" && generationMatch[3] === "cancel") {

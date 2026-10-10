@@ -253,3 +253,18 @@ for (const cancel of [false, true]) test(`a running batch item without a job can
   assert.equal((await request('/batches', payload)).body.items[0].status, cancel ? 'cancelled' : 'failed');
   assert.equal(reverse.length, 3); assert.equal((await request('/health')).body.active, 0);
 });
+
+test('user sees recovered generation reconcile a stale failed batch after restart without replay', async t => {
+  // Given the image commit succeeded before the batch record could update, When the service restarts, Then batch history converges without model calls.
+  const { request, reverse, generation, projects, dir, restart } = await setup(t, true);
+  await request('/batches', { requestId: 'recovered-output', projects: projects.slice(0, 1), language: 'en' });
+  await waitFor(async () => (await request('/batches')).body[0].items[0].status === 'completed');
+  const path = join(dir, 'records/batches.json'), stale = JSON.parse(await readFile(path, 'utf8'));
+  Object.assign(stale[0].items[0], { status: 'failed', stage: '任务保存失败', error: 'fixture save failed' });
+  await writeFile(path, JSON.stringify(stale));
+  await restart();
+  await waitFor(async () => (await request('/batches')).body[0].items[0].status === 'completed');
+  assert.equal((await request('/batches')).body[0].items[0].error, undefined);
+  assert.equal(reverse.length, 1);
+  assert.equal(generation.length, 1);
+});

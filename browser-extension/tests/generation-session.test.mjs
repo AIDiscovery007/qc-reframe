@@ -5,6 +5,48 @@ import { createGenerationSession, generationReadiness } from '../lib/generation-
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const job = (id = 'version-a', mode = 'style') => ({ id, mode, result: { promptZh: '专属提示词', promptEn: 'dedicated prompt' }, reenact: {}, generations: [] });
 const input = (patch = {}) => ({ job: job(), lang: 'zh', disabled: false, subjectImage: 'subject-a', ...patch });
+
+test('user submits Magpie pixels with immutable image inputs instead of an aspect ratio', async () => {
+  // Given a ready attached-image task, When submitted and then edited, Then pixels and inputs retain their original values.
+  const f = fixture(), imageSize = { width: 1536, height: 1024 };
+  const candidate = input({ imageSize, pixelSize: true });
+  const action = f.session.act(candidate, false, f.callbacks);
+  imageSize.width = 512; candidate.subjectImage = 'later';
+  assert.deepEqual(f.requests[0].message.imageSize, { width: 1536, height: 1024 });
+  assert.equal(f.requests[0].message.aspectRatio, undefined);
+  assert.equal(f.requests[0].message.subjectImage, 'subject-a');
+  f.requests[0].resolve(job()); await action;
+});
+
+test('user cannot submit invalid pixels or mix pixel and ratio channels', async () => {
+  // Given a valid prompt, When dimensions are invalid or belong to another channel, Then no generation request is sent.
+  const f = fixture();
+  for (const patch of [
+    ...[null, { width: 0, height: 1024 }, { width: 1.5, height: 1024 }, { width: 10001, height: 1 }, { width: 10000, height: 10000 }, { width: NaN, height: 1024 }].map(imageSize => ({ imageSize, pixelSize: true })),
+    { pixelSize: true, aspectRatio: { width: 1, height: 1 } }, { imageSize: { width: 1024, height: 1024 } },
+  ]) {
+    assert.equal(generationReadiness(input(patch)).canGenerate, false);
+    assert.equal(await f.session.act(input(patch), false, f.callbacks), false);
+  }
+  assert.equal(f.requests.length, 0);
+});
+
+test('user retries saving an existing generated result without another paid generation', async () => {
+  // Given generated output awaiting persistence, When saving is retried, Then only the existing generation save operation is requested.
+  const f = fixture(), generation = { id: 'save-pending', status: 'failed', resultSavePending: true };
+  const candidate = input({ job: { ...job(), generations: [generation] } });
+  assert.equal(generationReadiness(candidate).canGenerate, false);
+  const action = f.session.save(generation, f.callbacks);
+  assert.deepEqual(f.requests[0].message, { type: 'alchemy:save-generation', jobId: 'version-a', generationId: 'save-pending' });
+  assert.equal(await f.session.save(generation, f.callbacks), false);
+  f.requests[0].reject(new Error('storage full'));
+  assert.equal(await action, false);
+  assert.equal(f.session.getSnapshot().error, 'storage full');
+  const retry = f.session.save(generation, f.callbacks);
+  f.requests[1].resolve(job()); await retry;
+  assert.equal(f.requests.some(item => item.message.type === 'alchemy:generate'), false);
+  assert.equal(f.updates.length, 1);
+});
 function fixture(id = 'version-a') {
   const requests = [], updates = [], pending = [];
   const session = createGenerationSession(id, message => {

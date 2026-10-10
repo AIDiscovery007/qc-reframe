@@ -135,3 +135,6 @@
 }
 
 .canvas-generate[aria-disabled="true"] { opacity:.35;cursor:default; }
+
+.canvas-generation-actions .generation-ratio[data-pixel-size] .select-field { flex-basis: 160px; }
+.canvas-generation-actions .generation-ratio[data-pixel-size]:has(.custom-ratio) .select-field { flex-basis: 104px; }

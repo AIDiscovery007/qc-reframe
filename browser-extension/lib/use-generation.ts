@@ -7,7 +7,7 @@ export function useGeneration(input: GenerationInput & GenerationCallbacks & { g
   const session = useMemo(() => createGenerationSession(input.job.id, request), [input.job.id]);
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   useEffect(() => session.activate(), [session]);
-  useEffect(() => session.loadImage(input.generation), [session, input.generation?.id, input.generation?.status]);
+  useEffect(() => session.loadImage(input.generation), [session, input.generation?.id, input.generation?.status, input.generation?.imageAsset]);
   useEffect(() => session.loadReference(input.compare ? input.generation : undefined), [session, input.compare, input.generation?.id]);
-  return { ...state, ...generationReadiness(input), act: (cancel = false) => session.act(input, cancel, input) };
+  return { ...state, ...generationReadiness(input), act: (cancel = false) => session.act(input, cancel, input), save: (generation: Generation) => session.save(generation, input) };
 }

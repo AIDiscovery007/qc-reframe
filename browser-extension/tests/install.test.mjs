@@ -26,7 +26,7 @@ async function installation(t, copyRoot = false) {
   if (copyRoot) {
     installRoot = join(dir, "installation");
     await mkdir(join(installRoot, ".output/chrome-mv3"), { recursive: true });
-    for (const path of ["package.json", "scripts", "bridge", ".agents", ".output/chrome-mv3/manifest.json"])
+    for (const path of ["package.json", "scripts", "bridge", "lib", ".agents", ".output/chrome-mv3/manifest.json"])
       await cp(join(root, path), join(installRoot, path), { recursive: true });
     await symlink(join(root, "node_modules"), join(installRoot, "node_modules"), "dir");
   }

@@ -1,8 +1,9 @@
-import type { AspectRatio, Generation, Job, MultiSubject } from "./types";
+import { validImageSize } from "./image-size.mjs";
+import type { AspectRatio, Generation, ImageSize, Job, MultiSubject } from "./types";
 
 export type GenerationInput = {
   job: Job; lang: "zh" | "en"; disabled: boolean; subjectImage?: string; subjects?: MultiSubject[];
-  aspectRatio?: AspectRatio; allowMulti?: boolean; requestPending?: boolean;
+  aspectRatio?: AspectRatio; imageSize?: ImageSize; pixelSize?: boolean; allowMulti?: boolean; requestPending?: boolean;
 };
 export type GenerationCallbacks = {
   // Data and originating drawer settlement survive navigation; view selection does not.
@@ -18,11 +19,12 @@ type Snapshot = {
 };
 type Request = <T>(message: Record<string, unknown>) => Promise<T>;
 
-export const validGenerationRatio = (ratio?: AspectRatio) => !ratio || [ratio.width, ratio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000)
+export const validGenerationRatio = (ratio?: AspectRatio) => ratio === undefined || !!ratio && typeof ratio === "object" && !Array.isArray(ratio) && Object.keys(ratio).every(key => key === "width" || key === "height") && [ratio.width, ratio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000)
   && ratio.width / ratio.height >= 1 / 20 && ratio.width / ratio.height <= 20;
 
-export function generationReadiness({ job, lang, disabled, subjectImage, subjects, aspectRatio, allowMulti = true, requestPending }: GenerationInput) {
+export function generationReadiness({ job, lang, disabled, subjectImage, subjects, aspectRatio, imageSize, pixelSize = false, allowMulti = true, requestPending }: GenerationInput) {
   const running = job.generations?.find(item => item.status === "running");
+  const recovery = job.generations?.find(item => item.resultSavePending);
   const multi = job.mode === "multi-reenact";
   const inputsReady = job.mode === "recreate" || job.mode === "session" || (multi
     ? !!subjects && subjects.length >= 2 && subjects.length <= 6 && subjects.every(item => !!item.subjectImage)
@@ -30,8 +32,9 @@ export function generationReadiness({ job, lang, disabled, subjectImage, subject
   const generic = job.mode === "style" && !job.reenact;
   const incomplete = /\[SUBJECT\]/i.test((lang === "zh" ? job.result?.promptZh : job.result?.promptEn) || "");
   const validRatio = validGenerationRatio(aspectRatio);
-  return { running, multi, inputsReady, generic, incomplete, validRatio,
-    canGenerate: !!job.result && job.autoGeneration?.status !== "pending" && !disabled && !requestPending && !running && inputsReady && !generic && !incomplete && validRatio && (allowMulti || !multi) };
+  const validSize = pixelSize ? aspectRatio === undefined && validImageSize(imageSize) : imageSize === undefined && validRatio;
+  return { running, recovery, multi, inputsReady, generic, incomplete, validRatio, validSize,
+    canGenerate: !!job.result && job.autoGeneration?.status !== "pending" && !disabled && !requestPending && !running && !recovery && inputsReady && !generic && !incomplete && validSize && (allowMulti || !multi) };
 }
 
 // One mounted prompt version owns its reads and view state. Submission callbacks
@@ -60,6 +63,7 @@ export function createGenerationSession(jobId: string, request: Request) {
       const message = cancel ? { type: "alchemy:generation-cancel", id: jobId, generationId: readiness.running!.id }
         : { type: "alchemy:generate", id: jobId, language: input.lang,
           ...(input.aspectRatio ? { aspectRatio: { ...input.aspectRatio } } : {}),
+          ...(input.imageSize ? { imageSize: { ...input.imageSize } } : {}),
           ...(readiness.multi ? { subjects } : subjectImage !== undefined ? { subjectImage } : {}) };
       update({ busy: true, submitting: !cancel, error: "" });
       let failure = "";
@@ -77,6 +81,20 @@ export function createGenerationSession(jobId: string, request: Request) {
         update({ busy: false, submitting: false });
         if (!cancel) callbacks.onRequestState?.(false, failure);
       }
+    },
+    async save(generation: Generation, callbacks: GenerationCallbacks) {
+      if (!active || state.busy || !generation.resultSavePending) return false;
+      const epoch = lifecycle;
+      update({ busy: true, error: "" });
+      try {
+        const job = await request<Job>({ type: "alchemy:save-generation", jobId, generationId: generation.id });
+        callbacks.onUpdate(job);
+        if (active && epoch === lifecycle) callbacks.onViewUpdate?.();
+        return active && epoch === lifecycle;
+      } catch (error) {
+        if (active && epoch === lifecycle) update({ error: error instanceof Error ? error.message : String(error) });
+        return false;
+      } finally { update({ busy: false }); }
     },
     loadImage(generation?: Generation) {
       const revision = ++imageRead;

@@ -12,7 +12,7 @@ const button = text => [...document.querySelectorAll('button')].find(node => nod
 const generate = () => button('再生成图片') || button('生成图片');
 const cancel = () => document.querySelector('[aria-label="取消生图"]') || button('取消生图');
 try {
-  await wait(() => document.querySelector('.online-dot:not(.offline), .connection .dot.online') && document.querySelector('[aria-label="逆向模式"]'));
+  await wait(() => document.querySelector('.online-dot:not(.offline), .connection .dot.online') && document.querySelector('[aria-label="逆向模式"]') && !document.querySelector('[aria-label="逆向模式"]').disabled);
   const mode = document.querySelector('[aria-label="逆向模式"]');
   mode.value = 'recreate';
   mode.dispatchEvent(new Event('change', { bubbles: true }));
@@ -31,8 +31,9 @@ try {
     }
     if (scenario === 'magpie') {
       assert(document.body.textContent.includes('网关默认'), 'Magpie 必须说明使用默认尺寸');
-      assert(button('逆向并生图')?.disabled, 'Magpie 连续入口必须禁用');
-      assert(!document.querySelector('.generation-ratio select'), 'Magpie 不能接受未支持的比例');
+      assert(button('逆向并生图') && !button('逆向并生图').disabled, 'Magpie 连续入口应可用');
+      const sizes = document.querySelector('.generation-ratio select');
+      if (sizes) assert([...sizes.options].some(option => option.value === '1536:1024') && ![...sizes.options].some(option => option.value === '3:2'), 'Magpie 应显示像素预设，不将比例作为像素');
     }
     generate().click();
     await wait(() => cancel());

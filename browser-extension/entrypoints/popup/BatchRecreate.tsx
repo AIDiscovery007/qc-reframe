@@ -3,11 +3,15 @@ import { request } from "../../lib/client";
 import { showMotionDialog } from "../../lib/motion-dialog";
 import type { AspectRatio, Batch, BatchPreview, BatchProject, ProjectSummary } from "../../lib/types";
 import SelectField from "./SelectField";
+import GenerationSizeFields from "./GenerationSizeFields";
+import { inheritedGenerationSize } from "../../lib/generation-size";
+import { validImageSize } from "../../lib/image-size.mjs";
+import { validGenerationRatio } from "../../lib/generation-session";
 
-type Submission = { requestId: string; projects: BatchProject[]; language: "zh" | "en"; aspectRatio?: AspectRatio };
+type Submission = { requestId: string; projects: BatchProject[]; language: "zh" | "en"; aspectRatio?: AspectRatio; imageSize?: AspectRatio; pixelSize?: boolean };
 
-export default function BatchRecreate({ projects, showHidden, hiddenProjectIds, onClose, onStarted }: {
-  projects: ProjectSummary[]; showHidden: boolean; hiddenProjectIds: string[]; onClose(): void; onStarted(batch: Batch): void;
+export default function BatchRecreate({ pixelSize = false, projects, showHidden, hiddenProjectIds, onClose, onStarted }: {
+  pixelSize?: boolean; projects: ProjectSummary[]; showHidden: boolean; hiddenProjectIds: string[]; onClose(): void; onStarted(batch: Batch): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const alive = useRef(false);
@@ -20,7 +24,11 @@ export default function BatchRecreate({ projects, showHidden, hiddenProjectIds, 
     catch { return undefined; }
   });
   const [language, setLanguage] = useState<"zh" | "en">(submission?.language || "zh");
-  const [ratio, setRatio] = useState(submission?.aspectRatio ? `${submission.aspectRatio.width}:${submission.aspectRatio.height}` : "auto");
+  const usePixels = submission ? !!submission.pixelSize : pixelSize;
+  const [sizeDraft, setSizeDraft] = useState(() => ({ pixelSize: usePixels, size: inheritedGenerationSize(usePixels, submission) }));
+  const size = sizeDraft.pixelSize === usePixels ? sizeDraft.size : undefined;
+  const setSize = (size?: AspectRatio) => setSizeDraft({ pixelSize: usePixels, size });
+  const validSize = usePixels ? validImageSize(size) : validGenerationRatio(size);
   const [preview, setPreview] = useState<BatchPreview>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -45,15 +53,15 @@ export default function BatchRecreate({ projects, showHidden, hiddenProjectIds, 
   const previewItems = preview?.items.filter(item => visible(item.projectId)) || [];
   const eligible = previewItems.filter(item => item.eligible);
   const start = async () => {
-    if (pending.current || (!submission && !eligible.length)) return;
-    const [width = NaN, height = NaN] = ratio.split(":").map(Number);
+    if (pending.current || (!submission && (!eligible.length || !validSize))) return;
     const body = submission || { requestId: crypto.randomUUID(), projects: eligible.map(({ projectId, inputRevision }) => ({ projectId, inputRevision })), language,
-      ...(ratio === "auto" ? {} : { aspectRatio: { width, height } }) };
+      pixelSize, ...(size ? pixelSize ? { imageSize: { ...size } } : { aspectRatio: { ...size } } : {}) };
     pending.current = true; setBusy(true); setError(""); setSubmission(body);
     // Retain the exact request after an uncertain response, including across a page reload.
     try { sessionStorage.setItem(storageKey, JSON.stringify(body)); } catch { /* The open dialog still retains the request. */ }
     try {
-      const batch = await request<Batch>({ type: "alchemy:batch-start", ...body });
+      const { pixelSize: _pixelSize, ...snapshot } = body;
+      const batch = await request<Batch>({ type: "alchemy:batch-start", ...snapshot });
       try { sessionStorage.removeItem(storageKey); } catch { /* A repeated request is still idempotent. */ }
       if (alive.current) started.current(batch);
     } catch (reason) { if (alive.current) setError((reason as Error).message); }
@@ -70,9 +78,7 @@ export default function BatchRecreate({ projects, showHidden, hiddenProjectIds, 
         <SelectField label="提示词语言" aria-label="提示词语言" value={language} disabled={busy || !!submission} onChange={event => setLanguage(event.target.value as "zh" | "en")}>
           <option value="zh">中文</option><option value="en">英文</option>
         </SelectField>
-        <SelectField label="图片比例" aria-label="图片比例" value={ratio} disabled={busy || !!submission} onChange={event => setRatio(event.target.value)}>
-          <option value="auto">自动</option>{["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"].map(value => <option key={value}>{value}</option>)}
-        </SelectField>
+        <GenerationSizeFields key={String(usePixels)} pixelSize={usePixels} value={size} onChange={setSize} disabled={busy || !!submission} />
       </div>
       {submission && !busy && <p role="status">上次提交结果尚未确认。重试会核对同一请求，不会重复启动；也可关闭后在任务中心查看。</p>}
       {!preview && !error && <p role="status">正在检查 {projects.filter(item => visible(item.id)).length} 个项目…</p>}
@@ -80,7 +86,7 @@ export default function BatchRecreate({ projects, showHidden, hiddenProjectIds, 
         <ul className="batch-checks">{previewItems.map(item => <li key={item.projectId}><strong>{item.title}</strong><span>{item.eligible ? "可以启动" : item.error || "暂不能启动"}</span></li>)}</ul></>}
       {error && <p className="error" role="alert">{error}{!submission && <button className="text-button" onClick={() => setRetry(value => value + 1)}>重新检查</button>}</p>}
       <div className="dialog-actions"><button className="secondary" disabled={busy} onClick={onClose}>取消</button>
-        <button className="primary" disabled={busy || (!submission && !eligible.length)} aria-busy={busy} onClick={() => void start()}>{busy ? "正在提交…" : submission ? "重试提交" : `启动 ${eligible.length} 个项目`}</button>
+        <button className="primary" disabled={busy || (!submission && (!eligible.length || !validSize))} aria-busy={busy} onClick={() => void start()}>{busy ? "正在提交…" : submission ? "重试提交" : `启动 ${eligible.length} 个项目`}</button>
       </div>
     </div>
   </dialog>;

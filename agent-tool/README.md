@@ -59,6 +59,10 @@
 
 生图 API 设置：`node agent-tool/ui.mjs verify --scenarios image-settings-wide image-settings-narrow image-settings-legacy`。复用生产设置组件，覆盖两种直连 API 与 Magpie、进入/重开自动加载、空目录/失败邻近提示、失效模型保留并禁止保存、地址/渠道/卸载迟到目录、保存失败、密钥不回显、清除和窄屏；仅合成消息，不访问真实凭据、供应商或项目。桥接与协议反例：`node --test browser-extension/tests/image-api-bridge.test.mjs browser-extension/tests/image-api.test.mjs browser-extension/tests/image-settings.test.mjs browser-extension/tests/magpie.test.mjs`，使用临时配置、合成图片与 stub，不调用真实模型。
 
+Magpie 工作流：`node agent-tool/ui.mjs verify --scenarios magpie-workflows-manual magpie-workflows-custom magpie-workflows-custom-invalid magpie-workflows-continuous magpie-workflows-batch magpie-workflows-quick magpie-workflows-history magpie-workflows-save-retry magpie-workflows-save-asset`。使用生产组件与合成消息，覆盖有序附图入口、默认/预设/自定义像素、非法尺寸零提交、连续/批量快照、快捷端继承、旧比例隔离、请求与实际尺寸展示，以及保存失败后的同结果重试（零生成请求）。宽高限制为整数 1–10000，总像素不超过 4000 万；限制不代表供应商支持承诺。覆盖窄屏与宽屏，custom-invalid 保留校验错误截图；generation-readiness-popup-ready-delayed 用延迟草稿恢复检查模式控件初始化保护。不访问真实模型、凭据或项目，不接受视觉基线。
+
+输出保存恢复反例：`node --test browser-extension/tests/generation-output.test.mjs browser-extension/tests/image-api-bridge.test.mjs browser-extension/tests/task-runtime.test.mjs browser-extension/tests/task-records.test.mjs browser-extension/tests/bridge.test.mjs`。临时数据目录、合成图片与 stub 下故障注入图片落盘/任务记录失败、取消期间迟到输出、重复保存失败和服务重启；核验终态及失败补写连续失败后重启仍保留图片、保存重试零模型二次调用，恢复关联损坏保留原件及取消/删除不复活。仅内存保留的未落盘图片不能跨服务重启恢复。
+
 先运行 `npm --prefix browser-extension run build`，再运行 `npm --prefix browser-extension run preview`。原来的 `cd browser-extension && npm run preview` 入口保留。仅监听 `127.0.0.1`，按 Ctrl+C 停止自己的预览进程。
 
 - `PREVIEW_PORT`：默认 `43188`，整数 0–65535；0 自动分配空闲端口，实际地址见 stdout。占用端口报错，不关闭已有服务。

@@ -1,3 +1,4 @@
+import { generationSizeDescription, inheritedGenerationSize } from "../../lib/generation-size";
 import { orderedImageIds } from "../../lib/image-order";
 import RecoveryAction from "./RecoveryAction";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -11,8 +12,8 @@ import Icon from "./Icon";
 
 const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
 
-export default function QuickWorkspace({ gatewayDefaultSize = false, revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, referenceIndex, onImageOrder, instruction, job, disabled, modeDisabled, reverseDisabled, continuous, submitting, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onGenerate, chainDisabled, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, onGenerationViewUpdate, generationDisabled, generationHint }: {
-  gatewayDefaultSize?: boolean;
+export default function QuickWorkspace({ pixelSize = false, revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, referenceIndex, onImageOrder, instruction, job, disabled, modeDisabled, reverseDisabled, continuous, submitting, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onGenerate, chainDisabled, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, onGenerationViewUpdate, generationDisabled, generationHint }: {
+  pixelSize?: boolean;
   revealPrompt?: number; targetGeneration?: string; contextKey: string; selection?: Selection; title?: string; mode: Mode; subject: string; instruction: string; job?: Job;
   referenceIndex: number; onImageOrder(referenceIndex: number, onSaved: () => void): Promise<void>;
   generationHint?: string; generationDisabled: boolean; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; continuous: boolean; submitting: boolean; status?: string; stale: boolean; cancelling: boolean; copied: boolean; lang: "zh" | "en"; versions: ReactNode;
@@ -132,23 +133,26 @@ export default function QuickWorkspace({ gatewayDefaultSize = false, revealPromp
       <p className="quick-prompt-text" data-reminder-task={job.id}>{lang === "zh" ? job.result.promptZh : job.result.promptEn}</p>
       <button className="text-button" onClick={onWorkspace}>完整编辑<Icon name="arrow" /></button>
     </section>}
-    {job && <QuickResult gatewayDefaultSize={gatewayDefaultSize} key={job.id} targetGeneration={targetGeneration} job={job} lang={lang} subject={subject} disabled={generationDisabled || uploading} hint={generationHint} onSubject={() => subjectFile.current?.click()} onReverse={onReverse} onUpdate={onUpdate} onGenerationViewUpdate={onGenerationViewUpdate} onWorkspace={onWorkspace} />}
+    {job && <QuickResult pixelSize={pixelSize} key={job.id} targetGeneration={targetGeneration} job={job} lang={lang} subject={subject} disabled={generationDisabled || uploading} hint={generationHint} onSubject={() => subjectFile.current?.click()} onReverse={onReverse} onUpdate={onUpdate} onGenerationViewUpdate={onGenerationViewUpdate} onWorkspace={onWorkspace} />}
   </section>;
 }
 
-function QuickResult({ gatewayDefaultSize, targetGeneration, job, lang, subject, disabled, hint, onSubject, onReverse, onUpdate, onGenerationViewUpdate, onWorkspace }: { gatewayDefaultSize: boolean; targetGeneration?: string; hint?: string; onSubject(): void; onReverse(): void; job: Job; lang: "zh" | "en"; subject: string; disabled: boolean; onUpdate(job: Job): void; onGenerationViewUpdate(): void; onWorkspace(): void }) {
+function QuickResult({ pixelSize, targetGeneration, job, lang, subject, disabled, hint, onSubject, onReverse, onUpdate, onGenerationViewUpdate, onWorkspace }: { pixelSize: boolean; targetGeneration?: string; hint?: string; onSubject(): void; onReverse(): void; job: Job; lang: "zh" | "en"; subject: string; disabled: boolean; onUpdate(job: Job): void; onGenerationViewUpdate(): void; onWorkspace(): void }) {
   const running = job.generations?.find(item => item.status === "running");
   const generation = job.generations?.find(item => item.id === targetGeneration) || running || job.generations?.at(-1);
   const controls = useGeneration({ job, lang, disabled, subjectImage: subject, generation, allowMulti: false,
-    aspectRatio: gatewayDefaultSize ? undefined : generation ? generation.aspectRatio : job.autoGeneration?.aspectRatio, onUpdate, onViewUpdate: onGenerationViewUpdate });
-  const { generic, incomplete, inputsReady, asset, busy: cancelling } = controls;
+    pixelSize: pixelSize, ...(pixelSize ? { imageSize: inheritedGenerationSize(true, generation || job.autoGeneration) } : { aspectRatio: inheritedGenerationSize(false, generation || job.autoGeneration) }), onUpdate, onViewUpdate: onGenerationViewUpdate });
+  const { generic, incomplete, inputsReady, recovery, asset, busy: cancelling } = controls;
   const error = controls.error || controls.imageError;
   const key = `${job.id}:${generation?.id}`;
   if (!job.result) return null;
   return <section className="quick-result" aria-label="当前生图结果"><div className="quick-result-head"><strong>生成结果</strong><button className="text-button" onClick={onWorkspace}>工作台查看<Icon name="arrow" /></button></div>
-    {asset?.key === key && generation?.status === "completed" ? <ImagePreview data-reminder-task={generation.id} src={asset.image} alt="当前生成结果" /> : generation ? <p data-reminder-task={generation.status === "failed" ? generation.id : undefined} role="status">{generation?.status === "running" ? generation?.stage || "正在生成图片…" : generation?.status === "failed" ? "图片生成失败" : generation?.status === "cancelled" ? "图片生成已取消" : "正在读取结果…"}</p> : null}
+    {asset?.key === key && generation?.status === "completed" ? <ImagePreview data-reminder-task={generation.id} src={asset.image} alt="当前生成结果" /> : generation ? <p data-reminder-task={generation.status === "failed" ? generation.id : undefined} role="status">{generation?.status === "running" ? generation?.stage || "正在生成图片…" : generation?.resultSavePending ? "图片等待保存" : generation?.status === "failed" ? "图片生成失败" : generation?.status === "cancelled" ? "图片生成已取消" : "正在读取结果…"}</p> : null}
+    {generation && <p className="hint">{generationSizeDescription(generation)}</p>}
+    {pixelSize && <p className="hint">再次生成沿用当前记录的像素尺寸；无像素记录时使用网关默认尺寸。可在工作台调整。</p>}
+    {recovery && <p className="hint" role="status">图片已生成，重试保存不会再次生图；服务重启后未落盘的结果可能无法恢复。</p>}
     {(error || generation?.error) && <p className="error" role="alert">{error || generation?.error} <RecoveryAction error={error || generation?.error} /></p>}
     {!running && job.mode !== "multi-reenact" && (generic || incomplete || !inputsReady || hint) && <p className="quick-generation-hint" role="status">{!inputsReady ? <>先添加主体图 <button className="text-button" onClick={onSubject}>上传主体</button></> : generic || incomplete ? <>需要专属提示词 <button className="text-button" onClick={onReverse}>重新逆向</button></> : hint}</p>}
-    {generation?.status === "running" ? <button className="text-button" disabled={cancelling} onClick={() => void controls.act(true)}>{cancelling ? "正在取消…" : "取消生图"}</button> : job.mode !== "multi-reenact" && <button className="primary" disabled={cancelling || !controls.canGenerate} onClick={() => void controls.act(false)}>{cancelling ? "正在提交…" : job.generations?.length ? "再生成图片" : "生成图片"}<Icon name="arrow" /></button>}
+    {recovery ? <button className="primary" disabled={cancelling} onClick={() => void controls.save(recovery)}>{cancelling ? "正在保存…" : "重试保存"}</button> : generation?.status === "running" ? <button className="text-button" disabled={cancelling} onClick={() => void controls.act(true)}>{cancelling ? "正在取消…" : "取消生图"}</button> : job.mode !== "multi-reenact" && <button className="primary" disabled={cancelling || !controls.canGenerate} onClick={() => void controls.act(false)}>{cancelling ? "正在提交…" : job.generations?.length ? "再生成图片" : "生成图片"}<Icon name="arrow" /></button>}
   </section>;
 }

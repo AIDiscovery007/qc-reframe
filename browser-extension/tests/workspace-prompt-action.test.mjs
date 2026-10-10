@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { validImageSize } from '../lib/image-size.mjs';
+import { inheritedGenerationSize } from '../lib/generation-size.ts';
 import { validGenerationRatio } from '../lib/generation-session.ts';
 import { creationContext, emptyCreationState, resolveCreation } from '../lib/creation-context.ts';
 
 // Exercise the actual workspace action derivation and submitted input for each path.
 const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
 const tree = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ['instructionStale', 'genericPrompt', 'needsPrompt', 'subjectError', 'reverseHint', 'genericHint', 'reverseDisabled', 'ratio', 'chainDisabled', 'reverse'];
+const names = ['instructionStale', 'genericPrompt', 'needsPrompt', 'subjectError', 'reverseHint', 'genericHint', 'reverseDisabled', 'inheritedSize', 'targetSize', 'chainDisabled', 'reverse'];
 const declarations = new Map();
 function visit(node) {
   if (ts.isVariableDeclaration(node) && names.includes(node.name.getText(tree))) declarations.set(node.name.getText(tree), node.initializer.getText(tree));
@@ -20,7 +22,7 @@ const compiled = ts.transpileModule(names.map(name => `const ${name} = ${declara
 function fixture(mode, overrides = {}) {
   const calls = [], drafts = {}, exports = {};
   runInNewContext(compiled, {
-    exports, workspace: true, magpie: false, chainRatio: undefined, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, generationBlocked: false, promptDraft: undefined,
+    exports, workspace: true, magpie: false, chainSize: undefined, targetGeneration: undefined, validImageSize, inheritedGenerationSize, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, generationBlocked: false, promptDraft: undefined,
     selection: { image: 'reference' }, referenceError: undefined, displayImage: 'reference', subjectDraftKey: mode => `project:${mode}:new`, subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
     taskInstruction: () => 'instruction', defaultInstructions: { [mode]: 'instruction' }, subjectImage: () => 'subject',
     multiSubjects: [{ id: 'one', subjectImage: 'one' }, { id: 'two', subjectImage: 'two' }], multiPrompt: 'instruction', multiStale: false,
@@ -183,7 +185,7 @@ test('continuous action uses a new reverse submission and blocks incomplete inpu
     assert.equal(ui.calls[1].generate, false);
   }
   for (const overrides of [{ subjectImage: () => '' }, { promptDraft: {} }, { blocked: true },
-    { chainRatio: { key: 'project:mode:version', ratio: { width: 0, height: 1 } } }]) {
+    { chainSize: { key: 'project:mode:version', pixelSize: false, size: { width: 0, height: 1 } } }]) {
     const ui = fixture('style', overrides);
     ui.reverse(true);
     assert.equal(ui.calls.length, 0);
@@ -193,14 +195,26 @@ test('continuous action uses a new reverse submission and blocks incomplete inpu
   assert.equal(ui.calls.length, 1, 'reference-only style still supports reverse only');
 });
 
-test('Magpie blocks continuous generation while preserving reverse-only actions', () => {
+test('user can start Magpie continuous generation while ready and retain reverse-only actions when generation is blocked', () => {
+  // Given each supported reverse mode and a ready Magpie channel.
   for (const mode of ['style', 'recreate', 'reenact', 'multi-reenact']) {
     const ui = fixture(mode, { magpie: true });
-    assert.equal(ui.chainDisabled, true);
+    // When continuous generation is selected, Then the reverse submission includes generation.
+    assert.equal(ui.chainDisabled, false);
     ui.reverse(true);
-    assert.equal(ui.calls.length, 0);
-    ui.reverse();
     assert.equal(ui.calls.length, 1);
-    assert.equal(ui.calls[0].generate, false);
+    assert.equal(ui.calls[0].generate, true);
+    for (const overrides of [{ generationBlocked: true }, { blocked: true },
+      { chainSize: { key: 'project:mode:version', pixelSize: true, size: { width: 0, height: 1024 } } }]) {
+      // Given an unavailable channel, busy UI, or invalid pixels, When chained, Then no task starts.
+      const guarded = fixture(mode, { magpie: true, ...overrides });
+      assert.equal(guarded.chainDisabled, true);
+      guarded.reverse(true);
+      assert.equal(guarded.calls.length, 0);
+      // When only generation is blocked, Then reverse-only remains available.
+      guarded.reverse();
+      assert.equal(guarded.calls.length, overrides.blocked ? 0 : 1);
+      if (!overrides.blocked) assert.equal(guarded.calls[0].generate, false);
+    }
   }
 });

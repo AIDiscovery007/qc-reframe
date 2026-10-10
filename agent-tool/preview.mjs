@@ -50,7 +50,7 @@ const job = {
 };
 
 // Receipts travel over the parent IPC channel, never through page-controlled state.
-const regressions = Object.fromEntries(['generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
+const regressions = Object.fromEntries(['magpie-workflows', 'generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
   .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
 const previewSources = ['agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs', 'browser-extension/lib/operation-policy.ts', 'browser-extension/bridge/image-order.mjs'];
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -267,7 +267,7 @@ const server = createServer(async (req, res) => {
           await new Promise(resolve=>setTimeout(resolve,Math.min(60000,Math.max(0,Number(previewOptions.get('generationStartDelay'))||0))));
           if(chained&&saved.autoGeneration.status!=='pending')return;
           if(previewOptions.get('generationStart')==='failed')throw new Error('示例：生成请求提交失败，请重试');
-          const generation={id:crypto.randomUUID(),status:'running',stage:'正在生成图片…',language:message.language,extension:'png',createdAt:new Date().toISOString(),prompt:message.language==='zh'?saved.result.promptZh:saved.result.promptEn,negativePrompt:saved.result.negativePrompt,model:saved.model||models.selected,referenceIndex:savedReferenceIndex(saved),subjectImage:message.subjectImage,subjects:message.subjects?structuredClone(message.subjects):undefined,aspectRatio:message.aspectRatio};
+          const generation={id:crypto.randomUUID(),status:'running',stage:'正在生成图片…',language:message.language,extension:'png',createdAt:new Date().toISOString(),prompt:message.language==='zh'?saved.result.promptZh:saved.result.promptEn,negativePrompt:saved.result.negativePrompt,model:saved.model||models.selected,referenceIndex:savedReferenceIndex(saved),subjectImage:message.subjectImage,subjects:message.subjects?structuredClone(message.subjects):undefined,aspectRatio:message.aspectRatio,...(previewOptions.has('magpieWorkflowsRegression')?{provider:'magpie',imageSize:message.imageSize,sizeMode:message.imageSize?'explicit':'gateway-default',outputSize:{width:320,height:400}}:{})};
           saved.generations||=[];saved.generations.push(generation);touch(projects.find(p=>p.id===saved.projectId));
           setTimeout(()=>{if(generation.status==='running'){
             generation.status=previewOptions.get('fx')==='failed'?'failed':'completed';
@@ -288,9 +288,19 @@ const server = createServer(async (req, res) => {
         let connectionFailures=previewOptions.has('connectionRegression')?1:0;
       let imageSaveFailed=false, magpieSaveFailed=false, magpieChangingDirectoryReads=0;
       const imageSettings={provider:'codex',configs:{magpie:{baseUrl:'http://127.0.0.1:3425',model:''},openai:{baseUrl:'https://api.openai.com/v1',model:'',hasApiKey:false},gemini:{baseUrl:'https://generativelanguage.googleapis.com/v1beta',model:'',hasApiKey:false}}};
+        const magpieWorkflow=previewOptions.get('magpieWorkflowsRegression');
+        if(magpieWorkflow) {
+          imageSettings.provider='magpie';imageSettings.configs.magpie.model='fixture/image';
+          for(const project of projects)for(const saved of project.jobs) {
+            if(['quick','history','save-retry','save-asset'].includes(magpieWorkflow)&&saved.result) {
+              saved.generations=[{id:'magpie-history-image',createdAt:saved.createdAt,status:magpieWorkflow.startsWith('save-')?'failed':'completed',stage:magpieWorkflow.startsWith('save-')?'图片等待保存':'图片已生成',language:'zh',prompt:saved.result.promptZh,model:'fixture/image',provider:magpieWorkflow==='history'?'codex':'magpie',...(magpieWorkflow==='history'?{aspectRatio:{width:3,height:2}}:{imageSize:{width:1536,height:1024},sizeMode:'explicit',outputSize:{width:320,height:400}}),...(magpieWorkflow.startsWith('save-')?{resultSavePending:true,error:'示例：生成结果尚未保存，请重试保存'}:{}),...(magpieWorkflow==='save-asset'?{imageAsset:'preview-stored-asset'}:{})}];
+            }
+          }
+        }
+        let magpieSaveAttempts=0;
         const generationReadiness=previewOptions.get('generationReadinessRegression');
         if(['ready','legacy-empty'].includes(generationReadiness)){models.selected=null;models.verifiedAt=undefined;}
-        const generationHealth=generationReadiness==='magpie'?{generationReady:true,generationModel:'fixture/image',generationProvider:'magpie'}:generationReadiness==='ready'?{generationReady:true,generationModel:null}:generationReadiness==='blocked'?{generationReady:false,generationModel:'preview-image'}:generationReadiness==='legacy'?{generationModel:'preview-image'}:{};
+        const generationHealth=generationReadiness==='magpie'||magpieWorkflow?{generationReady:true,generationModel:'fixture/image',generationProvider:'magpie'}:generationReadiness==='ready'?{generationReady:true,generationModel:null}:generationReadiness==='blocked'?{generationReady:false,generationModel:'preview-image'}:generationReadiness==='legacy'?{generationModel:'preview-image'}:{};
         const agents={selected:'codex',agents:[{id:'codex',label:'Codex',model:'preview-vision'},{id:'pi',label:'Pi',model:'preview/pi-model'}]};
         let piVerificationCount=0, piContextChanged=false;
         const piModels={verifiedAt:'2026-10-01T00:00:00.000Z',selected:'preview/pi-model',accountLabel:'Pi · 预览',models:[{model:'preview/pi-model',label:'Pi Model',isDefault:true,status:'verified',supportedReasoningEfforts:[]},{model:'preview/pi-draft',label:'Pi Draft Model',status:'unverified',supportedReasoningEfforts:[]}]};
@@ -339,7 +349,7 @@ const server = createServer(async (req, res) => {
           if(message.type==='alchemy:batch-start') {
             let batch=batchRequests.get(message.requestId);
             if(!batch) {
-              batch={id:crypto.randomUUID(),createdAt:new Date().toISOString(),language:message.language,aspectRatio:message.aspectRatio,model:models.selected,
+              batch={id:crypto.randomUUID(),createdAt:new Date().toISOString(),language:message.language,aspectRatio:message.aspectRatio,imageSize:message.imageSize,...(magpieWorkflow?{provider:'magpie'}:{}),model:models.selected,
                 items:message.projects.map((item,index)=>({projectId:item.projectId,title:projects.find(p=>p.id===item.projectId)?.title||'已删除项目',status:index===0?'running':index===1||batchAllAccepted?'queued':'rejected',stage:index===0?'正在逆向':index===1||batchAllAccepted?'排队中':'未受理',...(index>1&&!batchAllAccepted?{error:'项目输入已变化，请重新检查'}:{})}))};
               const running=batch.items[0];
               if(running){running.jobId='batch-preview-'+batch.id;projects.find(p=>p.id===running.projectId)?.jobs.unshift({...structuredClone(job),id:running.jobId,projectId:running.projectId,mode:'recreate',status:'running',stage:'正在逆向',result:undefined,generations:[]});}
@@ -395,7 +405,7 @@ const server = createServer(async (req, res) => {
             if(previewOptions.get('imagePreview')==='fail')throw new Error('预览：原图读取失败');
             if(previewOptions.get('imagePreview')==='delay')await new Promise(resolve=>setTimeout(resolve,2500));
           }
-          if(message.type==='alchemy:quick-draft'){const key=location.pathname.includes('popup')?'quick-popup':'quick-panel';if(message.context){sessionStorage.setItem(key,JSON.stringify({...message.context,draft:message.draft}));return {ok:true};}return {ok:true,value:JSON.parse(sessionStorage.getItem(key)||'null')};}
+          if(message.type==='alchemy:quick-draft'){const key=location.pathname.includes('popup')?'quick-popup':'quick-panel';if(message.context){sessionStorage.setItem(key,JSON.stringify({...message.context,draft:message.draft}));return {ok:true};}await new Promise(resolve=>setTimeout(resolve,Math.min(5000,Math.max(0,Number(previewOptions.get('quickDraftDelay'))||0))));return {ok:true,value:JSON.parse(sessionStorage.getItem(key)||'null')};}
           if(message.type==='alchemy:open-workspace'){sessionStorage.setItem('workspace-draft',JSON.stringify({...message.context,draft:message.draft,projects,data}));const params=new URLSearchParams({handoff:'preview',...(message.view?{view:message.view}:{}),...(message.section?{section:message.section}:{})});if(location.pathname==='/workspace.html'||location.pathname==='/'){params.set('request',crypto.randomUUID());location.hash='workspace='+params;}else location.href='/workspace.html?state='+state+'&'+params;return {ok:true};}
           if(message.type==='alchemy:workspace-handoff'){const saved=JSON.parse(sessionStorage.getItem('workspace-draft')||'null');sessionStorage.removeItem('workspace-draft');return {ok:true,value:saved};}
           if(message.type==='alchemy:sessions-list'&&cliScenario==='unsupported')return {error:cli.compatibility.features.sessions.message};
@@ -564,7 +574,7 @@ const server = createServer(async (req, res) => {
             await new Promise(resolve=>setTimeout(resolve,Math.min(10000,Math.max(0,Number(previewOptions.get('startDelay'))||0))));
             if(previewOptions.get('start')==='failed')throw new Error('示例：逆向提交失败，请重试');
             const project=projects.find(p=>p.id===message.projectId);
-            const next={id:crypto.randomUUID(),model:models.selected,...(message.generation&&previewOptions.get('start')!=='legacy'?{autoGeneration:{...structuredClone(message.generation),status:'pending'}}:{}),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,referenceIndex:message.referenceIndex,instruction:message.instruction,...(message.mode==='session'?{sessionContext:{sources:selectedSessionRows(message.sessionIds),capturedAt:new Date().toISOString(),hash:'preview-snapshot',messageCount:6,attachmentCount:0}}:{}),reenact:message.reenact?structuredClone(message.reenact):undefined};
+            const next={id:crypto.randomUUID(),model:models.selected,...(message.generation&&previewOptions.get('start')!=='legacy'?{autoGeneration:{...structuredClone(message.generation),...(magpieWorkflow?{provider:'magpie'}:{}),status:'pending'}}:{}),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,referenceIndex:message.referenceIndex,instruction:message.instruction,...(message.mode==='session'?{sessionContext:{sources:selectedSessionRows(message.sessionIds),capturedAt:new Date().toISOString(),hash:'preview-snapshot',messageCount:6,attachmentCount:0}}:{}),reenact:message.reenact?structuredClone(message.reenact):undefined};
             project.jobs.unshift(next);project.inputs={...project.inputs,[message.mode]:{referenceIndex:message.referenceIndex,instruction:message.instruction,...structuredClone(message.reenact),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};project.inputVersions={...project.inputVersions,[message.mode]:next.id};project.inputRevision=(project.inputRevision||0)+1;touch(project);const submittedSelection={...selection(project),jobId:next.id,reenact:structuredClone(message.reenact)};
             if(data.selection?.id===selectedAtStart)data.selection=submittedSelection;
             setTimeout(async()=>{
@@ -596,6 +606,12 @@ const server = createServer(async (req, res) => {
             const job=findJob(message.id);
             job.result={...job.result,promptZh:message.promptZh,promptEn:message.promptEn,negativePrompt:message.negativePrompt};touch(projects.find(p=>p.id===job.projectId));
             return {ok:true,value:job};
+          }
+          if(message.type==='alchemy:save-generation') {
+            const saved=findJob(message.jobId),generation=saved.generations.find(item=>item.id===message.generationId);
+            if(++magpieSaveAttempts===1)throw new Error('示例：保存失败，仍可重试保存');
+            Object.assign(generation,{status:'completed',stage:'图片已保存',imageAsset:'preview-stored-asset'});delete generation.resultSavePending;delete generation.error;
+            touch(projects.find(p=>p.id===saved.projectId));return {ok:true,value:structuredClone(saved)};
           }
           if(message.type==='alchemy:generate') {
             const saved=findJob(message.id);
@@ -660,6 +676,8 @@ const server = createServer(async (req, res) => {
             '<body><div id="preview-notice">界面预览 · 示例数据 · 不执行逆向</div>',
           ),
       );
+    if (['/workspace.html','/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('magpieWorkflowsRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/magpie-workflows-regression.js"></script></body>'));
     if (['/workspace.html','/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('generationReadinessRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/generation-readiness-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('imageSettingsRegression'))

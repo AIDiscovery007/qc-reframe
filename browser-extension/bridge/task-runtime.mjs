@@ -26,7 +26,7 @@ export function createTaskRuntime({ save, onProgress, onIdle, onFailure }) {
       controllers.get(task.id)?.controller.abort();
       await save(job);
     },
-    async run(job, task, { execute, modelSettings, completedStage, failedStage, onSettled }) {
+    async run(job, task, { execute, modelSettings, completedStage, failedStage, onSettled, onSaveFailure }) {
       const { controller } = controllers.get(task.id);
       const progress = update => {
         if (task.status !== "running") return;
@@ -47,6 +47,7 @@ export function createTaskRuntime({ save, onProgress, onIdle, onFailure }) {
         catch (error) {
           // Never leave a successful-looking result when its record could not commit.
           if (task.status === "completed") Object.assign(task, { status: "failed", stage: "任务保存失败", error: "任务结果未能保存，请检查本机数据目录后重试" });
+          onSaveFailure?.();
           onProgress(job);
           await save(job).catch(failure => console.error("保存任务失败:", failure.message));
         }

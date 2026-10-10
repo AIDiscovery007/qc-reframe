@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { validImageSize } from "../lib/image-size.mjs";
+import { validGenerationRatio } from "../lib/generation-session.ts";
 import * as operationPolicy from "../lib/operation-policy.ts";
 
 const compiled = ts.transpileModule(await readFile(new URL("../entrypoints/background.ts", import.meta.url), "utf8"), {
@@ -45,6 +47,7 @@ function background(local = { preferences: { token: "private-token" } }) {
       "../lib/reminder-background": { startReminderService: () => ({ wake: async () => {}, projectsChanged: async () => {} }) },
       "wxt/browser": { browser }, "../lib/bridge": { bridge },
       "../lib/operation-policy": operationPolicy,
+      "../lib/image-size.mjs": { validImageSize }, "../lib/generation-session": { validGenerationRatio },
       "../lib/capture": { captureImage: async () => ({ image, capture: "original" }) },
     })[name],
   });
@@ -314,4 +317,22 @@ test('user batch list follows hidden-project scope and cancellation targets the 
   await bg.send({ type: 'alchemy:batch-cancel', id, projectId });
   assert.equal(bg.calls.at(-1).path, `/batches/${id}/cancel`);
   assert.deepEqual(bg.calls.at(-1).body, { projectId });
+});
+
+
+test('user pixel generation and save recovery reach their own endpoints without a second model request', async () => {
+  // Given a trusted UI sender and a saved generation, When requesting pixels or retrying save, Then their endpoints stay distinct.
+  const bg = background(), id = '11111111-1111-4111-8111-111111111111', generationId = '22222222-2222-4222-8222-222222222222';
+  const imageSize = { width: 1536, height: 1024 };
+  assert.equal((await bg.send({ type: 'alchemy:generate', id, language: 'zh', imageSize })).ok, true);
+  assert.deepEqual(bg.calls[0].body.imageSize, imageSize);
+  assert.equal(bg.calls[0].body.aspectRatio, undefined);
+  assert.equal((await bg.send({ type: 'alchemy:save-generation', jobId: id, generationId })).ok, true);
+  assert.equal(bg.calls[1].path, `/jobs/${id}/generations/${generationId}/save`);
+  assert.deepEqual(bg.calls[1].body, {});
+  assert.equal(await bg.send({ type: 'alchemy:save-generation', jobId: id, generationId }, { ...sender, id: 'foreign' }), undefined);
+  // Given invalid or ambiguous pixels, When submitted, Then no bridge call occurs.
+  for (const fields of [{ imageSize: { width: 10000, height: 10000 } }, { imageSize: { width: '1536', height: 1024 } }, { imageSize, aspectRatio: { width: 3, height: 2 } }])
+    assert.match((await bg.send({ type: 'alchemy:generate', id, language: 'zh', ...fields })).error, /像素|比例/);
+  assert.equal(bg.calls.length, 2);
 });
