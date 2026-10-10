@@ -2,14 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { stop } from './build.mjs';
 
-test('cancelling preview stops the gate without launching the extension stage', { timeout: 45000 }, async () => {
+test('cancelling preview stops the gate without launching the extension stage', { timeout: 45000 }, async t => {
   const script = `import {gate} from ${JSON.stringify(new URL('./gate.mjs', import.meta.url).href)};
 const report = await gate({tier:'browser',build:false,progress:message => {
-  if (message === '检查 workspace-wide') process.kill(process.pid,'SIGTERM');
+  if (message.startsWith('检查 ')) process.kill(process.pid,'SIGTERM');
 }});
 console.log(JSON.stringify(report));`;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => stop(child));
   let output = '', errors = '';
   child.stdout.on('data', data => { output += data; });
   child.stderr.on('data', data => { errors += data; });
@@ -23,7 +25,7 @@ console.log(JSON.stringify(report));`;
   assert.equal(report.visualCandidate, undefined);
 });
 
-test('signals during visual candidates and report persistence cannot turn a cancelled gate green', { timeout: 120000 }, async () => {
+test('signals during visual candidates and report persistence cannot turn a cancelled gate green', { timeout: 120000 }, async t => {
   const script = `import fs from 'node:fs';
 import {syncBuiltinESMExports} from 'node:module';
 const original = fs.promises.writeFile, sent = new Set();
@@ -43,7 +45,8 @@ scenarios.filter = predicate => select(predicate).filter(scene=>['workspace-wide
 const {gate}=await import(${JSON.stringify(new URL('./gate.mjs', import.meta.url).href)});
 const report=await gate({tier:'browser',build:false});
 console.log(JSON.stringify({report,sent:[...sent]}));`;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => stop(child));
   let output = '', errors = '';
   child.stdout.on('data', data => { output += data; });
   child.stderr.on('data', data => { errors += data; });
