@@ -15,25 +15,27 @@ const fill = (node, value) => {
 const button = (text, root = document) => [...root.querySelectorAll('button')].find(node => node.textContent.trim() === text);
 const records = [], gates = [];
 const send = chrome.runtime.sendMessage;
-let directoryFailed = false, saveFailed = false;
+let directoryFailed = false, saveFailed = false, healthOverride;
 chrome.runtime.sendMessage = async message => {
   const record = { message: structuredClone(message) }; records.push(record);
   const gate = gates.find(item => !item.claimed && item.matches(message));
   if (gate) { gate.claimed = true; gate.record = record; }
+  if (gate?.before) await gate.promise;
   let response;
   if (scenario === 'directory-failure' && message.type === 'alchemy:image-models' && !directoryFailed) {
     response = { error: '示例：模型目录暂时不可用' };
   } else if (scenario === 'save-failure' && message.type === 'alchemy:image-settings-save' && !saveFailed) {
     saveFailed = true; response = { error: '示例：生图模型保存失败' };
   } else response = await send(message);
+  if (healthOverride && message.type === 'alchemy:query' && message.path === '/health') Object.assign(response.value, healthOverride);
   if (gate?.response) response = gate.response;
   record.response = structuredClone(response);
-  if (gate) await gate.promise;
+  if (gate && !gate.before) await gate.promise;
   record.delivered = true; return response;
 };
-const hold = (matches, response) => {
+const hold = (matches, response, before = false) => {
   let release; const promise = new Promise(resolve => { release = resolve; });
-  const gate = { matches, response, promise, release }; gates.push(gate); return gate;
+  const gate = { matches, response, before, promise, release }; gates.push(gate); return gate;
 };
 const fields = () => find('.canvas-generation-actions .generation-ratio');
 const model = () => find('.canvas-generation-actions [aria-label="生图模型"]');
@@ -61,6 +63,19 @@ const assertSaved = next => {
 };
 const switchModel = async next => { fill(model(), next); await readyModel(next); assertSaved(next); };
 const noGeneration = () => assert(!submissions().length, '模型切换、失败和重试均不得触发生图');
+const assertBusy = async reason => {
+  await settled();
+  assert(model()?.disabled, `${reason}期间必须禁用底部模型选择`);
+  const before = saves().length;
+  fill(model(), gemini); await settled();
+  assert(saves().length === before && model().value === gpt, `${reason}期间不得保存或切换模型`);
+};
+const refreshHealth = async () => {
+  const start = records.length;
+  document.dispatchEvent(new Event('visibilitychange'));
+  await wait(() => records.slice(start).some(record => record.delivered && record.message.type === 'alchemy:query' && record.message.path === '/health'), '应读取最新服务忙碌状态');
+  await settled();
+};
 const run = async () => {
   // Given a ready Magpie workspace, Then its native model selector follows target size and submission-preview copy is absent.
   await wait(() => fields() && generate() && (scenario === 'empty' || !generate().disabled), '工作台应完成初始化');
@@ -111,15 +126,50 @@ const run = async () => {
     noGeneration(); return;
   }
   if (scenario === 'snapshot') {
-    // Given an accepted GPT generation, When global settings switch to Gemini, Then its saved model and dimensions remain unchanged.
-    fill(fields().querySelector('select'), '1536:1024'); await settled(); generate().click();
-    await wait(() => submissions().at(-1)?.response?.ok, '合成生图应受理');
-    const accepted = submissions().at(-1).response.value.generations.at(-1), snapshot = structuredClone(accepted);
+    // Given a held manual submission, When it is accepted then cancelled, Then model selection stays disabled until idle and keeps the original task snapshot.
+    fill(fields().querySelector('select'), '1536:1024'); await settled();
+    const pending = hold(message => message.type === 'alchemy:generate', undefined, true);
+    generate().click(); await wait(() => pending.claimed, '手动生图应进入受理前交接');
+    const request = structuredClone(pending.record.message);
+    await assertBusy('手动生图受理前');
+    pending.release(); await wait(() => pending.record.delivered && pending.record.response.ok, '合成生图应受理');
+    const snapshot = structuredClone(pending.record.response.value.generations.at(-1));
     assert(snapshot.model === gpt && snapshot.imageSize.width === 1536 && snapshot.submittedImageSize.width === 1536, '受理记录应冻结 GPT 与请求/提交尺寸');
+    await wait(() => find('[aria-label="取消生图"]') && !find('[aria-label="取消生图"]').disabled, '受理后应可取消生图');
+    await assertBusy('手动生图运行');
+    find('[aria-label="取消生图"]').click();
+    await wait(() => records.some(record => record.message.type === 'alchemy:generation-cancel' && record.delivered), '取消应确认');
+    await refreshHealth(); await readyModel(gpt);
     await switchModel(gemini);
     const saved = (await send({ type: 'alchemy:query', path: '/jobs' })).value.flatMap(job => job.generations || []).find(item => item.id === snapshot.id);
-    assert(JSON.stringify(saved) === JSON.stringify(snapshot), '全局模型切换不能串改在途任务快照');
-    assert(submissions().length === 1, '切换模型不能产生第二条生图'); return;
+    const inputSnapshot = ({ status, stage, ...input }) => input;
+    assert(saved.status === 'cancelled' && JSON.stringify(inputSnapshot(saved)) === JSON.stringify(inputSnapshot(snapshot)), '取消和后续切换只能改变任务状态，不能串改原模型及尺寸快照');
+    assert(JSON.stringify(pending.record.message) === JSON.stringify(request) && submissions().length === 1, '原始请求应保持不变且切换不得产生第二条生图'); return;
+  }
+  if (scenario === 'reverse-busy') {
+    // Given an idle workspace, When reverse submission is held then accepted, Then the model remains locked through handoff and execution until cancellation.
+    const pending = hold(message => message.type === 'alchemy:start', undefined, true);
+    const reverse = find('.canvas-generate');
+    assert(reverse && !reverse.disabled, '逆向入口应可用'); reverse.click();
+    await wait(() => pending.claimed, '逆向应进入受理前交接');
+    await assertBusy('逆向受理前');
+    pending.release(); await wait(() => pending.record.delivered && pending.record.response.ok, '逆向应受理');
+    await wait(() => find('.canvas-generate')?.textContent === '取消提示词', '逆向运行应提供取消入口');
+    await assertBusy('逆向运行');
+    find('.canvas-generate').click();
+    await wait(() => records.some(record => record.message.type === 'alchemy:cancel' && record.delivered), '逆向取消应确认');
+    await refreshHealth(); await readyModel(gpt);
+    assert(!saves().length && records.filter(record => record.message.type === 'alchemy:start').length === 1, '逆向忙碌尝试不能保存模型或重复提交'); return;
+  }
+  if (scenario === 'background-busy') {
+    // Given no current running job, When health reports background work including batch queued work, Then the global model locks and recovers at active=0.
+    for (const [name, active, visibleActive] of [['后台手动生图', 1, 0], ['后台逆向', 1, 1], ['批量运行及排队', 2, 2], ['批量仅排队', 1, 1]]) {
+      healthOverride = { active, visibleActive }; await refreshHealth();
+      await assertBusy(name);
+      assert(!(await send({ type: 'alchemy:query', path: '/jobs' })).value.some(job => job.status === 'running' || job.generations?.some(generation => generation.status === 'running')), '背景反例必须独立于当前项目本地任务状态');
+      healthOverride = { active: 0, visibleActive: 0 }; await refreshHealth(); await readyModel(gpt);
+    }
+    assert(!saves().length, '后台忙碌期间不得保存模型'); noGeneration(); return;
   }
   // When selecting Gemini and GPT in place, Then saved settings and size profiles follow without generating.
   fill(fields().querySelector('select'), 'custom'); await settled();

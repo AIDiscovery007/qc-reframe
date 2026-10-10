@@ -61,7 +61,7 @@
 
 渠道保存即时同步：`image-settings-sync-{codex-to-magpie,magpie-to-codex}-{manual,continuous,batch}` 与 `image-settings-sync-{stale-health,rapid-switch,reopen-draft,snapshot}` 共 10 个场景，沿用 `node agent-tool/ui.mjs verify --scenarios ID …`。覆盖保存及健康刷新期间禁提交、保存后立即使用新渠道尺寸、迟到响应隔离、重开后新草稿保留及已受理快照；只用合成消息，不调用真实模型。Node 时序反例：`node --test browser-extension/tests/image-settings-sync.test.mjs`。
 
-底部生图模型：`workspace-image-model-{switch,empty,narrow,directory-failure,save-failure,stale-directory,stale-health,snapshot}`，沿用 `node agent-tool/ui.mjs verify --scenarios ID …`。覆盖目录原生选择、首次无提示词入口、设置中心同步、失败重试、迟到响应、手填尺寸保留和在途快照；检查无提交预览、无悬空描述与窄屏布局。仅合成消息，不调用网关、模型或写入真实项目。
+底部生图模型：`workspace-image-model-{switch,empty,narrow,directory-failure,save-failure,stale-directory,stale-health,snapshot,reverse-busy,background-busy}`，沿用 `node agent-tool/ui.mjs verify --scenarios ID …`。覆盖目录原生选择、首次无提示词入口、设置中心同步、失败重试、迟到响应、手填尺寸保留、提交受理及当前/后台任务忙碌禁用、空闲恢复和原任务快照；检查无提交预览、无悬空描述与窄屏布局。仅合成消息，不调用网关、模型或写入真实项目。
 
 Magpie 工作流：`node agent-tool/ui.mjs verify --scenarios magpie-workflows-manual magpie-workflows-custom magpie-workflows-custom-invalid magpie-workflows-continuous magpie-workflows-batch magpie-workflows-quick magpie-workflows-history magpie-workflows-save-retry magpie-workflows-save-asset magpie-workflows-gemini-ratios magpie-workflows-unknown-auto magpie-workflows-model-switch magpie-workflows-batch-snapshot`。使用生产组件与合成消息，覆盖有序附图入口、默认/预设/自定义像素、非法数值自动默认与超限尺寸自动调整、连续/批量快照、快捷端继承、旧比例隔离、请求与实际尺寸展示，以及保存失败后的同结果重试（零生成请求）。模型规则与最近距离见[尺寸契约研究](../browser-extension/docs/research/2026-10-10-magpie-image-contract.md#2026-10-10-尺寸归一化补充)，不代表中转来源实测支持。覆盖窄屏与宽屏，custom-invalid 保留原始输入截图并核验已受理的默认提交尺寸；generation-readiness-popup-ready-delayed 用延迟草稿恢复检查模式控件初始化保护。不访问真实模型、凭据或项目，不接受视觉基线。
 

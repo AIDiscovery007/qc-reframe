@@ -424,8 +424,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         if (cancelled || !applyGenerationHealth(health, generationSnapshot)) return delay;
         setConnected(health.serviceReady ?? true);
         setPreferences(value => value.paired ? value : { ...value, paired: true });
-        setServiceBusy(health.active > 0);
         if (revision === projectRevision.current) {
+          setServiceBusy(health.active > 0);
           setActiveCount(health.visibleActive ?? health.active);
           setHiddenProjectIds(health.hiddenProjectIds || []);
         }
@@ -607,6 +607,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   };
   const updateJob = (updated: Job) => {
     projectRevision.current++;
+    if (updated.status === "running" || updated.autoGeneration?.status === "pending" || updated.generations?.some(item => item.status === "running")) setServiceBusy(true);
     setRefreshNonce(value => value + 1);
     setProject((current) => current && current.id === updated.projectId
       ? { ...current, jobs: [updated, ...current.jobs.filter((item) => item.id !== updated.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt)) }
@@ -858,7 +859,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     if (!workspace || !narrow || !drawerOpen) return;
     if (editor.current?.contains(document.activeElement) || document.activeElement === document.body) resultReturn.current?.focus({ preventScroll: true });
   }, [workspace, narrow, drawerOpen, resultPane]);
-  const generationModelControl = workspace && magpie ? <GenerationModelField model={generationModel} settingsRevision={imageSettingsRevision} disabled={!connected || generationSettingsPending} onSave={saveImageSettings} /> : undefined;
+  const generationModelBusy = serviceBusy || busy || Object.values(drawers).some(item => item.pending)
+    || !!project?.jobs.some(item => item.status === "running" || item.autoGeneration?.status === "pending" || item.generations?.some(generation => generation.status === "running"));
+  const generationModelControl = workspace && magpie ? <GenerationModelField model={generationModel} settingsRevision={imageSettingsRevision} disabled={!connected || generationSettingsPending || generationModelBusy} onSave={saveImageSettings} /> : undefined;
   const generationPanel = activeJob?.result ? <GenerationPanel modelControl={generationModelControl} generationModel={generationModel} pixelSize={magpie} key={`${activeJob.id}:${magpie}`} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace} onAspectRatioChange={size => setChainSize({ key: drawerKey, pixelSize: false, size })} onImageSizeChange={size => setChainSize({ key: drawerKey, pixelSize: true, size })}
                   drawerOpen={drawerOpen} requestError={drawer.error} requestPending={drawer.pending}
                   onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabledReason={workspace ? promptDraft ? "编辑未保存，请保存或取消提示词修改。" : needsPrompt ? reverseHint || genericHint || "输入已修改，请更新提示词。" : "" : ""} disabled={generationBlocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}

@@ -99,11 +99,11 @@ export const scenarios = [
 ];
 
 export const exampleScenarios = [
-  ...['switch', 'empty', 'narrow', 'directory-failure', 'save-failure', 'stale-directory', 'stale-health', 'snapshot'].map(flow => ({
+  ...['switch', 'empty', 'narrow', 'directory-failure', 'save-failure', 'stale-directory', 'stale-health', 'snapshot', 'reverse-busy', 'background-busy'].map(flow => ({
     example: 'workspace-image-model', title: `工作台生图模型：${flow}`, states: [flow], components: ['GenerationModelField'],
     steps: '合成消息自动运行模型切换、设置同步、尺寸草稿保留、失败重试与迟到响应反例；不调用真实模型。',
     id: `workspace-image-model-${flow}`, surface: 'workspace',
-    path: `/workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=${flow}&generationDelay=60000`,
+    path: `/workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=${flow}&generationDelay=60000&reverseDelay=60000`,
     viewport: flow === 'narrow' ? { width: 360, height: 740 } : wide, regression: 'workspaceImageModelRegression', rules: [],
   })),
   ...['manual', 'custom', 'custom-invalid', 'continuous', 'batch', 'quick', 'history', 'save-retry', 'save-asset', 'gemini-ratios', 'unknown-auto', 'model-switch', 'batch-snapshot'].map(flow => ({
