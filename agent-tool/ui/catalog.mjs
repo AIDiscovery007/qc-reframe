@@ -50,6 +50,12 @@ export const scenarios = [
     viewport: surface === 'popup' ? { width: 360, height: 740 } : wide, regression: 'generationReadinessRegression', rules: [],
   })),
   { id: 'generation-actions', surface: 'workspace', path: '/workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200', viewport: wide, regression: 'generationActionsRegression', rules: [] },
+  ...['workspace', 'workspace-narrow', 'popup'].map(surface => ({
+    id: `generation-readiness-${surface}`, surface: surface === 'popup' ? 'popup' : 'workspace',
+    path: `/${surface === 'popup' ? 'popup' : 'workspace'}.html?state=alignment&mode=recreate`,
+    viewport: surface === 'workspace' ? wide : { width: 360, height: 740 },
+    regression: 'generationReadiness', generationReadiness: true, rules: [],
+  })),
   ...['workspace', 'popup'].flatMap(surface => ['cancel', 'legacy', 'failure', 'tab', 'tab-failure', 'project', 'project-failure'].map(flowKeyboardCase => ({
     id: `end-to-end-keyboard-${surface}-${flowKeyboardCase}`, surface,
     path: `/${surface}.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000${flowKeyboardCase === 'legacy' ? '&start=legacy' : flowKeyboardCase.includes('failure') ? '&start=failed' : ''}`,
@@ -76,13 +82,17 @@ export const scenarios = [
   ...['new', 'history', 'failure', 'late'].map(keyboardCase => ({ id: `image-order-keyboard-${keyboardCase}`, surface: 'popup', path: `/popup.html?state=projects&mode=style&inputSaveDelay=4000${keyboardCase === 'new' ? '&imageOrderFixture=new' : ''}${keyboardCase === 'failure' ? '&inputSaveFailures=1' : ''}`, viewport: { width: 320, height: 740 }, regression: 'imageOrderKeyboard', keyboardCase, rules: [] })),
   { id: 'auto-style', surface: 'workspace', path: '/workspace.html?state=projects&mode=style&autoStyleRegression=1&inputSaveDelay=250', viewport: wide, regression: 'autoStyleRegression', rules: [] },
   { id: 'creation-context', surface: 'workspace', path: '/workspace.html?state=alignment&mode=recreate&inputSaveDelay=1800&creationContextRegression=mode', viewport: wide, regression: 'creationContextRegression', rules: [] },
+  ...[['workspace', wide], ['workspace-narrow', { width: 320, height: 740 }], ['popup', { width: 320, height: 740 }]].map(([surface, viewport]) => ({
+    id: `automatic-connection-${surface}`, surface: surface.startsWith('workspace') ? 'workspace' : 'popup',
+    path: `/${surface.startsWith('workspace') ? 'workspace' : 'popup'}.html?state=empty&connectionRegression=1`, viewport, regression: 'connectionRegression', rules: [],
+  })),
   { id: 'settings-recovery-narrow', surface: 'workspace', path: '/workspace.html?state=library&settingsRegression=1', viewport: { width: 320, height: 740 }, regression: 'settingsRegression', rules: [] },
   { id: 'settings-recovery', surface: 'workspace', path: '/workspace.html?state=library&settingsRegression=1', viewport: wide, regression: 'settingsRegression', rules: [] },
 ];
 
 export const exampleScenarios = [
   ...['wide', 'narrow', 'legacy'].map(variant => ({ id: `image-settings-${variant}`, surface: 'workspace', path: `/workspace.html?state=library&imageSettingsRegression=${variant}`, viewport: variant === 'narrow' ? { width: 360, height: 740 } : wide, regression: 'imageSettingsRegression', example: 'image-settings', title: '生图渠道设置', states: ['saved', 'failure', 'narrow'], components: ['ImageGenerationSettings'], steps: '打开设置保存直连API与Magpie，检查连接失败、旧目录迟到、保存恢复、重开与密钥不回显。', rules: [] })),
-  { id: 'example-workspace-empty', title: '工作台新项目空态', surface: 'workspace', path: '/workspace.html?state=empty', viewport: wide, example: 'empty', states: ['empty'], components: ['CanvasWorkspace'], steps: '关闭首次连接设置，查看尚未选择参考图的工作台。' },
+  { id: 'example-workspace-empty', title: '工作台新项目空态', surface: 'workspace', path: '/workspace.html?state=empty', viewport: wide, example: 'empty', states: ['empty'], components: ['CanvasWorkspace'], steps: '首次打开直接查看尚未选择参考图的工作台。' },
   { id: 'example-popup-empty', title: '轻量上传空态', surface: 'popup', path: '/popup.html?state=empty', viewport: { width: 400, height: 740 }, example: 'empty', states: ['empty'], components: ['QuickWorkspace'], steps: '查看上传入口；没有项目时不显示任务提交区。' },
   { id: 'example-input-loading', title: '参考图读取中', surface: 'workspace', path: '/workspace.html?state=alignment&reference=pending&referenceDelay=60000', viewport: wide, example: 'loading', states: ['loading', 'disabled'], components: ['CanvasWorkspace'], steps: '读取延迟60秒，检查原画布等待反馈与提交保护。' },
   { id: 'example-reverse-busy', title: '逆向忙碌与取消入口', surface: 'popup', path: '/popup.html?state=running', viewport: { width: 400, height: 740 }, example: 'busy', states: ['busy', 'disabled'], components: ['QuickWorkspace'], steps: '查看阶段状态、取消入口和输入禁用；不调用真实模型。' },

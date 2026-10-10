@@ -64,6 +64,9 @@
 | generation-readiness-workspace-legacy | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationReadinessRegression=legacy&generationDelay=60000 | generationReadinessRegression |
 | generation-readiness-workspace-legacy-empty | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationReadinessRegression=legacy-empty&generationDelay=60000 | generationReadinessRegression |
 | generation-actions | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200 | generationActionsRegression |
+| generation-readiness-workspace | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate | generationReadiness |
+| generation-readiness-workspace-narrow | workspace 360×740 | /workspace.html?state=alignment&mode=recreate | generationReadiness |
+| generation-readiness-popup | popup 360×740 | /popup.html?state=alignment&mode=recreate | generationReadiness |
 | end-to-end-keyboard-workspace-cancel | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000 | endToEndKeyboard |
 | end-to-end-keyboard-workspace-legacy | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=legacy | endToEndKeyboard |
 | end-to-end-keyboard-workspace-failure | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=failed | endToEndKeyboard |
@@ -100,6 +103,9 @@
 | image-order-keyboard-late | popup 320×740 | /popup.html?state=projects&mode=style&inputSaveDelay=4000 | imageOrderKeyboard |
 | auto-style | workspace 1440×1000 | /workspace.html?state=projects&mode=style&autoStyleRegression=1&inputSaveDelay=250 | autoStyleRegression |
 | creation-context | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&inputSaveDelay=1800&creationContextRegression=mode | creationContextRegression |
+| automatic-connection-workspace | workspace 1440×1000 | /workspace.html?state=empty&connectionRegression=1 | connectionRegression |
+| automatic-connection-workspace-narrow | workspace 320×740 | /workspace.html?state=empty&connectionRegression=1 | connectionRegression |
+| automatic-connection-popup | popup 320×740 | /popup.html?state=empty&connectionRegression=1 | connectionRegression |
 | settings-recovery-narrow | workspace 320×740 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
 | settings-recovery | workspace 1440×1000 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
 | image-settings-wide | workspace 1440×1000 | /workspace.html?state=library&imageSettingsRegression=wide | imageSettingsRegression |

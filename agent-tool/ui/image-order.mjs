@@ -25,7 +25,7 @@ export async function checkImageOrderKeyboard(page, scenario) {
   await page.waitForFunction(() => window.imageOrderSaves.started === 1);
   if (which === 'failure') {
     // Saving disables mode/version navigation. Focus an enabled control without opening it.
-    const settings = page.getByRole('button', { name: '连接设置', exact: true });
+    const settings = page.getByRole('button', { name: '设置', exact: true });
     await settings.focus();
     record('focus can move away from a pending reorder', true, await settings.evaluate(node => node === document.activeElement));
   } else if (which === 'late') {
@@ -56,7 +56,7 @@ export async function checkImageOrderKeyboard(page, scenario) {
       { selected: actual.selected, focused: actual.focused, title: actual.title });
   } else if (which === 'failure') {
     record('failure preserves original order and does not steal focus',
-      { selected: '查看主体图', focused: '连接设置', images: ['查看主体图', '查看参考图'] },
+      { selected: '查看主体图', focused: '设置', images: ['查看主体图', '查看参考图'] },
       { selected: actual.selected, focused: actual.focused, images: actual.images });
   } else {
     record('successful keyboard reorder retains the selected image and focus',

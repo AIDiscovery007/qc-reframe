@@ -81,7 +81,6 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const [projectModes, setProjectModes] = useState<Record<string, Mode>>({});
   const [inputReload, setInputReload] = useState(0);
   const [viewsReady, setViewsReady] = useState(false);
-  const [tokenDraft, setTokenDraft] = useState("");
   const [storedSelection, setSelection] = useState<Selection>();
   const [hiddenProjectIds, setHiddenProjectIds] = useState<string[]>([]);
   const preferences = { ...basePreferences, mode: storedSelection?.projectId
@@ -123,7 +122,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const visibleProject = (item: ProjectSummary) => showHidden || (!item.hidden && !hiddenProjectIds.includes(item.id));
   const recentProjects = library.recent.items.filter(visibleProject);
   const [connected, setConnected] = useState(false);
-  const [connectionText, setConnectionText] = useState("尚未连接");
+  const [connectionText, setConnectionText] = useState("正在连接本机服务…");
   const [serviceBusy, setServiceBusy] = useState(false);
   const [reverseAgent, setReverseAgent] = useState("codex");
   const [modelBusy, setModelBusy] = useState(false);
@@ -217,7 +216,6 @@ export default function App({ embedded = false, workspace = false }: { embedded?
             : previous.mode,
           showHiddenProjects: visibility === visibilityRevision.current ? value.preferences.showHiddenProjects : previous.showHiddenProjects,
         }));
-        if (firstRefresh && !ownContext) setSettings(!value.preferences.paired);
         initialized = true;
         setDraftReady(quickRestored);
         if (workspace && (ownContext || !firstRefresh)) return 1500;
@@ -372,7 +370,6 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   }, [preferences.paired, selection?.id, !!selection?.image, selection?.projectId]);
 
   useEffect(() => {
-    if (!preferences.paired) return;
     let cancelled = false;
     let fetchedRevision: string | undefined;
     const stop = pollWhileVisible(async () => {
@@ -382,6 +379,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         const health = await query<{ generationProvider?: string; generationReady?: boolean; generationModel?: string | null; agent?: string; ready: boolean; serviceReady?: boolean; skill: string; active: number; visibleActive?: number; hiddenProjectIds?: string[]; projectsRevision?: string; modelBusy?: boolean; cliBusy?: boolean; model?: string; cli?: CliStatus | null }>("/health");
         if (cancelled) return delay;
         setConnected(health.serviceReady ?? true);
+        setPreferences(value => value.paired ? value : { ...value, paired: true });
         setServiceBusy(health.active > 0);
         if (revision === projectRevision.current) {
           setActiveCount(health.visibleActive ?? health.active);
@@ -576,22 +574,6 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     if (savingMode || busy || !draftReady) return;
     setCopied(false); setError("");
     setProjectMode(selection?.projectId, mode);
-  };
-  const connect = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      const health = await request<{ ready: boolean; skill: string }>({ type: "alchemy:connect", token: tokenDraft.trim() });
-      setPreferences({ ...preferences, paired: true });
-      setTokenDraft("");
-      setConnected(true);
-      setConnectionText(`已连接 · ${health.skill}`);
-      setSettings(true);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
   };
   const startPending = useRef(false);
   const [continuousJobId, setContinuousJobId] = useState("");
@@ -795,7 +777,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const reverseDisabled = blocked || !!reverseHint || !!promptDraft;
   const ratio = workspace ? chainRatio?.key === drawerKey ? chainRatio.ratio : undefined
     : job?.generations?.length ? job.generations.at(-1)?.aspectRatio : job?.autoGeneration?.aspectRatio;
-  const chainDisabled = magpie || reverseDisabled || (preferences.mode === "style" && !subjectImage("style")) || !validGenerationRatio(ratio);
+  const chainDisabled = magpie || reverseDisabled || generationBlocked || (preferences.mode === "style" && !subjectImage("style")) || !validGenerationRatio(ratio);
   const reverse = (generate = false) => {
     if (generate ? chainDisabled : reverseDisabled) return;
     const mode = preferences.mode;
@@ -896,8 +878,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         <button className="text-button workspace-entry" disabled={busy || savingMode || !!subjectUnavailable[subjectKey(preferences.mode)]} onClick={() => void openWorkspace()} title="在工作台继续"><Icon name="expand" />工作台</button>
         <button
           className="icon-button"
-          title="连接设置"
-          aria-label="连接设置"
+          title="设置"
+          aria-label="设置"
           aria-expanded={settings}
           onClick={() => {
             setSettings(!settings);
@@ -910,28 +892,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
 
       {!workspace && settings && (
         <section className="settings card">
-          <h2>连接 Codex</h2>
-          <details className="inline-help" open={!connected}><summary>如何获取配对码？</summary><p>在插件目录打开终端，启动服务并获取配对码。</p><code className="command">npm start<br />npm run pair</code></details>
-          <label htmlFor="pair-token">本机配对码</label>
-          <input
-            id="pair-token"
-            type="password"
-            autoComplete="off"
-            value={tokenDraft}
-            placeholder="粘贴终端中的配对码"
-            onChange={(e) => setTokenDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void connect();
-            }}
-          />
-          <button
-            className="primary"
-            disabled={busy || !tokenDraft.trim()}
-            onClick={connect}
-          >
-            {busy ? "正在连接…" : "连接本机服务"}
-          </button>
-          {connected && <button className="text-button" onClick={() => void openWorkspace("settings")}>在工作台管理模型与设置<Icon name="arrow" /></button>}
+          <button className="text-button" onClick={() => void openWorkspace("settings")}>在工作台管理模型与设置<Icon name="arrow" /></button>
         </section>
       )}
       {error && (
@@ -939,7 +900,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           {error} <RecoveryAction error={error} />
         </div>
       )}
-      {preferences.paired && !settings && (!connected || connectionText === "未找到图片逆向技能") && (
+      {!settings && (!connected || connectionText === "未找到图片逆向技能") && (
         <div className="error" role="alert">{connectionText} <RecoveryAction error={connectionText} /></div>
       )}
       {connected && (!selectedModel || reverseAgent === "codex" && cliStatus && !cliStatus.installed) && !settings && <div className="model-notice">
@@ -978,7 +939,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       {magpieHint && !galleryOpen && <p className="hint" role="status">{magpieHint}</p>}
       <main className={workspace && !historyOpen && !galleryOpen && selection ? "canvas-main" : undefined}>
         {historyOpen ? (
-          <ProjectHistory hiddenProjectIds={hiddenProjectIds} batchDisabled={magpie || !connected || !selectedModel || modelBusy || cliBusy} onTasks={() => setTasksOpen(true)} searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
+          <ProjectHistory hiddenProjectIds={hiddenProjectIds} batchDisabled={magpie || !connected || !selectedModel || !generationReady || modelBusy || cliBusy} onTasks={() => setTasksOpen(true)} searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
         ) : workspace && selection ? <CanvasWorkspace onPromptRevealed={() => setTargetPrompt(undefined)} revealPrompt={targetPrompt?.jobId === activeJob?.id ? targetPrompt?.request : undefined} contextKey={drawerKey} mode={preferences.mode}
           sessionTitle={selectedSessions().length === 1 ? selectedSessions()[0]!.title : selectedSessions().length ? `已选 ${selectedSessions().length} 个会话` : undefined} onSessions={() => setSessionPicker(drawerKey)}
           image={displayImage} subjectImage={subjectImage(preferences.mode)} subjects={multiSubjects}

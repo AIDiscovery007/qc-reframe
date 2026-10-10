@@ -33,6 +33,10 @@ try {
   await waitFor(() => !document.querySelector('.settings-center'));
   await handoff('connection');
   await waitFor(() => active() === '本机连接');
+  assert(!document.querySelector('.settings-pair-label, #pair-token'), '自动接入不应显示手动配对输入');
+  assert(!document.querySelector('.settings-center-content').textContent.includes('如何启动本机服务'), '设置中不应显示启动说明');
+  assert(!document.querySelector('.settings-center-content').textContent.includes('Codex 安装'), 'CLI状态应统一插件模型');
+  assert(!document.querySelector('.settings-center-content').textContent.includes('服务地址'), '隐藏重复连接信息');
   document.querySelector('#preview-notice').textContent = '设置恢复行为回归：PASS · 无项目交接 / 分类切换 / 重复目标 / 关闭重开';
   document.documentElement.dataset.settingsRegression = 'passed';
 } catch (error) {

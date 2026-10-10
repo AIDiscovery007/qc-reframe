@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, realpath, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, realpath, readdir, rename, lstat } from 'node:fs/promises';
 import { readPiCatalog, runPi } from '../bridge/pi-agent.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -13,11 +13,11 @@ async function binary(path) { await mkdir(dirname(path), {recursive:true}); awai
 async function packageAt(root, version) { const p = join(root, 'node_modules', pkg); await binary(join(p, 'dist/cli.js')); await writeFile(join(p, 'package.json'), JSON.stringify({name:pkg,version,bin:{pi:'dist/cli.js'}})); return join(p, 'dist/cli.js'); }
 async function npmAt(bin) { const p=join(bin,'../npm-package'); await binary(join(p,'bin/npm-cli.js')); await writeFile(join(p,'package.json'),JSON.stringify({name:'npm'})); await mkdir(bin,{recursive:true}); await symlink(join(p,'bin/npm-cli.js'),join(bin,'npm')); }
 async function settled(m) { const until = Date.now()+5000; while(m.busy && Date.now()<until) await new Promise(r=>setTimeout(r,5)); assert.equal(m.busy,false); return m.status(); }
-async function fixture(t) {
+async function fixture(t, hooks = {}) {
   const dataDir = await directory(t), env = {PATH:''}; let version = '0.85.0', fail = false, invalid = false, verifyFail = false, resets = 0;
   const commands=[];
-  const run=async(file,args,options)=>{ commands.push({file,args,options}); if(args.includes('install')) { if(fail) throw Error('install failed'); await packageAt(args[args.indexOf('--prefix')+1],version); return ''; } if(args.includes('--help')) return invalid?'unrelated CLI':help; const p=JSON.parse(await readFile(join(dirname(dirname(args[0])), 'package.json'),'utf8')); return p.version; };
-  const m=createPiCliManager({dataDir,env,run,verify:async()=>{if(verifyFail)throw Error('RPC incompatible');},onUpdated:async()=>{resets++;},latest:async()=>version,runtime:async()=>({node:process.execPath,npm:'/trusted/npm-cli.js',version:'22.19.0'})});
+  const run=async(file,args,options)=>{ commands.push({file,args,options}); if(args.includes('install')) { if(fail) throw Error('install failed'); const prefix=args[args.indexOf('--prefix')+1]; await packageAt(prefix,version); await mkdir(join(prefix,'npm-cache'),{recursive:true}); await writeFile(join(prefix,'npm-cache/download'),'cached package'); await hooks.afterInstall?.(prefix); return ''; } if(args.includes('--help')) return invalid?'unrelated CLI':help; const p=JSON.parse(await readFile(join(dirname(dirname(args[0])), 'package.json'),'utf8')); return p.version; };
+  const m=createPiCliManager({dataDir,env,run,verify:async options=>{if(verifyFail)throw Error('RPC incompatible'); await hooks.afterVerify?.(options);},onUpdated:async()=>{resets++; await hooks.afterUpdated?.();},inspect:async()=>{const found=await inspectPi({dataDir,env,run}); return hooks.inspect?hooks.inspect(found):found;},latest:async()=>version,runtime:async()=>({node:process.execPath,npm:'/trusted/npm-cli.js',version:'22.19.0'})});
   t.after(()=>m.close()); return {m,dataDir,env,commands,resets:()=>resets,setVersion:v=>version=v,setFail:v=>fail=v,setInvalid:v=>invalid=v,setVerifyFail:v=>verifyFail=v};
 }
 test('user can install missing Pi from its fixed registry and rediscover it after restart',async t=>{
@@ -254,4 +254,107 @@ test('user cannot start a Pi update after the verified Node or npm target change
     // Then no modifying process starts, and unchanged model trust does not require invalidation.
     assert.equal(state.operation.status,'failed');assert.equal(resets,0);m.close();
   }
+});
+
+
+test('user reclaims only obsolete owned Pi releases and download caches after verified updates',async t=>{
+  // Given a fresh managed installation and two subsequent stable releases.
+  const f=await fixture(t,{afterVerify:async({dir})=>{await mkdir(join(dir,'pi-home')); await writeFile(join(dir,'verification.json'),'{}'); await writeFile(join(dir,'verification-system.txt'),'verification');}}), root=join(f.dataDir,'runtime/cli/pi');
+  // When all three installations finish verification, rediscovery and model invalidation.
+  for(const version of ['0.85.0','0.86.0','0.87.0']) {
+    f.setVersion(version); await f.m[version==='0.85.0'?'install':'update'](); const state=await settled(f.m);
+    // Then only the active release remains, its CLI resolves, and its download cache is gone.
+    const pointer=JSON.parse(await readFile(join(root,'current.json'),'utf8'));
+    assert.equal(state.operation.status,'completed'); assert.equal(state.version,version);
+    assert.deepEqual((await readdir(root)).sort(),['current.json',pointer.release].sort());
+    assert.equal((await resolvePiExecutable(f.env,f.dataDir)).executable,state.executable);
+    await assert.rejects(lstat(join(root,pointer.release,'npm-cache')),{code:'ENOENT'});
+    assert.deepEqual((await readdir(join(root,pointer.release))).sort(),['.reframe-managed.json','node_modules']);
+  }
+});
+
+test('user keeps unmarked, linked and replaced old Pi directories during successful cleanup',async t=>{
+  // Given an old installation whose ownership cannot safely be established at deletion time.
+  for(const kind of ['unmarked','symlink','replaced']) {
+    const hooks={}, f=await fixture(t,hooks); await f.m.install(); await settled(f.m);
+    const root=join(f.dataDir,'runtime/cli/pi'), pointer=JSON.parse(await readFile(join(root,'current.json'),'utf8'));
+    const old=join(root,pointer.release), external=join(f.dataDir,'preserved-'+kind);
+    if(kind==='unmarked') await rm(join(old,'.reframe-managed.json'),{force:true});
+    else hooks.afterUpdated=async()=>{
+      await rename(old,external);
+      if(kind==='symlink') await symlink(external,old);
+      else { await mkdir(old); await writeFile(join(old,'.reframe-managed.json'),await readFile(join(external,'.reframe-managed.json')).catch(()=>'{}')); }
+    };
+    const unrelated=join(root,'release-user'); await mkdir(unrelated); await writeFile(join(unrelated,'keep'),'user data');
+    // When a new managed version activates, cleanup cannot claim ownership by a release-* name alone.
+    f.setVersion('0.86.0'); await f.m.update(); const state=await settled(f.m);
+    // Then the old/foreign entry and any external target survive, while the new CLI works.
+    assert.equal(state.operation.status,'completed'); assert.ok(await lstat(old));
+    assert.equal(await readFile(join(unrelated,'keep'),'utf8'),'user data');
+    if(kind!=='unmarked') assert.ok(await lstat(join(external,'node_modules')));
+    assert.equal((await resolvePiExecutable(f.env,f.dataDir)).version,'0.86.0');
+  }
+});
+
+test('user keeps the old Pi when an update is cancelled before activation',async t=>{
+  // Given a managed version and a candidate blocked in its package process.
+  const hooks={}, f=await fixture(t,hooks); await f.m.install(); await settled(f.m);
+  const before=await resolvePiExecutable(f.env,f.dataDir), ready=Promise.withResolvers(), release=Promise.withResolvers();
+  hooks.afterInstall=async()=>{ready.resolve(); await release.promise;};
+  f.setVersion('0.86.0'); await f.m.update(); await ready.promise;
+  // When the manager is closed before the candidate is activated.
+  f.m.close(); release.resolve(); const state=await settled(f.m);
+  // Then cancellation preserves the old executable and removes only the unactivated candidate.
+  assert.equal(state.operation.status,'failed'); assert.deepEqual(await resolvePiExecutable(f.env,f.dataDir),before);
+  assert.equal((await readdir(join(f.dataDir,'runtime/cli/pi'))).filter(name=>name.startsWith('release-')).length,1);
+});
+
+test('user keeps the old Pi after activation when rediscovery, invalidation or cancellation prevents completion',async t=>{
+  // Given an old verified version and a candidate which reaches the active pointer.
+  for(const failure of ['source','executable','invalidation','cancel']) {
+    const hooks={}, f=await fixture(t,hooks); await f.m.install(); await settled(f.m);
+    const before=await resolvePiExecutable(f.env,f.dataDir);
+    if(failure==='source'||failure==='executable') hooks.inspect=found=>found.version==='0.86.0'?{...found,[failure]:failure==='source'?'custom':'/unexpected/pi'}:found;
+    if(failure==='invalidation') hooks.afterUpdated=async()=>{throw Error('cannot refresh model catalog');};
+    if(failure==='cancel') hooks.afterUpdated=async()=>f.m.close();
+    // When post-activation verification or completion fails.
+    f.setVersion('0.86.0'); await f.m.update(); const state=await settled(f.m);
+    // Then the old installation is retained, and no rollback is claimed for the new active pointer.
+    assert.equal(state.operation.status,'failed',failure); assert.ok(await lstat(before.executable));
+    assert.equal((await resolvePiExecutable(f.env,f.dataDir)).version,'0.86.0');
+  }
+});
+
+test('user keeps a verified Pi update successful when unsafe cache cleanup is refused',async t=>{
+  // Given a verified candidate whose private cache has been replaced with an external symlink.
+  const hooks={}, f=await fixture(t,hooks); await f.m.install(); await settled(f.m);
+  const external=join(f.dataDir,'external-cache'); await mkdir(external); await writeFile(join(external,'keep'),'user data');
+  hooks.afterUpdated=async()=>{
+    const root=join(f.dataDir,'runtime/cli/pi'), pointer=JSON.parse(await readFile(join(root,'current.json'),'utf8'));
+    const cache=join(root,pointer.release,'npm-cache'); await rm(cache,{recursive:true}); await symlink(external,cache);
+  };
+  // When cleanup rejects the unsafe target after the new version has activated.
+  f.setVersion('0.86.0'); await f.m.update(); const state=await settled(f.m);
+  // Then activation remains successful, the external data survives, and cleanup reports a warning.
+  assert.equal(state.operation.status,'completed'); assert.equal(state.version,'0.86.0'); assert.match(state.operation.cleanupWarning,/清理/);
+  assert.equal(await readFile(join(external,'keep'),'utf8'),'user data');
+});
+
+test('user retains both Pi installations when the active pointer changes before cleanup',async t=>{
+  // Given an old managed version and a candidate that reaches model invalidation.
+  const hooks={}, f=await fixture(t,hooks); await f.m.install(); await settled(f.m);
+  const root=join(f.dataDir,'runtime/cli/pi'), oldPointer=await readFile(join(root,'current.json'),'utf8');
+  const before=await resolvePiExecutable(f.env,f.dataDir); let candidate;
+  hooks.afterUpdated=async()=>{
+    assert.equal(f.m.busy,true);
+    candidate=JSON.parse(await readFile(join(root,'current.json'),'utf8')).release;
+    await writeFile(join(root,'current.json'),oldPointer);
+  };
+  // When another actor restores the previous pointer before cleanup starts.
+  f.setVersion('0.86.0'); await f.m.update(); const state=await settled(f.m);
+  // Then cleanup is refused without failing the verified installation or deleting either release.
+  assert.equal(state.operation.status,'completed'); assert.match(state.operation.cleanupWarning,/清理/);
+  assert.deepEqual(await resolvePiExecutable(f.env,f.dataDir),before);
+  assert.ok(await lstat(join(root,candidate,'node_modules')));
+  for(const name of ['npm-cache','npm-user','npm-global']) assert.ok(await lstat(join(root,candidate,name)));
 });
