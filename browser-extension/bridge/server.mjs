@@ -27,6 +27,7 @@ import { createGalleryStore } from "./gallery.mjs";
 import { openGeneratedImage } from "./image-actions.mjs";
 import sharp from "sharp";
 import { migrateStorage } from "./storage.mjs";
+import { connectionOrigins } from "./connection.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
@@ -116,6 +117,7 @@ function decodeSubjects(subjects, referenceBytes, draft = false) {
 
 export async function createBridge({
   dataDir = resolve(process.env.ALCHEMY_DATA_DIR || join(root, ".local")),
+  extensionId = process.env.ALCHEMY_EXTENSION_ID,
   skillPath = resolve(
     process.env.ALCHEMY_SKILL_PATH ||
       join(root, ".agents/skills/alchemy/SKILL.md"),
@@ -136,6 +138,7 @@ export async function createBridge({
   sessions,
   sessionReadTimeoutMs = 120_000,
 } = {}) {
+  const trustedConnections = connectionOrigins(join(root, ".output/chrome-mv3"), extensionId);
   const instanceId = randomUUID();
   const paths = await migrateStorage(dataDir);
   sessions ||= createSessionStore({ cwd: root, dataDir: paths.records });
@@ -584,6 +587,13 @@ export async function createBridge({
       const origin = req.headers.origin;
       if (origin && !/^chrome-extension:\/\/[a-p]{32}$/.test(origin))
         throw bad("Origin not allowed", 403);
+      const url = new URL(req.url, "http://127.0.0.1");
+      const path = url.pathname;
+      const query = url.searchParams;
+      if (path === "/connection") {
+        if (!trustedConnections.has(origin)) throw bad("Origin not allowed", 403);
+        if (url.search) throw bad("无效查询参数");
+      }
       if (origin) {
         res.setHeader("Access-Control-Allow-Origin", origin);
         res.setHeader("Vary", "Origin");
@@ -598,6 +608,12 @@ export async function createBridge({
         res.end();
         return;
       }
+      if (path === "/connection") {
+        if (req.method !== "POST") throw bad("Method not allowed", 405);
+        if (Object.keys(await readBody(req)).length) throw bad("无效连接请求");
+        json(200, { token });
+        return;
+      }
       const supplied = Buffer.from(
         (req.headers.authorization || "").replace(/^Bearer /, ""),
       );
@@ -606,10 +622,7 @@ export async function createBridge({
         supplied.length !== expected.length ||
         !timingSafeEqual(supplied, expected)
       )
-        throw bad("配对码不正确，请在设置中重新连接", 401);
-      const url = new URL(req.url, "http://127.0.0.1");
-      const path = url.pathname;
-      const query = url.searchParams;
+        throw bad("本机连接凭据已失效，请重新打开工作台自动连接", 401);
       const validateQuery = (allowed) => {
         for (const key of query.keys()) if (!allowed.includes(key) || query.getAll(key).length !== 1) throw bad("无效查询参数");
       };
@@ -1195,7 +1208,7 @@ if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const { server, tokenPath } = await createBridge({ allowShutdown: process.env.ALCHEMY_MANAGED === "1", restart: prepareRestart, restartId: process.env.ALCHEMY_RESTART_ID });
+  const { server } = await createBridge({ allowShutdown: process.env.ALCHEMY_MANAGED === "1", restart: prepareRestart, restartId: process.env.ALCHEMY_RESTART_ID });
   const port = Number(process.env.ALCHEMY_PORT || 43187);
   server.on("error", (error) => {
     console.error(
@@ -1207,7 +1220,7 @@ if (
   });
   server.listen(port, "127.0.0.1", () => {
     console.log(
-      `QC-Reframe ${version} 本机服务：http://127.0.0.1:${port}\n运行 npm run pair 查看配对码（保存在 ${tokenPath}）。\n通过已配置的本机 Agent 或生图 API 执行，按 Ctrl+C 停止。`,
+      `QC-Reframe ${version} 本机服务：http://127.0.0.1:${port}\n已批准的 Reframe 扩展将自动连接。\n通过已配置的本机 Agent 或生图 API 执行，按 Ctrl+C 停止。`,
     );
   });
   for (const signal of ["SIGINT", "SIGTERM"])

@@ -666,8 +666,9 @@ test("reference uploads validate image input and register an authenticated proje
   assert.ok(calls.every(call => call.url.startsWith("http://127.0.0.1:43187/projects") && call.options.headers.Authorization === "Bearer private-token"));
   assert.deepEqual(JSON.parse(calls[1].options.body), { image, sourceUrl: "", capture: "original" });
   storage.preferences.token = "";
-  assert.match((await send({ type: "alchemy:upload-reference", image })).error, /配对码/);
-  assert.equal(calls.length, 3);
+  assert.match((await send({ type: "alchemy:upload-reference", image })).error, /有效连接凭据/);
+  assert.equal(calls.length, 4);
+  assert.ok(calls.at(-1).url.endsWith("/connection"), "failed handshake must not start the requested operation");
   assert.equal(handlers.message({ type: "alchemy:upload-reference", image }, { ...sender, id: "other" }, () => assert.fail("untrusted upload")), undefined);
 });
 
@@ -693,8 +694,9 @@ test("CLI management messages expose only fixed authenticated endpoints and neve
   for (const type of ["alchemy:cli-check", "alchemy:cli-update"])
     assert.equal(handlers.message({ type }, { ...sender, id: "other" }, () => assert.fail("untrusted CLI reply")), undefined);
   chrome.storage.local.get = async () => ({});
-  assert.match((await send({ type: "alchemy:cli-update" })).error, /配对码/);
-  assert.equal(calls.length, 3);
+  assert.match((await send({ type: "alchemy:cli-update" })).error, /有效连接凭据/);
+  assert.equal(calls.length, 4);
+  assert.ok(calls.at(-1).url.endsWith("/connection"), "failed handshake must not start the requested operation");
 });
 
 test("user manages Pi through fixed authenticated messages without forwarding arbitrary commands", async () => {
@@ -774,8 +776,9 @@ test("paged project reads encode filters, retain authentication and reject unbou
   assert.ok(calls.every(call => call.options.method === "GET" && call.options.headers.Authorization === "Bearer test"));
   assert.equal(handlers.message({ type: "alchemy:projects" }, { ...sender, id: "other" }, () => assert.fail("untrusted page reply")), undefined);
   chrome.storage.local.get = async () => ({});
-  assert.match((await send({ type: "alchemy:projects" })).error, /配对码/);
-  assert.equal(calls.length, 2);
+  assert.match((await send({ type: "alchemy:projects" })).error, /有效连接凭据/);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.at(-1).url.endsWith("/connection"), "failed handshake must not start the requested operation");
 });
 
 test("thumbnail reads constrain project and generation endpoints without exposing credentials", async () => {
@@ -841,6 +844,7 @@ test("collecting images persists projects without replacing the current selectio
   let created = true, fail = false;
   const { handlers, chrome, messages, tabs } = await background(async (url, options) => {
     calls.push({ url, options });
+    if (url.endsWith("/connection")) return { ok: true, json: async () => ({ token: "automatic-collection" }) };
     if (url.endsWith("/projects")) return { ok: !fail, json: async () => fail ? { error: "保存失败" } : { id: "a".repeat(64), created } };
     return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "Content-Type": "image/png" } });
   }, {
@@ -853,7 +857,10 @@ test("collecting images persists projects without replacing the current selectio
   });
   const storage = { preferences: { token: "test" }, selection: { id: "previous", projectId: "b".repeat(64), jobId: "active" } };
   chrome.storage.local.get = async () => storage;
-  chrome.storage.local.set = async () => assert.fail("collect must not change current UI state");
+  chrome.storage.local.set = async value => {
+    assert.deepEqual(Object.keys(value), ["preferences"], "automatic connection must not change current selection");
+    Object.assign(storage, value);
+  };
   const sender = { id: "test", frameId: 0, tab: { id: 4, windowId: 1, url: "https://example.com" } };
   const message = { type: "alchemy:collect", target: { src: "https://example.com/template.png" } };
   const send = () => new Promise(resolve => handlers.message(message, sender, resolve));
@@ -868,15 +875,19 @@ test("collecting images persists projects without replacing the current selectio
   assert.equal(failed.ok, undefined);
   const count = calls.length;
   storage.preferences.token = "";
-  assert.match((await send()).error, /连接本机服务/);
-  assert.equal(calls.length, count, "unpaired collection must not read the image or claim success");
+  fail = false;
+  assert.equal((await send()).value.created, false);
+  assert.equal(calls.slice(count).filter(call => call.url.endsWith('/connection')).length, 1);
+  assert.equal(calls.slice(count).filter(call => call.url.endsWith('/projects')).length, 1);
+  assert.equal(storage.preferences.token, "automatic-collection");
   assert.equal(storage.selection.id, "previous");
   assert.equal(messages.length, 0);
   assert.equal(tabs.length, 0);
-  assert.ok(calls.filter(call => call.options?.method === "POST").every(call => call.url.endsWith("/projects")));
+  assert.ok(calls.filter(call => call.options?.method === "POST").every(call => /\/(projects|connection)$/.test(call.url)));
   for (const untrusted of [{ ...sender, id: "other" }, { ...sender, frameId: 1 }, { id: "test", url: "chrome-extension://test/popup.html" }])
     assert.equal(handlers.message(message, untrusted, () => assert.fail("untrusted collection reply")), undefined);
   storage.preferences.token = "test";
+  fail = true;
   const feedback = [];
   let finish;
   chrome.tabs.sendMessage = async (_, message) => { feedback.push(message); if (message.state === "error") finish(); };
@@ -1489,4 +1500,103 @@ test("recovery opens the requested settings section with the unsaved workspace d
   }
   for (const input of [{ view: "settings", section: "invalid" }, { section: "cli" }, { view: "tasks", section: "models" }])
     assert.match((await send({ type: "alchemy:open-workspace", ...input })).error, /无效/);
+});
+
+test("user connects automatically once across concurrent requests without exposing credentials or overwriting preferences", async () => {
+  // Given an installed service and an extension without a saved token.
+  const calls = [], storage = { preferences: { mode: "style" } };
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const { handlers, chrome } = await background(async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith('/connection')) { await pending; return { ok: true, json: async () => ({ token: 'automatic-secret' }) }; }
+    return { ok: true, json: async () => ({ ready: false, serviceReady: true, skill: 'alchemy' }) };
+  });
+  chrome.storage.local.get = async () => structuredClone(storage);
+  chrome.storage.local.set = async value => Object.assign(storage, structuredClone(value));
+  const sender = { id: 'test', url: 'chrome-extension://test/workspace.html' };
+  const send = message => new Promise(resolve => handlers.message(message, sender, resolve));
+  // When both UI consumers connect while a local preference changes.
+  const first = send({ type: 'alchemy:connect', token: 'ignored-page-token' });
+  const second = send({ type: 'alchemy:query', path: '/health' });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  await send({ type: 'alchemy:mode', mode: 'recreate' });
+  release();
+  const replies = await Promise.all([first, second]);
+  // Then one handshake serves both, independent of CLI/skill readiness.
+  assert.ok(replies.every(reply => reply.ok), JSON.stringify(replies));
+  assert.equal(calls.filter(call => call.url.endsWith('/connection')).length, 1);
+  assert.equal(calls[0].options.method, 'POST');
+  assert.equal(calls[0].options.headers.Authorization, undefined);
+  assert.ok(calls.filter(call => call.url.endsWith('/health')).every(call => call.options.headers.Authorization === 'Bearer automatic-secret'));
+  assert.equal(storage.preferences.token, 'automatic-secret');
+  assert.equal(storage.preferences.mode, 'recreate');
+  assert.ok(!JSON.stringify(replies).includes('automatic-secret'));
+});
+
+test("user recovers rejected credentials once but failed writes are never replayed after a network error", async () => {
+  // Given saved credentials that the service no longer accepts.
+  const calls = [], storage = { preferences: { token: 'expired', mode: 'reenact' } };
+  const { handlers, chrome } = await background(async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith('/connection')) return { ok: true, json: async () => ({ token: 'renewed' }) };
+    if (options.headers.Authorization === 'Bearer expired') return { ok: false, status: 401, json: async () => ({ error: '配对码不正确' }) };
+    if (url.endsWith('/models/verify')) throw new Error('response lost');
+    return { ok: true, json: async () => ({ serviceReady: true }) };
+  });
+  chrome.storage.local.get = async () => structuredClone(storage);
+  chrome.storage.local.set = async value => Object.assign(storage, structuredClone(value));
+  const sender = { id: 'test', url: 'chrome-extension://test/workspace.html' };
+  const send = message => new Promise(resolve => handlers.message(message, sender, resolve));
+  // When health is rejected, then refresh once and preserve other preferences.
+  assert.equal((await send({ type: 'alchemy:query', path: '/health' })).ok, true);
+  assert.equal(storage.preferences.token, 'renewed');
+  assert.equal(storage.preferences.mode, 'reenact');
+  assert.equal(calls.filter(call => call.url.endsWith('/connection')).length, 1);
+  // When a write loses its response, then never replay it or reconnect.
+  assert.match((await send({ type: 'alchemy:model-verify', model: 'vision' })).error, /本机服务/);
+  assert.equal(calls.filter(call => call.url.endsWith('/models/verify')).length, 1);
+  assert.equal(calls.filter(call => call.url.endsWith('/connection')).length, 1);
+});
+
+test("user keeps saved credentials when automatic reconnection is unavailable and local settings remain accessible", async () => {
+  // Given an unauthorized installation, when automatic connection fails,
+  // then retain credentials and allow local settings without a service.
+  const storage = { preferences: { token: 'keep-me', mode: 'style' } };
+  const { handlers, chrome } = await background(async url => ({ ok: false, status: url.endsWith('/connection') ? 403 : 401, json: async () => ({ error: '本机服务未允许此扩展' }) }));
+  chrome.storage.local.get = async () => structuredClone(storage);
+  chrome.storage.local.set = async value => Object.assign(storage, structuredClone(value));
+  const sender = { id: 'test', url: 'chrome-extension://test/workspace.html' };
+  const send = message => new Promise(resolve => handlers.message(message, sender, resolve));
+  assert.match((await send({ type: 'alchemy:connect' })).error, /本机服务/);
+  assert.equal(storage.preferences.token, 'keep-me');
+  assert.equal((await send({ type: 'alchemy:mode', mode: 'reenact' })).ok, true);
+  assert.equal((await send({ type: 'alchemy:state' })).ok, true);
+  assert.equal(storage.preferences.token, 'keep-me');
+});
+
+test('closing a request during automatic connection prevents its business request while other consumers connect', async () => {
+  const calls = [], storage = { preferences: { mode: 'style' } };
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const bg = await background(async url => {
+    calls.push(url);
+    if (url.endsWith('/connection')) { await pending; return { ok: true, json: async () => ({ token: 'shared' }) }; }
+    return { ok: true, json: async () => ({ serviceReady: true }) };
+  });
+  bg.chrome.storage.local.get = async () => structuredClone(storage);
+  bg.chrome.storage.local.set = async value => Object.assign(storage, structuredClone(value));
+  const flow = portClient(bg, requestClock());
+  const cancelled = assert.rejects(flow.request({ type: 'alchemy:sessions-index', action: 'refresh' }), /结果尚未确认/);
+  await flushRequest();
+  const health = flow.request({ type: 'alchemy:query', path: '/health' });
+  flow.ports[0].worker.disconnect();
+  flow.ports[0].worker.onDisconnect.emit();
+  await cancelled;
+  release();
+  assert.equal((await health).serviceReady, true);
+  await flushRequest();
+  assert.equal(calls.filter(url => url.endsWith('/connection')).length, 1);
+  assert.equal(calls.filter(url => url.endsWith('/sessions/index')).length, 0);
+  assert.equal(storage.preferences.token, 'shared');
 });

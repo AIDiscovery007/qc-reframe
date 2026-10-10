@@ -41,7 +41,7 @@ export async function checkEndToEndKeyboard(page, scenario) {
   // A second real Enter while aria-disabled must not issue a duplicate request.
   await page.keyboard.press('Enter');
   record('pending Enter cannot submit twice', 1, await page.evaluate(() => window.endToEndKeyboard.started));
-  const settings = page.getByRole('button', { name: popup ? '连接设置' : '设置中心', exact: true });
+  const settings = page.getByRole('button', { name: popup ? '设置' : '设置中心', exact: true });
   if (moving) {
     let tabs = 0;
     // The stable settings control survives task and result rendering. Use actual Tab traversal,

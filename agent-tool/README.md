@@ -73,6 +73,8 @@
 
 预览读取构建文件、示例图及显式指定的图片，缩略图在内存生成。浏览器 fixture 会使用当前预览 origin 的 localStorage/sessionStorage；不写真实项目资产、不连接 bridge、不调用 Codex。模拟行为及 HTTP 资源测试不能替代实际扩展与真实模型验收。
 
+自动连接补充验收：`node agent-tool/ui.mjs verify --scenarios automatic-connection-workspace automatic-connection-workspace-narrow automatic-connection-popup`。合成未配对状态、首次健康请求失败及下一轮成功，验证自动恢复、无手填配对、首次不强制打开设置、离线本地设置可用与恢复后导航保留；不启动真实本机服务或调用模型。
+
 模型设置补充验收：`node agent-tool/ui.mjs verify --scenarios agent-settings-layout-wide agent-settings-layout-narrow agent-settings-layout-loading agent-settings-layout-missing agent-settings-layout-failed agent-settings-layout-custom agent-settings-layout-updating agent-settings-layout-installing`。沿用统一构建、隔离预览与Chromium，使用合成消息；分别输出模型/管理区截图，320px长路径另存详情图，并检查真实Space/Enter/Tab焦点。既有`agent-settings-*`负责业务往返，`image-settings-*`与`settings-recovery{,-narrow}`覆盖共享导航。`verify --fault settings-overflow`与`--fault settings-focus`应非零退出，分别证明横溢出与不可见卡片焦点会被检测。默认构建会写入构建产物，临时报告/profile及进程由工具管理；不访问真实账户、CLI、模型、用户数据或接受视觉基线。有效构建可加`--no-build`复用。
 
 ## UIUX 规范与诊断

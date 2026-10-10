@@ -1,7 +1,7 @@
 import { openWorkspace } from "../lib/workspace-navigation";
 import { startReminderService } from "../lib/reminder-background";
 import { browser } from "wxt/browser";
-import { bridge } from "../lib/bridge";
+import { bridge as fetchBridge, BridgeError } from "../lib/bridge";
 import { operationFor, allowsOperation, messageSource, PORT_KEEP_ALIVE } from "../lib/operation-policy";
 import { captureImage } from "../lib/capture";
 import type {
@@ -33,6 +33,47 @@ const validSubjects = (subjects: unknown, minimum = 2): subjects is MultiSubject
   && new Set(subjects.map(subject => subject.id)).size === subjects.length;
 
 export default defineBackground(() => {
+  // Only credentials live in storage; concurrent callers share an in-flight handshake.
+  let connecting: Promise<string> | undefined;
+  let preferencesWrite = Promise.resolve();
+  const savePreferences = (patch: Partial<Preferences>) => {
+    const previous = preferencesWrite;
+    const save = (async () => {
+      await previous;
+      const { preferences } = await browser.storage.local.get("preferences") as { preferences?: Preferences };
+      await browser.storage.local.set({ preferences: { mode: "style", ...preferences, ...patch } });
+    })();
+    preferencesWrite = save.catch(() => {});
+    return save;
+  };
+  const connectionToken = async (rejectedToken?: string): Promise<string> => {
+    if (connecting) return connecting;
+    const { preferences } = await browser.storage.local.get("preferences") as { preferences?: Preferences };
+    if (preferences?.token && preferences.token !== rejectedToken) return preferences.token;
+    if (connecting) return connecting;
+    connecting = (async () => {
+      const { token } = await fetchBridge<{ token: string }>("/connection", "", {});
+      if (typeof token !== "string" || !token || token.length > 1024) throw new Error("本机服务未提供有效连接凭据，请更新本机服务。");
+      await savePreferences({ token });
+      return token;
+    })();
+    try { return await connecting; }
+    finally { connecting = undefined; }
+  };
+  const bridge = async <T,>(path: string, token: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
+    signal?.throwIfAborted();
+    const credential = token || await connectionToken();
+    signal?.throwIfAborted();
+    try { return await fetchBridge<T>(path, credential, body, signal); }
+    catch (error) {
+      if (!(error instanceof BridgeError) || error.status !== 401) throw error;
+      signal?.throwIfAborted();
+      const renewed = await connectionToken(credential);
+      signal?.throwIfAborted();
+      // A 401 proves the operation was rejected before execution; network failures never replay writes.
+      return fetchBridge<T>(path, renewed, body, signal);
+    }
+  };
   const reminders = startReminderService();
   void browser.storage.local.setAccessLevel({
     accessLevel: "TRUSTED_CONTEXTS",
@@ -84,21 +125,17 @@ export default defineBackground(() => {
         selection,
         await captureImage(target, tab.id, tab.windowId),
       );
-      if (!preferences?.token) {
-        selection.stage = "图片已就绪，请先连接本机 Codex";
-      } else {
-        const project = await bridge<Project>("/projects", preferences.token, {
-          image: selection.image,
-          sourceUrl: selection.sourceUrl,
-          capture: selection.capture,
-        });
-        if (project.hidden && !await showsHiddenProjects()) {
-          selection = { id: selection.id, sourceUrl: "" };
-          throw new Error("该项目已隐藏，请先点击小眼睛显示隐藏项目");
-        }
-        selection = { ...await projectReference(project.id, preferences.token), id: selection.id };
-        selection.stage = "参考模板已就绪，请选择路径生成提示词";
+      const project = await bridge<Project>("/projects", preferences?.token || "", {
+        image: selection.image,
+        sourceUrl: selection.sourceUrl,
+        capture: selection.capture,
+      });
+      if (project.hidden && !await showsHiddenProjects()) {
+        selection = { id: selection.id, sourceUrl: "" };
+        throw new Error("该项目已隐藏，请先点击小眼睛显示隐藏项目");
       }
+      selection = { ...await projectReference(project.id, preferences?.token || ""), id: selection.id };
+      selection.stage = "参考模板已就绪，请选择路径生成提示词";
     } catch (error) {
       selection.error = error instanceof Error ? error.message : String(error);
     } finally {
@@ -111,9 +148,8 @@ export default defineBackground(() => {
   const collect = async (target: ImageTarget, tab: { id: number; windowId: number; url?: string }): Promise<CollectionResult> => {
     if (!target || typeof target.src !== "string") throw new Error("请选择有效图片");
     const { preferences } = await browser.storage.local.get("preferences") as { preferences?: Preferences };
-    if (!preferences?.token) throw new Error("请先在设置中连接本机服务，再加入图片");
     const captured = await captureImage(target, tab.id, tab.windowId);
-    const project = await bridge<Project & { created?: boolean }>("/projects", preferences.token, {
+    const project = await bridge<Project & { created?: boolean }>("/projects", preferences?.token || "", {
       ...captured, sourceUrl: tab.url || "",
     });
     return { projectId: project.id, created: project.created ?? true };
@@ -384,13 +420,8 @@ export default defineBackground(() => {
         if (typeof message.show !== "boolean") throw new Error("无效显示设置");
         await browser.storage.session.set({ showHiddenProjects: message.show });
         return message.show;
-      case "alchemy:connect": {
-        if (typeof message.token !== "string") throw new Error("无效配对码");
-        const health = await bridge<{ ready: boolean; skill: string }>("/health", message.token);
-        if (!health.ready) throw new Error("服务已启动，但未找到图片逆向技能。");
-        await browser.storage.local.set({ preferences: { ...preferences, mode: preferences?.mode || "style", token: message.token } });
-        return health;
-      }
+      case "alchemy:connect":
+        return bridge("/health", token);
       case "alchemy:project-views": {
         const stored = await browser.storage.local.get(null);
         return Object.fromEntries(Object.entries(stored).filter(([key]) => /^projectView:[a-f0-9]{64}$/.test(key))
@@ -408,7 +439,7 @@ export default defineBackground(() => {
       }
       case "alchemy:mode":
         if (!modes.includes(message.mode)) throw new Error("无效模式");
-        await browser.storage.local.set({ preferences: { ...preferences, token, mode: message.mode } });
+        await savePreferences({ mode: message.mode });
         return;
       case "alchemy:query":
         if (typeof message.path !== "string" || !/^\/(health|agents|models(?:\?agent=(?:pi|codex))?|cli\/status(?:\?agent=(?:pi|codex))?|jobs(?:\/[\w-]+)?|projects(?:\/[\da-f]{64})?)$/.test(message.path))

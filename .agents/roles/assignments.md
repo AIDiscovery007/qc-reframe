@@ -9,3 +9,4 @@
 | [uiux-engineer](uiux-engineer.md) | [梳理 Reframe UIUX 规范与工具](codex://threads/01a11556-7e12-7440-b956-f968b3a00034) | UIUX 规范、设计一致性与诊断工具实现维护。 | 本机 `agent-logs/01a11556-7e12-7440-b956-f968b3a00034.md` |
 | [executor](executor.md) | [多 Agent 逆向接入](codex://threads/01a120db-5bf4-7e03-977a-c398f8da0f5f) | 本机 Agent 适配、设置卡片与相关验证；用户未指定编号。 | 本机 `agent-logs/01a120db-5bf4-7e03-977a-c398f8da0f5f.md` |
 | [executor](executor.md) | [API 生图渠道接入](codex://threads/01a120e4-7515-7b63-a192-aab00d2e724f) | 生图 API 适配与设置配置、快照及验证；用户未指定编号。 | 本机 `agent-logs/01a120e4-7515-7b63-a192-aab00d2e724f.md` |
+| [executor](executor.md) | [自动连接与设置精简](codex://threads/01a123bb-50cf-73a3-87ac-108070dc2ea6) | 本机服务自动接入、设置精简与 PR 交付；用户未指定编号。 | 本机 `agent-logs/01a123bb-50cf-73a3-87ac-108070dc2ea6.md` |

@@ -183,7 +183,7 @@ async function runExtension({ progress = () => {}, extensionPath = defaultExtens
     await popup.locator('.app').waitFor({ state: 'visible' });
     const popupState = await popup.evaluate(() => ({ token: getComputedStyle(document.querySelector('.app')).getPropertyValue('--yellow').trim(), sheets: document.styleSheets.length, text: document.body.innerText }));
     check(current, 'Production popup loads styles and unpaired UI', { token: popupState.token, sheets: popupState.sheets, unpaired: popupState.text.includes('本机未连接') }, 'Brand token, stylesheet and unpaired state', !!popupState.token && popupState.sheets > 0 && popupState.text.includes('本机未连接'));
-    const settings = popup.getByRole('button', { name: '连接设置', exact: true });
+    const settings = popup.getByRole('button', { name: '设置', exact: true });
     await settings.click();
     const firstState = await settings.getAttribute('aria-expanded');
     await settings.press('Enter');

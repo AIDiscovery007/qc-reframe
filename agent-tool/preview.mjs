@@ -50,7 +50,7 @@ const job = {
 };
 
 // Receipts travel over the parent IPC channel, never through page-controlled state.
-const regressions = Object.fromEntries(['image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
+const regressions = Object.fromEntries(['automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
   .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
 const previewSources = ['agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs', 'browser-extension/lib/operation-policy.ts', 'browser-extension/bridge/image-order.mjs'];
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -285,6 +285,7 @@ const server = createServer(async (req, res) => {
         const batchItems=request=>request.projects.map(item=>({projectId:item.projectId,inputRevision:item.inputRevision,title:projects.find(p=>p.id===item.projectId)?.title||'已删除项目',eligible:batchAllAccepted||item.projectId!==projects[3]?.id,...(!batchAllAccepted&&item.projectId===projects[3]?.id?{error:'参考图缺失'}:{})}));
         const service={service:'qc-alchemy',version:'0.3.2',managed:previewOptions.get('restart')!=='manual',canRestart:!['old','manual'].includes(previewOptions.get('restart')),instanceId:'preview-first'};
         let restartingUntil=0;
+        let connectionFailures=previewOptions.has('connectionRegression')?1:0;
       let imageSaveFailed=false;
       const imageSettings={provider:'codex',configs:{openai:{baseUrl:'https://api.openai.com/v1',model:'',hasApiKey:false},gemini:{baseUrl:'https://generativelanguage.googleapis.com/v1beta',model:'',hasApiKey:false}}};
         const agents={selected:'codex',agents:[{id:'codex',label:'Codex',model:'preview-vision'},{id:'pi',label:'Pi',model:'preview/pi-model'}]};
@@ -438,6 +439,10 @@ const server = createServer(async (req, res) => {
           }
           if(message.type==='alchemy:upload-reference'){if(new URLSearchParams(location.search).get('swap')==='failed')return {error:'互换失败（预览），请重试'};let p=projects.find(p=>(p.image||template)===message.image);if(!p){p={id:crypto.randomUUID(),title:'上传的参考图',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),sourceUrl:'',capture:'original',jobs:[],image:message.image};projects.unshift(p);touch(p);}data.selection={...selection(p),image:message.image};return {ok:true,value:data.selection};}
           if(message.type==='alchemy:service-restart'){if(previewOptions.get('restart')==='failed')return {error:'重启准备失败，原服务仍在运行。请查看本机服务日志后重试。'};const ticket={previousInstanceId:service.instanceId,restartId:crypto.randomUUID()};restartingUntil=Date.now()+1800;setTimeout(()=>Object.assign(service,{instanceId:crypto.randomUUID(),restartId:ticket.restartId}),1800);return {ok:true,value:ticket};}
+          if(message.type==='alchemy:query'&&message.path==='/health'&&previewOptions.has('connectionRegression')){
+            if(connectionFailures-- > 0)return {error:'本机服务未运行，启动后将自动连接。'};
+            data.preferences.token='preview';
+          }
           if(message.type==='alchemy:query'&&message.path==='/health'&&(Date.now()<restartingUntil||previewOptions.get('restart')==='offline'))return {error:'无法连接本机服务（预览）'};
           if(settingsUi==='loading'&&(message.type==='alchemy:models-refresh'||message.type==='alchemy:query'&&['/models','/cli/status'].includes(message.path)))return await new Promise(()=>{});
           if(message.type==='alchemy:query'&&message.path==='/cli/status?agent=pi'){const value=structuredClone(piCli);if(previewOptions.has('agentSettingsRegression'))await new Promise(resolve=>setTimeout(resolve,500));return {ok:true,value};}
@@ -636,6 +641,8 @@ const server = createServer(async (req, res) => {
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/image-settings-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('agentSettingsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/agent-settings-regression.js"></script></body>'));
+    if (['/workspace.html', '/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('connectionRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/automatic-connection-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('settingsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/settings-recovery-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('batchRecreateRegression'))
