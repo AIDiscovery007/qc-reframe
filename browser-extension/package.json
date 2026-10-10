@@ -2,7 +2,7 @@
   "name": "qc-reframe-extension",
   "description": "Turn selected images into prompts with your local Codex agent.",
   "private": true,
-  "version": "0.4.4",
+  "version": "0.5.0",
   "type": "module",
   "engines": {
     "node": ">=22.15.0"

@@ -1,18 +1,18 @@
 ![QC-Reframe — 把灵感，变成你的下一张图。](browser-extension/docs/media/hero.svg)
 
-**选一张参考图，用你的 Codex 细查逆向，再直接生成图片。**
+**选一张参考图，用你的 Codex 或 Pi 细查逆向，再直接生成图片。**
 
-在浏览器里收集灵感，在本机工作台调整主体、提示词与结果。沿用 Codex 登录和额度，无需另外填写模型 API Key。
+在浏览器里收集灵感，在本机工作台调整主体、提示词与结果。默认沿用 Codex 登录和额度，也可独立选择 API 或本机 Magpie 生图渠道。
 
-**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.4.4](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.4)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
+**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.5.0](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.5.0)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
 
-## v0.4.4，一次启动多个项目，自动完成复刻
+## v0.5.0，自选逆向 Agent，独立配置生图
 
-在「全部项目 → 批量管理」勾选项目，点击「批量完整复刻」，统一设置语言和比例，即可依次生成提示词与图片。任务中心查看进度、取消单项或停止排队；操作栏适配窄屏，选择数量变化时不再跳动。
+逆向可选 Codex 或 Pi，CLI 管理随顶部卡片切换，浏览器自动连接已启动的本机服务。生图独立选择 Codex、OpenAI 兼容 API、Gemini API 或本机 Magpie；Magpie 支持附图、连续和批量生成，在目标尺寸旁切换模型，按模型适配尺寸。图片已生成但保存失败时，可重试本地保存。
 
-本次升级需先等待任务结束，再更新完整仓库并重启本机服务，再重载扩展、刷新工作台和网页；已有项目、历史结果与配对保留。
+本次升级需先等待任务结束，再更新完整仓库并重启本机服务，重载原扩展、刷新工作台和网页；已有项目、历史结果与连接凭据保留。
 
-[查看 v0.4.4 更新与升级说明 →](browser-extension/docs/releases/v0.4.4.md)
+[查看 v0.5.0 更新与升级说明 →](browser-extension/docs/releases/v0.5.0.md)
 
 ## 工作台，让画面成为主角
 
@@ -63,10 +63,10 @@
 
 ## 开始你的第一张图
 
-**[把安装交给 Codex →](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　复制安装指令，完成环境检查、本机服务启动与浏览器配对；同页也有手动安装和升级步骤。
+**[把安装交给 Codex →](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　复制安装指令，完成环境检查、本机服务启动与浏览器自动连接；同页也有手动安装和升级步骤。
 
-需要已登录的 Codex CLI、Node.js 22.15+ 和可加载 MV3 扩展的浏览器。Codex 内置浏览器已有使用验证，也保留 Chrome 路径；生图需账户支持内置生图能力。**首次安装需要完整仓库，Chrome ZIP 仅含浏览器端。**
+默认路径需要已登录的 Codex CLI、Node.js 22.15+ 和可加载 MV3 扩展的浏览器；Pi 一键安装要求 Node.js 22.19+。Codex 内置浏览器已有使用验证，也保留 Chrome 路径；内置生图需账户支持，独立 API/Magpie 则使用所配置服务的权限与额度。**首次安装需要完整仓库，Chrome ZIP 仅含浏览器端。**
 
 [安装与排错](browser-extension/docs/INSTALL_WITH_CODEX.md) · [功能导览](browser-extension/docs/FEATURES.md) · [版本变化](browser-extension/docs/releases/README.md) · [贡献指南](Contribution.md)
 
-本机保存不代表离线推理；选中的图片，以及会话创作中所选会话的用户文本和助手最终回复，会按你的 Codex 配置交给模型。逆向用于近似复刻与风格迁移，不保证恢复原始 Prompt。[数据与使用边界 →](browser-extension/README.md#图片与数据)
+本机保存不代表离线推理；选中的图片，以及会话创作中所选会话的用户文本和助手最终回复，会按所选逆向 Agent 或生图渠道的配置交给模型。逆向用于近似复刻与风格迁移，不保证恢复原始 Prompt。[数据与使用边界 →](browser-extension/README.md#图片与数据)
