@@ -1,6 +1,6 @@
-import { access, readFile, writeFile, mkdir, mkdtemp, rename, rm, realpath, symlink } from 'node:fs/promises';
+import { access, readFile, writeFile, mkdir, mkdtemp, rename, rm, realpath, symlink, lstat } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { dirname, join, resolve, relative, delimiter } from 'node:path';
+import { dirname, join, resolve, relative, delimiter, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCliCommand, newerVersion, resolveExecutable } from './cli.mjs';
 
@@ -107,6 +107,21 @@ function cleanEnvironment(env, directory) {
 }
 const requiredFlags = ['--mode', '--print', '--no-tools', '--no-session', '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files', '--no-themes', '--no-approve', '--offline', '--system-prompt', '--append-system-prompt', '--extension', '--tools', '--model', '--provider', '--thinking'];
 
+// Bind installer ownership to the directory identity; names alone never authorize deletion.
+async function directoryIdentity(path) {
+  const info = await lstat(path);
+  if (!info.isDirectory() || await realpath(path) !== path) throw Error('Pi 安装目录已变化。');
+  return `${info.dev}:${info.ino}`;
+}
+async function ownedRelease(root, pointer) {
+  if (!/^release-[a-zA-Z0-9]+$/.test(pointer?.release) || !versionOf(pointer.version)) return;
+  const path = join(root, pointer.release), identity = await directoryIdentity(path);
+  const marker = join(path, '.reframe-managed.json');
+  if (!(await lstat(marker)).isFile()) return;
+  const owner = JSON.parse(await readFile(marker, 'utf8'));
+  if (owner.package === PACKAGE && owner.release === pointer.release && owner.identity === identity) return { path, identity };
+}
+
 export function createPiCliManager({ env = process.env, dataDir, run = runCliCommand, latest = latestPiRelease,
   inspect = () => inspectPi({ env, dataDir, run }), verify = async options => (await import('./pi-agent.mjs')).verifyPiInstallation(options), runtime = () => localRuntime(env), onUpdated = async () => {}, now = Date.now } = {}) {
   let installation, node, checkedAt, latestVersion, checkError, operation, controller, closed = false, checking, inspectedAt = 0, lastAttempt;
@@ -136,10 +151,21 @@ export function createPiCliManager({ env = process.env, dataDir, run = runCliCom
     const signal = controller.signal, target = { ...installation }, requested = latestVersion;
     operation = { status: 'running', stage: install ? '正在安装 Pi…' : '正在更新 Pi…', startedAt: new Date(now()).toISOString() };
     void (async () => {
-      let directory, activated = false, refreshStarted = false, npmStarted = false;
+      let directory, candidateIdentity, activated = false, refreshStarted = false, npmStarted = false;
       try {
-        const root = rootPath(env, dataDir); await mkdir(root, { recursive: true, mode: 0o700 });
+        await mkdir(rootPath(env, dataDir), { recursive: true, mode: 0o700 });
+        const root = await realpath(rootPath(env, dataDir)), rootIdentity = await directoryIdentity(root);
+        let previousPointer, previous, candidate;
+        if (target.source === 'managed') {
+          try {
+            previousPointer = JSON.parse(await readFile(join(root, 'current.json'), 'utf8'));
+            previous = await ownedRelease(root, previousPointer);
+            if (previous && (await packageEntry(previous.path, target.version)).executable !== target.executable) previous = undefined;
+          } catch { previous = undefined; } // Legacy or unproven directories stay untouched.
+        }
         directory = await mkdtemp(join(root, 'release-'));
+        candidateIdentity = await directoryIdentity(directory);
+        await writeFile(join(directory, '.reframe-managed.json'), JSON.stringify({ package: PACKAGE, release: basename(directory), identity: candidateIdentity }), { mode: 0o600 });
         const childEnv = cleanEnvironment(target.managerEnv || { ...env, PATH: `${dirname(node.node)}${delimiter}${env.PATH || ''}` }, directory);
         await writeFile(join(directory, 'npm-user'), '', { mode: 0o600 }); await writeFile(join(directory, 'npm-global'), '', { mode: 0o600 });
         const npmArgs = ['install', ...(target.source === 'npm' ? ['--global'] : []), '--prefix', target.source === 'npm' ? target.prefix : directory, `${PACKAGE}@${requested}`,
@@ -160,7 +186,7 @@ export function createPiCliManager({ env = process.env, dataDir, run = runCliCom
         signal.throwIfAborted();
         operation.stage = '正在验证 Pi 安装…';
         if (target.source !== 'npm') {
-          const entry = await packageEntry(directory, requested);
+          const entry = candidate = await packageEntry(directory, requested);
           const reported = versionOf(await run(node.node, [entry.executable, '--version'], { env: childEnv, cwd: directory, signal }));
           const help = await run(node.node, [entry.executable, '--help', '--offline', '--no-extensions', '--no-skills', '--no-context-files'], { env: childEnv, cwd: directory, signal });
           if (reported !== requested || !requiredFlags.every(flag => help.includes(flag)) || !/\brpc\b/.test(help)) throw Error('新 Pi 缺少 Reframe 所需的 CLI 接口，保留原安装。');
@@ -178,14 +204,41 @@ export function createPiCliManager({ env = process.env, dataDir, run = runCliCom
           await verify({ executable: target.executable, node: target.nodeResolved || target.node, env: childEnv, dir: directory, signal });
         }
         await discover();
-        if (installation.version !== requested || target.source === 'npm' && (installation.source !== 'npm' || !sameNpmInstallation(installation, target))) throw Error('更新后的 Pi 路径或版本不符合预期。');
+        if (installation.version !== requested || (target.source === 'npm' ? installation.source !== 'npm' || !sameNpmInstallation(installation, target) : installation.source !== 'managed' || installation.executable !== candidate.executable)) throw Error('更新后的 Pi 路径或版本不符合预期。');
         refreshStarted = true; await onUpdated();
+        signal.throwIfAborted();
+        if (activated) {
+          try {
+            const stillActive = async () => {
+              signal.throwIfAborted();
+              const pointer = JSON.parse(await readFile(join(root, 'current.json'), 'utf8'));
+              if (await directoryIdentity(root) !== rootIdentity || await directoryIdentity(directory) !== candidateIdentity || pointer.release !== basename(directory) || pointer.version !== requested) throw Error('Pi 安装来源已变化。');
+            };
+            for (const name of ['npm-cache', 'npm-user', 'npm-global', 'pi-home', 'verification.json', 'verification-system.txt']) {
+              await stillActive();
+              const path = join(directory, name);
+              const info = await lstat(path).catch(error => { if (error.code !== 'ENOENT') throw error; });
+              if (!info) continue;
+              if (info.isDirectory()) await directoryIdentity(path);
+              else if (!info.isFile() || await realpath(path) !== path) throw Error('Pi 安装临时文件已变化。');
+              await rm(path, { recursive: info.isDirectory(), force: true });
+            }
+            if (previous) {
+              await stillActive();
+              const owned = await ownedRelease(root, previousPointer).catch(() => undefined);
+              if (owned?.identity === previous.identity && owned.path === previous.path && owned.path !== directory) await rm(owned.path, { recursive: true, force: true });
+            }
+          } catch (error) {
+            if (signal.aborted) throw error;
+            operation.cleanupWarning = 'Pi 已更新，部分安装缓存或旧版本未能清理。';
+          }
+        }
         operation = { ...operation, status: 'completed', stage: 'Pi 已就绪，请重新验证模型。', finishedAt: new Date(now()).toISOString() };
       } catch (error) {
         await discover().catch(() => {});
         if (!refreshStarted && (npmStarted || activated || installation?.version !== target.version || installation?.executable !== target.executable)) { try { await onUpdated(); } catch {} }
         operation = { ...operation, status: 'failed', stage: activated ? 'Pi 已安装，复检未完成' : 'Pi 安装或更新未完成', error: error.message, finishedAt: new Date(now()).toISOString() };
-      } finally { if (directory && !activated) await rm(directory, { recursive: true, force: true }).catch(() => {}); controller = undefined; }
+      } finally { if (directory && candidateIdentity && !activated && await directoryIdentity(directory).catch(() => undefined) === candidateIdentity) await rm(directory, { recursive: true, force: true }).catch(() => {}); controller = undefined; }
     })();
     return view();
   };

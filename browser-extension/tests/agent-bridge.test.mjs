@@ -14,9 +14,10 @@ async function setup(t) {
   const reverse = [], generation = [], features = [];
   const modelStore = (provider, model) => ({ busy: false, selectedModel: model, selection: () => ({ provider, model, reasoningEffort: 'high' }), list: async () => ({ selected: model }), refresh: async () => ({ selected: model }), invalidate: async () => {}, close() {} });
   const models = modelStore('openai', 'codex-model'), piModels = modelStore('pi-provider', 'pi-model');
-  let unsupported = false;
+  let unsupported = false, piUpdates = 0;
   const options = { dataDir: dir, skillPath, generationSkillPath: skillPath, models, piModels,
     cli: { busy: false, status: async () => ({}), close() {} },
+    piCli: { busy: false, status: async () => ({}), update: async () => { piUpdates++; return {}; }, close() {} },
     compatibility: { snapshot: () => ({}), getCompatibility: async () => { features.push('codex'); return unsupported ? { features: { reverse: { status: 'unsupported', message: 'Codex reverse unavailable' } } } : {}; } },
     agent: args => new Promise((resolve, reject) => { reverse.push({ args, resolve, reject }); args.signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true }); }),
     generator: async args => { generation.push(args); return decodeImage(image); } };
@@ -25,7 +26,7 @@ async function setup(t) {
   const request = async (path, body) => { const response = await fetch(`http://127.0.0.1:${app.server.address().port}${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${app.token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); return { status: response.status, body: await response.json() }; };
   const close = async () => { app.server.closeAllConnections(); await new Promise(r => app.server.close(r)); await new Promise(r => setTimeout(r, 30)); };
   t.after(async () => { await close(); await rm(dir, { recursive: true, force: true }); });
-  return { dir, reverse, generation, models, piModels, request, unsupported: () => { unsupported = true; }, restart: async () => { await close(); app = await createBridge(options); await listen(); } };
+  return { dir, reverse, generation, models, piModels, request, piUpdates: () => piUpdates, unsupported: () => { unsupported = true; }, restart: async () => { await close(); app = await createBridge(options); await listen(); } };
 }
 
 test('user runs Pi reverse with frozen settings and independent Codex auto generation', async t => {
@@ -39,10 +40,14 @@ test('user runs Pi reverse with frozen settings and independent Codex auto gener
   await wait(() => s.reverse.length);
   assert.deepEqual(s.reverse[0].args.modelSettings, { agent: 'pi', provider: 'pi-provider', model: 'pi-model', reasoningEffort: 'high' });
   assert.equal((await s.request('/agents/select', { agent: 'codex' })).status, 409);
+  assert.equal((await s.request('/cli/update?agent=pi', {})).status, 409);
+  assert.equal(s.piUpdates(), 0, 'running Pi keeps its installation until the task finishes');
   s.models.selection = () => ({ model: 'changed-codex' });
   s.piModels.selection = () => ({ model: 'changed-pi' });
   s.reverse[0].resolve(result);
   await wait(async () => !(await s.request('/health')).body.active);
+  assert.equal((await s.request('/cli/update?agent=pi', {})).status, 202);
+  assert.equal(s.piUpdates(), 1);
   assert.equal(s.generation[0].modelSettings.model, 'codex-model');
   const saved = (await s.request(`/jobs/${task.body.id}`)).body;
   assert.equal(saved.agent, 'pi'); assert.equal(saved.provider, 'pi-provider'); assert.equal(saved.model, 'pi-model');

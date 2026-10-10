@@ -68,6 +68,7 @@ test('user cannot install or update either CLI while a model or another CLI is b
     owner.busy = false;
   }
   s.piCli.busy = true;
+  assert.equal((await s.request('/jobs', {})).status, 409);
   for (const agent of ['codex', 'pi']) {
     assert.equal((await s.request(`/models?agent=${agent}`)).status, 409);
     assert.equal((await s.request(`/models/verify?agent=${agent}`, { model: 'test' })).status, 409);
