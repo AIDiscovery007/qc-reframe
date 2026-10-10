@@ -20,6 +20,9 @@
 
 | 组件 | 用法 | 源码 |
 | --- | --- | --- |
+| ImageGenerationSettings | 设置中的生图渠道、私有凭据及保存反馈。 | [browser-extension/entrypoints/popup/ImageGenerationSettings.tsx](../../../browser-extension/entrypoints/popup/ImageGenerationSettings.tsx) |
+| AgentCliSettings | 按管理目标读取CLI状态、安装与更新，不改变逆向Agent，迟到响应按目标隔离。 | [browser-extension/entrypoints/popup/AgentCliSettings.tsx](../../../browser-extension/entrypoints/popup/AgentCliSettings.tsx) |
+| AgentSettings | 设置中的原生 Agent 单选卡片，独立模型、失败保留与旧服务回退。 | [browser-extension/entrypoints/popup/AgentSettings.tsx](../../../browser-extension/entrypoints/popup/AgentSettings.tsx) |
 | SelectField | 所有下拉框；保留原生键盘、禁用及 Escape 行为。 | [browser-extension/entrypoints/popup/SelectField.tsx](../../../browser-extension/entrypoints/popup/SelectField.tsx) |
 | ImagePreview / ImageViewer | 可放大图片；列表缩略图不开放预览，编辑输入才传旋转能力。 | [browser-extension/entrypoints/popup/ImagePreview.tsx](../../../browser-extension/entrypoints/popup/ImagePreview.tsx) |
 | QuickWorkspace | popup 与网页浮层的轻量创作，不复制工作台完整编辑能力。 | [browser-extension/entrypoints/popup/QuickWorkspace.tsx](../../../browser-extension/entrypoints/popup/QuickWorkspace.tsx) |
@@ -90,7 +93,11 @@
 | image-order-keyboard-late | popup 320×740 | /popup.html?state=projects&mode=style&inputSaveDelay=4000 | imageOrderKeyboard |
 | auto-style | workspace 1440×1000 | /workspace.html?state=projects&mode=style&autoStyleRegression=1&inputSaveDelay=250 | autoStyleRegression |
 | creation-context | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&inputSaveDelay=1800&creationContextRegression=mode | creationContextRegression |
+| settings-recovery-narrow | workspace 320×740 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
 | settings-recovery | workspace 1440×1000 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
+| image-settings-wide | workspace 1440×1000 | /workspace.html?state=library&imageSettingsRegression=wide | imageSettingsRegression |
+| image-settings-narrow | workspace 360×740 | /workspace.html?state=library&imageSettingsRegression=narrow | imageSettingsRegression |
+| image-settings-legacy | workspace 1440×1000 | /workspace.html?state=library&imageSettingsRegression=legacy | imageSettingsRegression |
 | example-workspace-empty | workspace 1440×1000 | /workspace.html?state=empty | UI-EXAMPLE-STATE |
 | example-popup-empty | popup 400×740 | /popup.html?state=empty | UI-EXAMPLE-STATE |
 | example-input-loading | workspace 1440×1000 | /workspace.html?state=alignment&reference=pending&referenceDelay=60000 | UI-EXAMPLE-STATE |
@@ -107,6 +114,17 @@
 | example-image-viewer-result-short | workspace 640×360 | /workspace.html?state=alignment | UI-EXAMPLE-KEYBOARD, UI-IMAGE-VIEWPORT |
 | example-image-viewer-result-popup | popup 400×740 | /popup.html?state=alignment | UI-EXAMPLE-KEYBOARD, UI-IMAGE-VIEWPORT |
 | example-native-controls | workspace 1440×1000 | /workspace.html?state=alignment | UI-EXAMPLE-KEYBOARD |
+| agent-settings-layout-wide | workspace 1440×1000 | /workspace.html?state=library&settingsUi=wide&cli=wide | UI-EXAMPLE-STATE |
+| agent-settings-layout-narrow | workspace 320×740 | /workspace.html?state=library&settingsUi=narrow&cli=narrow | UI-EXAMPLE-STATE |
+| agent-settings-layout-loading | workspace 320×740 | /workspace.html?state=library&settingsUi=loading&cli=loading | UI-EXAMPLE-STATE |
+| agent-settings-layout-missing | workspace 320×740 | /workspace.html?state=library&settingsUi=missing&cli=missing | UI-EXAMPLE-STATE |
+| agent-settings-layout-failed | workspace 320×740 | /workspace.html?state=library&settingsUi=failed&cli=failed | UI-EXAMPLE-STATE |
+| agent-settings-layout-custom | workspace 320×740 | /workspace.html?state=library&settingsUi=custom&cli=custom | UI-EXAMPLE-STATE |
+| agent-settings-layout-updating | workspace 320×740 | /workspace.html?state=library&settingsUi=updating&cli=updating | UI-EXAMPLE-STATE |
+| agent-settings-layout-installing | workspace 320×740 | /workspace.html?state=library&settingsUi=installing&cli=installing | UI-EXAMPLE-STATE |
+| agent-settings-wide | workspace 1440×1000 | /workspace.html?state=library&agentSettingsRegression=wide | agentSettingsRegression |
+| agent-settings-narrow | workspace 320×740 | /workspace.html?state=library&agentSettingsRegression=narrow | agentSettingsRegression |
+| agent-settings-legacy | workspace 1440×1000 | /workspace.html?state=library&agentSettingsRegression=legacy | agentSettingsRegression |
 
 ## CSS 变量清单
 

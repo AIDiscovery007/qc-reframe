@@ -263,7 +263,7 @@ export default defineBackground(() => {
     switch (message.type) {
       case "alchemy:open-workspace": {
         if (message.view !== undefined && !["tasks", "settings"].includes(message.view)) throw new Error("无效工作台页面");
-        if (message.section !== undefined && (message.view !== "settings" || !["cli", "models", "connection"].includes(message.section))) throw new Error("无效设置页面");
+        if (message.section !== undefined && (message.view !== "settings" || !["cli", "pi-cli", "models", "generation", "connection"].includes(message.section))) throw new Error("无效设置页面");
         const id = crypto.randomUUID();
         // Explicit UI context wins over another view's global selection and mode.
         const draft = message.draft;
@@ -358,9 +358,12 @@ export default defineBackground(() => {
           throw error;
         }
       case "alchemy:cli-check":
-        return bridge("/cli/check", token, {});
       case "alchemy:cli-update":
-        return bridge("/cli/update", token, {});
+      case "alchemy:cli-install": {
+        if (message.agent !== undefined && !["codex", "pi"].includes(message.agent)) throw new Error("无效 Agent");
+        const action = message.type.slice("alchemy:cli-".length);
+        return bridge(`/cli/${action}${message.agent === "pi" ? "?agent=pi" : ""}`, token, {});
+      }
       case "alchemy:state": {
         let visibleSelection = selection;
         if (selection && !showHiddenProjects && (selection.projectId || /^[\da-f-]{36}$/.test(selection.jobId || ""))) {
@@ -408,7 +411,7 @@ export default defineBackground(() => {
         await browser.storage.local.set({ preferences: { ...preferences, token, mode: message.mode } });
         return;
       case "alchemy:query":
-        if (typeof message.path !== "string" || !/^\/(health|models|cli\/status|jobs(?:\/[\w-]+)?|projects(?:\/[\da-f]{64})?)$/.test(message.path))
+        if (typeof message.path !== "string" || !/^\/(health|agents|models(?:\?agent=(?:pi|codex))?|cli\/status(?:\?agent=(?:pi|codex))?|jobs(?:\/[\w-]+)?|projects(?:\/[\da-f]{64})?)$/.test(message.path))
           throw new Error("无效请求");
         return bridge(`${message.path}${showHiddenProjects && ["/projects", "/jobs", "/health"].includes(message.path) ? "?includeHidden=true" : ""}`, token);
       case "alchemy:gallery": {
@@ -438,12 +441,22 @@ export default defineBackground(() => {
       case "alchemy:project-thumbnail":
         if (typeof message.id !== "string" || !/^[\da-f]{64}$/.test(message.id) || (message.reference !== undefined && typeof message.reference !== "boolean")) throw new Error("无效项目");
         return bridge(`/projects/${message.id}/thumbnail${message.reference ? "?reference=1" : ""}`, token);
+      case "alchemy:image-settings":
+        return bridge("/image-settings", token);
+      case "alchemy:image-settings-save":
+        if (!message.settings || typeof message.settings !== "object" || Array.isArray(message.settings)) throw new Error("无效生图设置");
+        return bridge("/image-settings", token, message.settings);
+      case "alchemy:agent-select":
+        if (!["codex", "pi"].includes(message.agent)) throw new Error("请选择支持的 Agent");
+        return bridge("/agents/select", token, { agent: message.agent });
       case "alchemy:models-refresh":
-        return bridge("/models/refresh", token, {});
+        if (message.agent !== undefined && !["codex", "pi"].includes(message.agent)) throw new Error("请选择支持的 Agent");
+        return bridge(`/models/refresh${message.agent === "pi" ? "?agent=pi" : ""}`, token, {});
       case "alchemy:model-verify":
+        if (message.agent !== undefined && !["codex", "pi"].includes(message.agent)) throw new Error("请选择支持的 Agent");
         if (typeof message.model !== "string" || !message.model || message.model.length > 200) throw new Error("请选择有效模型");
         if (message.reasoningEffort !== undefined && (typeof message.reasoningEffort !== "string" || !message.reasoningEffort || message.reasoningEffort.length > 50)) throw new Error("请选择有效推理强度");
-        return bridge("/models/verify", token, { model: message.model, reasoningEffort: message.reasoningEffort });
+        return bridge(`/models/verify${message.agent === "pi" ? "?agent=pi" : ""}`, token, { model: message.model, reasoningEffort: message.reasoningEffort });
       case "alchemy:cancel":
         if (typeof message.id !== "string" || !/^[\w-]+$/.test(message.id)) throw new Error("无效任务");
         return bridge(`/jobs/${message.id}/cancel`, token, {});

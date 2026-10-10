@@ -36,8 +36,8 @@ export async function verifyModel({ cwd, selection, signal }) {
   if (!result.text.trim()) throw new Error("Codex 未返回有效响应，请重新验证。");
 }
 
-export async function createModelStore({ dataDir, cwd, readCatalog = readModelCatalog, verify = verifyModel }) {
-  const path = join(dataDir, "model-settings.json");
+export async function createModelStore({ dataDir, cwd, readCatalog = readModelCatalog, verify = verifyModel, filename = "model-settings.json" }) {
+  const path = join(dataDir, filename);
   let selected;
   try { selected = JSON.parse(await readFile(path, "utf8")); }
   catch (error) { if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error; }
@@ -91,7 +91,7 @@ export async function createModelStore({ dataDir, cwd, readCatalog = readModelCa
       if (!item) throw Object.assign(new Error("请选择当前列表中的图像输入模型。"), { status: 400 });
       if (reasoningEffort !== undefined && !effortOptions(item).some((option) => option.reasoningEffort === reasoningEffort))
         throw Object.assign(new Error("请选择当前模型支持的推理强度，刷新列表后重试。"), { status: 400 });
-      const next = { model, reasoningEffort: reasoningEffort ?? item.reasoningEffort, provider: catalog.provider, accountKey: catalog.accountKey };
+      const next = { model, reasoningEffort: reasoningEffort ?? item.reasoningEffort, provider: item.provider ?? catalog.provider, accountKey: catalog.accountKey };
       controller = new AbortController();
       const signal = controller.signal;
       verification = { model, reasoningEffort: next.reasoningEffort, status: "running" };

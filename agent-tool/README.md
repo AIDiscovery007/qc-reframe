@@ -55,6 +55,10 @@
 
 ## 界面预览
 
+逆向 Agent 设置：`node agent-tool/ui.mjs verify --scenarios agent-settings-wide agent-settings-narrow agent-settings-legacy`。覆盖 Codex/Pi 卡片、独立模型目录、保存失败、重开与旧服务兼容，使用合成消息，不调用真实 CLI 或模型。
+
+生图 API 设置：`node agent-tool/ui.mjs verify --scenarios image-settings-wide image-settings-narrow image-settings-legacy`。复用生产设置组件，覆盖两种 API、保存失败、重开、密钥不回显、清除和窄屏；仅合成消息，不访问真实凭据、供应商或项目。桥接与协议反例：`node --test browser-extension/tests/image-api-bridge.test.mjs browser-extension/tests/image-api.test.mjs browser-extension/tests/image-settings.test.mjs`，使用临时配置、合成图片与 stub，不调用真实模型。
+
 先运行 `npm --prefix browser-extension run build`，再运行 `npm --prefix browser-extension run preview`。原来的 `cd browser-extension && npm run preview` 入口保留。仅监听 `127.0.0.1`，按 Ctrl+C 停止自己的预览进程。
 
 - `PREVIEW_PORT`：默认 `43188`，整数 0–65535；0 自动分配空闲端口，实际地址见 stdout。占用端口报错，不关闭已有服务。
@@ -68,6 +72,8 @@
 - 查询参数和界面场景见 [扩展预览文档](../browser-extension/README.md)。回归脚本仍位于 `browser-extension/tests/`；预览只负责加载。
 
 预览读取构建文件、示例图及显式指定的图片，缩略图在内存生成。浏览器 fixture 会使用当前预览 origin 的 localStorage/sessionStorage；不写真实项目资产、不连接 bridge、不调用 Codex。模拟行为及 HTTP 资源测试不能替代实际扩展与真实模型验收。
+
+模型设置补充验收：`node agent-tool/ui.mjs verify --scenarios agent-settings-layout-wide agent-settings-layout-narrow agent-settings-layout-loading agent-settings-layout-missing agent-settings-layout-failed agent-settings-layout-custom agent-settings-layout-updating agent-settings-layout-installing`。沿用统一构建、隔离预览与Chromium，使用合成消息；分别输出模型/管理区截图，320px长路径另存详情图，并检查真实Space/Enter/Tab焦点。既有`agent-settings-*`负责业务往返，`image-settings-*`与`settings-recovery{,-narrow}`覆盖共享导航。`verify --fault settings-overflow`与`--fault settings-focus`应非零退出，分别证明横溢出与不可见卡片焦点会被检测。默认构建会写入构建产物，临时报告/profile及进程由工具管理；不访问真实账户、CLI、模型、用户数据或接受视觉基线。有效构建可加`--no-build`复用。
 
 ## UIUX 规范与诊断
 

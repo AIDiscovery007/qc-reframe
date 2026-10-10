@@ -50,7 +50,7 @@ const job = {
 };
 
 // Receipts travel over the parent IPC channel, never through page-controlled state.
-const regressions = Object.fromEntries(['batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
+const regressions = Object.fromEntries(['image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
   .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
 const previewSources = ['agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs', 'browser-extension/lib/operation-policy.ts', 'browser-extension/bridge/image-order.mjs'];
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -285,7 +285,14 @@ const server = createServer(async (req, res) => {
         const batchItems=request=>request.projects.map(item=>({projectId:item.projectId,inputRevision:item.inputRevision,title:projects.find(p=>p.id===item.projectId)?.title||'已删除项目',eligible:batchAllAccepted||item.projectId!==projects[3]?.id,...(!batchAllAccepted&&item.projectId===projects[3]?.id?{error:'参考图缺失'}:{})}));
         const service={service:'qc-alchemy',version:'0.3.2',managed:previewOptions.get('restart')!=='manual',canRestart:!['old','manual'].includes(previewOptions.get('restart')),instanceId:'preview-first'};
         let restartingUntil=0;
+      let imageSaveFailed=false;
+      const imageSettings={provider:'codex',configs:{openai:{baseUrl:'https://api.openai.com/v1',model:'',hasApiKey:false},gemini:{baseUrl:'https://generativelanguage.googleapis.com/v1beta',model:'',hasApiKey:false}}};
+        const agents={selected:'codex',agents:[{id:'codex',label:'Codex',model:'preview-vision'},{id:'pi',label:'Pi',model:'preview/pi-model'}]};
+        const piModels={selected:'preview/pi-model',accountLabel:'Pi · 预览',models:[{model:'preview/pi-model',label:'Pi Model',isDefault:true,status:'verified',supportedReasoningEfforts:[]},{model:'preview/pi-draft',label:'Pi Draft Model',status:'unverified',supportedReasoningEfforts:[]}]};
+        let agentSelectFailed=false;
         const cli={detectedAt:new Date().toISOString(),checkedAt:new Date().toISOString(),installed:true,version:'0.100.0',latestVersion:'0.101.0',executable:'/example/bin/codex',source:'npm',canUpdate:true,updateAvailable:true,command:'npm install -g @openai/codex@latest',instructions:{message:'升级后确认 Reframe 使用的 CLI 路径。',loginCommand:"'/example/bin/codex' login"},compatibility:{features:Object.fromEntries(['models','reverse','generation','sessions'].map(key=>[key,{status:'supported'}]))}};
+        const piCli={agent:'pi',installed:false,version:null,latestVersion:'0.60.0',executable:null,source:'missing',canInstall:true,canUpdate:false,updateAvailable:false,instructions:{message:'安装 Pi 后重新检测。'}};
+        let piInstallFailed=false;
         const cliScenario=previewOptions.get('cli');
         if(cliScenario==='standalone')Object.assign(cli,{source:'standalone',version:'0.159.2',latestVersion:'0.159.2',canUpdate:false,updateAvailable:false,command:'/example/bin/codex update'});
         if(['custom','app'].includes(cliScenario))Object.assign(cli,{source:cliScenario,comparisonReference:'npm-stable',canUpdate:false,command:null,reason:cliScenario==='app'?'请在 Codex App 中检查更新；稳定版仅作参考。':'请通过原安装方式更新；稳定版仅作参考。'});
@@ -293,6 +300,13 @@ const server = createServer(async (req, res) => {
         if(cliScenario==='offline')Object.assign(cli,{latestVersion:null,canUpdate:false,updateAvailable:false,checkError:'检查更新失败，请检查网络后重试。'});
         if(cliScenario==='unsupported')cli.compatibility.features.sessions={status:'unsupported',message:'当前 Codex CLI 不支持 Reframe 所需的会话读取接口，请在设置中心检查 CLI 更新后重新检测。'};
         if(cliScenario==='failed')Object.assign(cli,{version:cli.latestVersion,canUpdate:false,updateAvailable:false,operation:{status:'failed',stage:'Codex 已升级，复检未完成',error:'模型读取失败，请检查登录状态后重新检测。'}});
+        const settingsUi=previewOptions.get('settingsUi');
+        if(settingsUi==='narrow') {
+          cli.executable='/example/very-long-installation-directory/'.repeat(5)+'bin/codex';
+          models.models[0].label='用于复杂图片逆向的长模型名称 · '+ 'Provider / Model / '.repeat(8);
+        }
+        if(settingsUi==='updating')cli.operation={status:'running',stage:'正在升级 Codex，请稍候'};
+        if(settingsUi==='installing'){agents.selected='pi';piCli.operation={status:'running',stage:'正在安装 Pi，请稍候'};}
         const listeners = new Set();
         const notifyMotion = () => listeners.forEach(fn=>fn({type:'alchemy:motion-changed'},{id:'preview'},()=>{}));
         addEventListener('storage',event=>{if(event.key==='preview-motion-preference')notifyMotion();});
@@ -425,15 +439,45 @@ const server = createServer(async (req, res) => {
           if(message.type==='alchemy:upload-reference'){if(new URLSearchParams(location.search).get('swap')==='failed')return {error:'互换失败（预览），请重试'};let p=projects.find(p=>(p.image||template)===message.image);if(!p){p={id:crypto.randomUUID(),title:'上传的参考图',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),sourceUrl:'',capture:'original',jobs:[],image:message.image};projects.unshift(p);touch(p);}data.selection={...selection(p),image:message.image};return {ok:true,value:data.selection};}
           if(message.type==='alchemy:service-restart'){if(previewOptions.get('restart')==='failed')return {error:'重启准备失败，原服务仍在运行。请查看本机服务日志后重试。'};const ticket={previousInstanceId:service.instanceId,restartId:crypto.randomUUID()};restartingUntil=Date.now()+1800;setTimeout(()=>Object.assign(service,{instanceId:crypto.randomUUID(),restartId:ticket.restartId}),1800);return {ok:true,value:ticket};}
           if(message.type==='alchemy:query'&&message.path==='/health'&&(Date.now()<restartingUntil||previewOptions.get('restart')==='offline'))return {error:'无法连接本机服务（预览）'};
+          if(settingsUi==='loading'&&(message.type==='alchemy:models-refresh'||message.type==='alchemy:query'&&['/models','/cli/status'].includes(message.path)))return await new Promise(()=>{});
+          if(message.type==='alchemy:query'&&message.path==='/cli/status?agent=pi'){const value=structuredClone(piCli);if(previewOptions.has('agentSettingsRegression'))await new Promise(resolve=>setTimeout(resolve,500));return {ok:true,value};}
+          if(['alchemy:cli-check','alchemy:cli-update','alchemy:cli-install'].includes(message.type)&&message.agent==='pi'){
+            await new Promise(resolve=>setTimeout(resolve,200));
+            if(message.type==='alchemy:cli-install'){
+              if(!piInstallFailed){piInstallFailed=true;return {error:'Pi 安装失败（预览），保留原配置。'};}
+              Object.assign(piCli,{installed:true,version:'0.60.0',source:'managed',executable:'/example/bin/pi',canInstall:false,canUpdate:true,operation:{status:'completed',stage:'安装完成',finishedAt:new Date().toISOString()}});
+            } else if(message.type==='alchemy:cli-check') Object.assign(piCli,{checkedAt:new Date().toISOString(),latestVersion:'0.61.0',updateAvailable:piCli.installed});
+            else Object.assign(piCli,{version:'0.61.0',updateAvailable:false,operation:{status:'completed',stage:'升级完成',finishedAt:new Date().toISOString()}});
+            return {ok:true,value:structuredClone(piCli)};
+          }
           if(message.type==='alchemy:query'&&message.path==='/cli/status')return {ok:true,value:structuredClone(cli)};
           if(message.type==='alchemy:cli-check'){cli.detectedAt=new Date().toISOString();if(cli.installed)cli.checkedAt=cli.detectedAt;cli.operation=null;return {ok:true,value:structuredClone(cli)};}
-          if(message.type==='alchemy:cli-update'){cli.operation={status:'running',stage:'正在升级（预览）'};setTimeout(()=>{cli.version=cli.latestVersion;cli.updateAvailable=false;cli.operation={status:'completed',stage:'升级完成（预览）'};models.selected=null;},2500);return {ok:true,value:structuredClone(cli)};}
+          if(message.type==='alchemy:cli-update'){cli.operation={status:'running',stage:'正在升级（预览）'};setTimeout(()=>{cli.version=cli.latestVersion;cli.updateAvailable=false;cli.operation={status:'completed',stage:'升级完成（预览）',finishedAt:new Date().toISOString()};models.selected=null;},2500);return {ok:true,value:structuredClone(cli)};}
           if(message.type==='alchemy:connect'){data.preferences.token='preview';return {ok:true,value:{ready:true}};}
           if(message.type==='alchemy:project-views')return {ok:true,value:JSON.parse(localStorage.getItem('preview-project-views')||'{}')};
           if(message.type==='alchemy:save-project-view'){const views=JSON.parse(localStorage.getItem('preview-project-views')||'{}');views[message.projectId]=message.view;localStorage.setItem('preview-project-views',JSON.stringify(views));return {ok:true};}
           if(message.type==='alchemy:state')return {ok:true,value:structuredClone({preferences:{paired:!!data.preferences.token,mode:data.preferences.mode,showHiddenProjects},selection:!showHiddenProjects&&projects.find(p=>p.id===data.selection?.projectId)?.hidden?undefined:data.selection})};
+          if(message.type==='alchemy:image-settings')return previewOptions.get('imageSettingsRegression')==='legacy'?{error:'Not found'}:{ok:true,value:structuredClone(imageSettings)};
+          if(message.type==='alchemy:image-settings-save') {
+            if(!imageSaveFailed){imageSaveFailed=true;return {error:'生图设置保存失败（预览）'};}
+            const value=message.settings;imageSettings.provider=value.provider;
+            if(value.provider!=='codex')imageSettings.configs[value.provider]={baseUrl:value.baseUrl,model:value.model,hasApiKey:value.clearApiKey?false:!!value.apiKey||imageSettings.configs[value.provider].hasApiKey};
+            return {ok:true,value:structuredClone(imageSettings)};
+          }
+          if(message.type==='alchemy:query'&&message.path==='/agents')return previewOptions.get('agentSettingsRegression')==='legacy'?{error:'Not found'}:{ok:true,value:structuredClone(agents)};
+          if(message.type==='alchemy:agent-select'){
+            await new Promise(resolve=>setTimeout(resolve,200));
+            if(previewOptions.has('agentSettingsRegression')&&!agentSelectFailed){agentSelectFailed=true;return {error:'Agent 设置保存失败（预览）'};}
+            agents.selected=message.agent;return {ok:true,value:structuredClone(agents)};
+          }
+          if((message.type==='alchemy:query'&&message.path==='/models?agent=pi')||(message.type==='alchemy:models-refresh'&&message.agent==='pi'))return {ok:true,value:structuredClone(piModels)};
           if((message.type==='alchemy:models-refresh'||(message.type==='alchemy:query'&&message.path==='/models'))&&cliScenario==='missing')return {error:'未找到 Codex CLI，请先安装后重新检测。'};
           if(message.type==='alchemy:models-refresh'||(message.type==='alchemy:query'&&message.path==='/models'))return {ok:true,value:structuredClone(models)};
+          if(message.type==='alchemy:model-verify'&&message.agent==='pi'){
+            piModels.verification={model:message.model,status:'running'};
+            setTimeout(()=>{piModels.verification={model:message.model,status:'completed'};},500);
+            return {ok:true,value:structuredClone(piModels)};
+          }
           if(message.type==='alchemy:model-verify'){
             models.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:'running'};
             setTimeout(()=>{
@@ -588,6 +632,10 @@ const server = createServer(async (req, res) => {
             '<body><div id="preview-notice">界面预览 · 示例数据 · 不执行逆向</div>',
           ),
       );
+    if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('imageSettingsRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/image-settings-regression.js"></script></body>'));
+    if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('agentSettingsRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/agent-settings-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('settingsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/settings-recovery-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('batchRecreateRegression'))

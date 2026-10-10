@@ -15,7 +15,7 @@ const configFile = paths.settings;
 const port = Number(process.env.ALCHEMY_PORT || 43187);
 const url = `http://127.0.0.1:${port}`;
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-const runtimeKeys = ["CODEX_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH"];
+const runtimeKeys = ["CODEX_BIN", "PI_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH"];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const readable = async path => { try { await access(path); return true; } catch { return false; } };
 const cliCommand = path => process.platform === "win32" ? `& '${path.replaceAll("'", "''")}'` : `'${path.replaceAll("'", "'\"'\"'")}'`;
@@ -65,7 +65,7 @@ async function doctor(env, maintenance = false) {
   if (cliIssue) console.warn(`CLI 待处理，Reframe 初始化和本机管理仍可继续：${cliIssue}\n启动并配对后，请在设置中心检查 Codex CLI、选择并验证模型，再开始逆向或生图。`);
   await checkSkill(env);
   const imagegen = await readable(env.IMAGEGEN_SKILL_PATH);
-  console.log(`QC-Reframe ${version}\nNode.js ${process.versions.node}\nCodex CLI：${cliIssue ? "需要处理，请在设置中心检查" : "已登录"}\nAlchemy skill：就绪\n插件模型：在扩展连接设置中选择并验证\nimagegen：${imagegen ? "已找到（实际生图能力以账户和模型为准）" : "未找到；可逆向提示词，生图前需配置 IMAGEGEN_SKILL_PATH"}`);
+  console.log(`QC-Reframe ${version}\nNode.js ${process.versions.node}\nCodex CLI：${cliIssue ? "需要处理，请在设置中心检查" : "已登录"}\nAlchemy skill：就绪\n插件模型：在扩展连接设置中选择并验证\nimagegen：${imagegen ? "已找到（实际生图能力以账户和模型为准）" : "未找到；可逆向提示词，Codex 内置生图前需配置 IMAGEGEN_SKILL_PATH，也可在设置中选择 API 生图"}`);
   return env;
 }
 

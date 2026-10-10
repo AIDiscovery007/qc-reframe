@@ -13,18 +13,21 @@ const assert = (value, message) => { if (!value) throw new Error(message); };
 try {
   await waitFor(() => document.querySelector('.connection-state')?.textContent.includes('已连接'));
   await handoff('cli');
-  await waitFor(() => active() === 'Codex 与更新');
+  await waitFor(() => active() === '插件模型');
+  await waitFor(() => document.querySelector('.agent-management-target select')?.value === 'codex' && document.querySelector('.agent-cli-settings h3')?.textContent === 'Codex CLI');
   const dialog = document.querySelector('.settings-center');
-  for (const [section, label] of [['models', '插件模型'], ['connection', '本机连接'], ['cli', 'Codex 与更新']]) {
+  for (const [section, label] of [['models', '插件模型'], ['connection', '本机连接'], ['cli', '插件模型']]) {
     await handoff(section);
     await waitFor(() => active() === label);
+    if (section === 'cli') await waitFor(() => document.querySelector('.agent-management-target select')?.value === 'codex' && document.querySelector('.agent-cli-settings h3')?.textContent === 'Codex CLI');
     assert(dialog === document.querySelector('.settings-center'), '恢复导航不应重挂载设置弹窗');
   }
-  // Repeated target after manual navigation used to leave initialSection unchanged.
-  [...dialog.querySelectorAll('nav button')].find(button => button.textContent === '插件模型').click();
-  await waitFor(() => active() === '插件模型');
+  // Navigate to a different section: CLI recovery now shares the models page.
+  [...dialog.querySelectorAll('nav button')].find(button => button.textContent === '本机连接').click();
+  await waitFor(() => active() === '本机连接');
   await handoff('cli');
-  await waitFor(() => active() === 'Codex 与更新');
+  await waitFor(() => active() === '插件模型');
+  await waitFor(() => document.querySelector('.agent-management-target select')?.value === 'codex' && document.querySelector('.agent-cli-settings h3')?.textContent === 'Codex CLI');
   assert(dialog === document.querySelector('.settings-center'), '重复目标仍应复用弹窗');
   dialog.querySelector('[aria-label="关闭设置"]').click();
   await waitFor(() => !document.querySelector('.settings-center'));

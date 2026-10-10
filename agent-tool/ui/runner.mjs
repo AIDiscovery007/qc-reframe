@@ -10,10 +10,13 @@ import { probeLayout } from './probe.mjs';
 import { prepareExample, checkExample } from './examples.mjs';
 import { checkImageOrderKeyboard } from './image-order.mjs';
 import { checkEndToEndKeyboard } from './end-to-end.mjs';
+import { checkAgentSettings } from './agent-settings.mjs';
 
 const { chromium } = requireExtension('playwright');
 const buildDirectory = resolve(extension, '.output/chrome-mv3');
 export const faults = {
+  'settings-overflow': { scenario: 'agent-settings-layout-narrow', css: '.agent-settings .settings-model-fields { width:900px!important; }' },
+  'settings-focus': { scenario: 'agent-settings-layout-wide', css: '.settings-agent-card:has(:focus-visible) { box-shadow:none!important; }' },
   'canvas-padding': { scenario: 'workspace-wide', css: '.canvas-input { padding-left:8px!important; }' },
   'quick-height': { scenario: 'popup', css: '.quick-canvas { height:188px!important; }' },
   'image-offset': { scenario: 'popup', css: '.image-preview-trigger { transform:translateX(-8px)!important; }' },
@@ -250,7 +253,14 @@ async function runVerify({ coverage = false, scenario: id, scenarioIds, build = 
       page.on('pageerror', error => item.errors.push(error.message.slice(0, 500)));
       try {
         await page.goto(preview.url + scenario.path);
-        if (scenario.batchToolbar) {
+        if (scenario.settingsUi) {
+          if (fault) await page.addStyleTag({ content: faults[fault].css });
+          item.checks.push(...await checkAgentSettings(page, scenario, async label => {
+            const path = join(directory, `${scenario.id}-${label}.png`);
+            await page.screenshot({ path });
+            (item.evidence.settings ||= {})[label] = path;
+          }));
+        } else if (scenario.batchToolbar) {
           item.checks.push(...await checkBatchToolbar(page, directory, item));
         } else if (scenario.batchKeyboard) {
           item.evidence.batchDialog = join(directory, scenario.id + '-dialog.png');

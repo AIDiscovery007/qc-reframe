@@ -697,6 +697,27 @@ test("CLI management messages expose only fixed authenticated endpoints and neve
   assert.equal(calls.length, 3);
 });
 
+test("user manages Pi through fixed authenticated messages without forwarding arbitrary commands", async () => {
+  // Given a paired workspace, When Pi management is requested, Then only the explicit target reaches fixed routes.
+  const calls = [];
+  const { handlers } = await background(async (url, options) => {
+    calls.push({ url, options }); return { ok: true, json: async () => ({ agent: "pi" }) };
+  });
+  const sender = { id: "test", url: "chrome-extension://test/workspace.html" };
+  const send = message => new Promise(resolve => handlers.message(message, sender, resolve));
+  assert.equal((await send({ type: "alchemy:query", path: "/cli/status?agent=pi" })).ok, true);
+  for (const action of ["check", "install", "update"])
+    assert.equal((await send({ type: `alchemy:cli-${action}`, agent: "pi", command: "unsafe", path: "/private" })).ok, true);
+  assert.deepEqual(calls.map(call => call.url), ["status", "check", "install", "update"].map(action => `http://127.0.0.1:43187/cli/${action}?agent=pi`));
+  assert.ok(calls.every(call => call.options.headers.Authorization === "Bearer test"));
+  for (const call of calls.slice(1)) assert.deepEqual(JSON.parse(call.options.body), {});
+  for (const agent of ["unknown", "", null, {}, "pi&command=unsafe"])
+    assert.match((await send({ type: "alchemy:cli-install", agent })).error, /Agent/);
+  for (const path of ["/cli/status?agent=pi&agent=codex", "/cli/install?agent=pi", "/cli/status?agent=other"])
+    assert.ok((await send({ type: "alchemy:query", path })).error);
+  assert.equal(calls.length, 4);
+});
+
 test("generation comparison references validate both IDs and retain authentication in the background", async () => {
   const calls = [];
   const { handlers } = await background(async (url, options) => {
@@ -1459,7 +1480,7 @@ test('request port cannot let a content script query local sessions or invoke ar
 test("recovery opens the requested settings section with the unsaved workspace draft", async () => {
   const { handlers, tabs, sessionStorage } = await background(() => assert.fail("recovery navigation must not call Codex"));
   const send = message => new Promise(resolve => handlers.message(message, { id: "test", url: "chrome-extension://test/popup.html" }, resolve));
-  for (const section of ["cli", "models", "connection"]) {
+  for (const section of ["cli", "pi-cli", "models", "generation", "connection"]) {
     const draft = { instructions: { key: "keep my pending edit" } };
     assert.equal((await send({ type: "alchemy:open-workspace", view: "settings", section, draft })).ok, true);
     const url = new URL(tabs.at(-1).url);

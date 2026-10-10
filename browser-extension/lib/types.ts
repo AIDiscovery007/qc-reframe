@@ -5,6 +5,9 @@ export type SessionSearchResult = SessionSummary & { match?: "title" | "content"
 export type SessionPage = { data: SessionSearchResult[]; nextCursor: string | null; index?: SessionIndexStatus };
 export type SessionContext = { sources: SessionSummary[]; snapshotId?: string; hash?: string; capturedAt?: string; messageCount?: number; attachmentCount?: number };
 
+export type ImageProvider = "codex" | "openai" | "gemini";
+export type ImageSettings = { provider: ImageProvider; configs: Record<"openai" | "gemini", { baseUrl: string; model: string; hasApiKey: boolean }> };
+
 export type Mode = "style" | "recreate" | "reenact" | "multi-reenact" | "session";
 export type MultiSubject = { id: string; subjectImage: string; role: string; detail: string };
 export type SavedSubject = Omit<MultiSubject, "subjectImage"> & { subjectAsset: string };
@@ -46,6 +49,8 @@ export type Result = {
   uncertainties: string[];
 };
 export type Job = {
+  agent?: "codex" | "pi";
+  provider?: string;
   autoGeneration?: { language: "zh" | "en"; aspectRatio?: AspectRatio; status: "pending" | "started" | "failed" | "cancelled"; generationId?: string; error?: string };
   referenceIndex?: number;
   sessionContext?: SessionContext;
@@ -99,6 +104,8 @@ export type Batch = {
   items: { projectId: string; title: string; status: "queued" | "running" | "completed" | "failed" | "cancelled" | "rejected"; stage: string; error?: string; jobId?: string; generationId?: string }[];
 };
 export type Generation = {
+  provider?: ImageProvider;
+  baseUrl?: string;
   referenceIndex?: number;
   id: string;
   subjects?: SavedSubject[];

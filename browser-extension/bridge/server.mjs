@@ -13,8 +13,13 @@ import { fileURLToPath } from "node:url";
 import { runAgent } from "./agent.mjs";
 import { runGeneration, imagegenSkillPath } from "./generation.mjs";
 import { createProjectStore, projectIdFor, recoverProjectDeletion } from "./projects.mjs";
+import { createImageSettingsStore } from "./image-settings.mjs";
+import { runImageApi } from "./image-api.mjs";
 import { createModelStore } from "./models.mjs";
+import { createAgentStore } from "./agents.mjs";
+import { readPiCatalog, runPi } from "./pi-agent.mjs";
 import { createCliManager } from "./cli.mjs";
+import { createPiCliManager } from "./pi-cli.mjs";
 import { createCompatibilityChecker, assertFeatureSupported } from "./compatibility.mjs";
 import { createImageStore } from "./images.mjs";
 import { createThumbnailStore } from "./thumbnails.mjs";
@@ -117,13 +122,16 @@ export async function createBridge({
   ),
   agent = runAgent,
   generator = runGeneration,
+  apiGenerator = runImageApi,
   generationSkillPath = imagegenSkillPath(),
   allowShutdown = false,
   restart,
   restartId,
   imageAction = openGeneratedImage,
   models,
+  piModels,
   cli,
+  piCli,
   compatibility = defaultCompatibility,
   sessions,
   sessionReadTimeoutMs = 120_000,
@@ -132,6 +140,24 @@ export async function createBridge({
   const paths = await migrateStorage(dataDir);
   sessions ||= createSessionStore({ cwd: root, dataDir: paths.records });
   models ||= await createModelStore({ dataDir: paths.config, cwd: root });
+  piModels ||= await createModelStore({ dataDir: paths.config, cwd: root, filename: "pi-model-settings.json", readCatalog: cwd => readPiCatalog(cwd, dataDir),
+    verify: async ({ cwd, selection, signal }) => {
+      const result = await runPi({ cwd, dataDir, signal, modelSettings: selection, probe: true,
+        instructions: "仅按用户要求回复文字，不调用工具。", input: [{ type: "text", text: "仅回复 OK。" }] });
+      if (!result.text.trim()) throw new Error("Pi 未返回有效响应，请重新验证。");
+    } });
+  const agents = await createAgentStore({ dataDir: paths.config, models, piModels });
+  const imageSettings = await createImageSettingsStore({ dataDir: paths.config });
+  const generationSelection = () => {
+    const selected = imageSettings.selection();
+    return selected.provider === "codex" ? models.selection() : { ...selected, imageProvider: selected.provider };
+  };
+  const batchGenerationSettings = new Map(); // Secrets live only until the accepted batch settles.
+  const checkGeneration = async settings => {
+    if (settings.imageProvider) return;
+    await requireFeature("generation");
+    try { await readFile(generationSkillPath); } catch { throw bad("找不到 imagegen 技能，请设置 IMAGEGEN_SKILL_PATH", 503); }
+  };
   cli ||= createCliManager({ onUpdated: async () => {
     try {
       await models.reset();
@@ -140,9 +166,10 @@ export async function createBridge({
     }
     finally { sessions.resetReader?.(); }
   } });
+  piCli ||= createPiCliManager({ dataDir, onUpdated: () => piModels.reset() });
   const requireFeature = async feature => {
     const report = await compatibility.getCompatibility();
-    if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+    if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
     assertFeatureSupported(report, feature);
   };
   await recoverProjectDeletion(paths.records, dataDir);
@@ -197,8 +224,8 @@ export async function createBridge({
   for (const job of jobs.values()) taskFeed.update(job);
   const gallery = createGalleryStore({ projects, images });
   const runtime = createTaskRuntime({ save, onProgress: job => projects.updateJob(job),
-    onIdle: async () => { kickBatches(); await collectIdleImages(); }, onFailure: (settings, error) => models.invalidate(settings, error) });
-  const codexBusy = () => runtime.busy || !!batches?.active.length || models.busy || sessions.busy;
+    onIdle: async () => { kickBatches(); await collectIdleImages(); }, onFailure: (settings, error) => settings?.imageProvider ? Promise.resolve() : agents.modelStore(settings?.agent || "codex").invalidate(settings, error) });
+  const codexBusy = () => runtime.busy || !!batches?.active.length || agents.busy || sessions.busy;
   let mutationTail = Promise.resolve();
   let collectionPending = false;
   const acquireMutation = async () => {
@@ -217,12 +244,12 @@ export async function createBridge({
     catch (error) { console.error("回收图片失败:", error.message); }
     finally { release(); }
   };
-  const startGeneration = async (job, body, { modelSettings = models.selection(), promptResult = job.result, automatic = false, signal } = {}) => {
+  const startGeneration = async (job, body, { modelSettings = generationSelection(), promptResult = job.result, automatic = false, signal } = {}) => {
     if (job.status !== "completed" || !job.result) throw bad("请先完成提示词逆向", 409);
     if (job.mode === "style" && !job.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
     if (!automatic && job.autoGeneration?.status === "pending") throw bad("这条提示词正在准备自动生图，请等待完成或取消", 409);
-    if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-    if (models.busy) throw bad("正在验证模型，请稍候", 409);
+    if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
+    if (agents.busy) throw bad("正在验证模型，请稍候", 409);
     if (job.generations?.some((item) => item.status === "running" || runtime.has(item.id)))
       throw bad("这条提示词仍在生图，请等待完成或取消", 409);
     validateGenerationOptions(body);
@@ -247,7 +274,7 @@ export async function createBridge({
     const subject = !multi && job.mode !== "recreate" && job.reenact
       ? decodeImage(body.subjectImage !== undefined ? body.subjectImage : await storedImage(job, true)) : undefined;
     if (subject?.bytes.length > 2 * 1024 * 1024) throw bad("主体图最多 2 MB，请压缩后重试");
-    try { await readFile(generationSkillPath); } catch { throw bad("找不到 imagegen 技能，请设置 IMAGEGEN_SKILL_PATH", 503); }
+    await checkGeneration(modelSettings);
     const id = randomUUID();
     const subjectAsset = subject ? await images.put(subject) : undefined;
     const subjectImagePath = subjectAsset ? images.path(subjectAsset) : undefined;
@@ -256,7 +283,7 @@ export async function createBridge({
     referencePosition(referenceIndex, subjects?.length ?? (subject ? 1 : 0));
     signal?.throwIfAborted();
     const controller = runtime.reserve(id, job.projectId);
-    const next = { id, referenceIndex, model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
+    const next = { id, referenceIndex, provider: modelSettings.imageProvider || "codex", ...(modelSettings.imageProvider ? { baseUrl: modelSettings.baseUrl } : {}), model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: modelSettings.imageProvider ? "正在连接生图 API…" : "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
     job.generations ||= [];
     job.generations.push(next);
     if (automatic) Object.assign(job.autoGeneration, { status: "started", generationId: id });
@@ -271,7 +298,7 @@ export async function createBridge({
     if (signal?.aborted) { controller.abort(); Object.assign(next, { status: "cancelled", stage: "已取消" }); }
     void runtime.run(job, next, { modelSettings, completedStage: "图片已生成", failedStage: "生图失败",
       execute: async ({ signal, progress }) => {
-        const output = await generator({ mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt: next.negativePrompt,
+        const output = await (modelSettings.imageProvider ? apiGenerator : generator)({ ...(modelSettings.imageProvider ? { settings: modelSettings, aspectRatio } : {}), mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt: next.negativePrompt,
           skillPath: generationSkillPath, cwd: root, signal, modelSettings, onProgress: progress });
         signal.throwIfAborted();
         if (!["png", "jpeg", "webp"].includes(output.extension)) throw new Error("生图返回了不支持的文件格式");
@@ -282,13 +309,14 @@ export async function createBridge({
     return job;
   };
   const startJob = async (body, { readSessions, assertSessionRequestActive, frozen } = {}) => {
-    if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-    if (models.busy) throw bad("正在验证模型，请稍候", 409);
+    const generationModelSettings = body.generation ? frozen?.generationModelSettings || generationSelection() : undefined;
+    if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
+    if (agents.busy) throw bad("正在验证模型，请稍候", 409);
     if (body.generation !== undefined) {
       if (!body.generation || typeof body.generation !== "object" || Array.isArray(body.generation) || Object.keys(body.generation).some(key => !["language", "aspectRatio"].includes(key))) throw bad("无效自动生图参数");
       validateGenerationOptions(body.generation);
       if (body.mode === "style" && !body.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
-      try { await readFile(generationSkillPath); } catch { throw bad("找不到 imagegen 技能，请设置 IMAGEGEN_SKILL_PATH", 503); }
+      await checkGeneration(generationModelSettings);
     }
     if (!["style", "recreate", "reenact", "multi-reenact", "session"].includes(body.mode)) throw bad("无效逆向模式");
     const submittedInstruction = body.instruction ?? body.reenact?.basePrompt;
@@ -302,7 +330,7 @@ export async function createBridge({
       const ids = sessionIds(body.sessionIds, true);
       try { selectedSessions = await readSessions(signal => sessions.metadata(ids, signal)); }
       catch (error) { throw error.status ? error : bad("无法读取所选会话，请刷新后重试", 503); }
-      if (models.busy) throw bad("正在验证模型，请稍候", 409);
+      if (agents.busy) throw bad("正在验证模型，请稍候", 409);
     } else if (body.sessionIds !== undefined) throw bad("当前模式不接受会话输入");
     const { bytes, extension } = decodeImage(body.image);
     let project;
@@ -346,7 +374,7 @@ export async function createBridge({
     } catch {
       throw bad("找不到 Alchemy 技能，请设置 ALCHEMY_SKILL_PATH", 503);
     }
-    const modelSettings = frozen?.modelSettings || models.selection();
+    const modelSettings = frozen?.modelSettings || agents.selection();
     const sourceUrl = sourceUrlFor(body.sourceUrl);
     if (selectedSessions) assertSessionRequestActive();
     project ||= await projects.register({ bytes, extension }, { sourceUrl, capture: body.capture });
@@ -367,10 +395,12 @@ export async function createBridge({
       ...(subjectAsset ? { subjectAsset } : {}),
       mode: body.mode,
       referenceIndex,
+      agent: modelSettings.agent || "codex",
+      provider: modelSettings.provider,
       model: modelSettings.model,
       reasoningEffort: modelSettings.reasoningEffort,
       status: "running",
-      stage: "正在连接本机 Codex…",
+      stage: `正在连接本机 ${modelSettings.agent === "pi" ? "Pi" : "Codex"}…`,
       createdAt: new Date().toISOString(),
       sourceUrl,
       capture: body.capture === "screenshot" ? "screenshot" : "original",
@@ -400,7 +430,7 @@ export async function createBridge({
           Object.assign(job.autoGeneration, { status: job.status === "cancelled" || signal.aborted ? "cancelled" : "failed", error: job.error });
         } else {
           try {
-            await startGeneration(job, body.generation, { modelSettings, promptResult: promptSnapshot, automatic: true, signal });
+            await startGeneration(job, body.generation, { modelSettings: generationModelSettings, promptResult: promptSnapshot, automatic: true, signal });
             return;
           } catch (error) { Object.assign(job.autoGeneration, { status: "failed", error: error.message }); }
         }
@@ -421,7 +451,7 @@ export async function createBridge({
         const result = await agent({ sessionContext, imagePath, subjectImagePath,
           subjectImagePaths: reenact?.subjects?.map((item) => images.path(item.subjectAsset)),
           subjects: reenact?.subjects, referenceIndex, basePrompt: reenact?.basePrompt, instruction: job.instruction,
-          mode: job.mode, skillPath, cwd: root, signal, modelSettings, onProgress: progress });
+          mode: job.mode, skillPath, cwd: root, dataDir, signal, modelSettings, onProgress: progress });
         promptSnapshot = structuredClone(result);
         return { result };
       },
@@ -431,7 +461,7 @@ export async function createBridge({
   let deletionFailed = false;
   let shuttingDown = false;
   let cliStarting = false;
-  const cliBusy = () => cliStarting || cli.busy;
+  const cliBusy = () => cliStarting || cli.busy || piCli.busy;
   batches = await createBatchStore(join(paths.records, 'batches.json'), ids => { taskFeed.touch(); projects.touch(ids); });
   const batchItems = batch => batch.items.map(({ snapshot, ...item }) => {
     const job = item.jobId && jobs.get(item.jobId);
@@ -441,7 +471,7 @@ export async function createBridge({
     return { ...item, stage: generation?.stage || (job.status === 'completed' && job.autoGeneration?.status === 'pending' ? '正在准备自动生图…' : job.stage), ...(generation ? { generationId: generation.id } : {}) };
   });
   const publicBatch = (batch, visible = () => true) => ({ id: batch.id, createdAt: batch.createdAt, language: batch.language,
-    ...(batch.aspectRatio ? { aspectRatio: batch.aspectRatio } : {}), model: batch.modelSettings.model,
+    ...(batch.aspectRatio ? { aspectRatio: batch.aspectRatio } : {}), agent: batch.modelSettings.agent || "codex", model: batch.modelSettings.model,
     items: batchItems(batch).filter(item => visible(item.projectId)) });
   const validateBatchProjects = body => {
     if (!Array.isArray(body.projects) || !body.projects.length || body.projects.length > 100 || body.projects.some(item =>
@@ -497,8 +527,9 @@ export async function createBridge({
             changed = true;
           }
           if (changed) await batches.put(next);
+          if (!next.items.some(batchActive)) batchGenerationSettings.delete(next.id);
         }
-        if (cliBusy() || models.busy || runtime.reading || sessions.busy) return;
+        if (cliBusy() || agents.busy || runtime.reading || sessions.busy) return;
         for (const batch of [...batches.all].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
           for (const candidate of batch.items) {
             if (candidate.status !== 'queued') continue;
@@ -509,11 +540,13 @@ export async function createBridge({
             item.status = 'running'; item.stage = '正在准备完整复刻…';
             await batches.put(next);
             try {
+              const generationModelSettings = batchGenerationSettings.get(next.id) || next.generationModelSettings;
+              if (generationModelSettings.imageProvider && !generationModelSettings.apiKey) throw bad("批次生图凭据快照已失效，请重新提交", 409);
               await startJob({ projectId: item.projectId, inputRevision: item.snapshot.inputRevision, mode: 'recreate',
                 image: await storedImage(item.snapshot), instruction: item.snapshot.instruction, referenceIndex: item.snapshot.referenceIndex,
                 sourceUrl: item.snapshot.sourceUrl, capture: item.snapshot.capture,
                 generation: { language: next.language, ...(next.aspectRatio ? { aspectRatio: next.aspectRatio } : {}) } },
-              { frozen: { modelSettings: next.modelSettings, jobId: item.jobId } });
+              { frozen: { modelSettings: next.modelSettings, generationModelSettings, jobId: item.jobId } });
             } catch (error) {
               item.status = 'failed'; item.stage = '启动失败'; item.error = error.message;
               await batches.put(next);
@@ -587,11 +620,11 @@ export async function createBridge({
       };
       const submittedJob = req.method === "POST" && path === "/jobs" ? await readBody(req) : undefined;
       // Probe before taking the mutation lock; all task/revision checks still run under it.
-      const feature = req.method !== "POST" ? undefined : path === "/jobs" ? "reverse"
-        : /^\/jobs\/[\da-f-]{36}\/generations$/.test(path) ? "generation"
-        : ["/models/refresh", "/models/verify"].includes(path) ? "models" : undefined;
+      const feature = req.method !== "POST" ? undefined : path === "/jobs" ? (agents.selected === "codex" ? "reverse" : submittedJob?.generation && imageSettings.view().provider === "codex" ? "generation" : undefined)
+        : /^\/jobs\/[\da-f-]{36}\/generations$/.test(path) ? (imageSettings.view().provider === "codex" ? "generation" : undefined)
+        : ["/models/refresh", "/models/verify"].includes(path) && query.get("agent") !== "pi" ? "models" : undefined;
       if (feature) {
-        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+        if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
         const controller = new AbortController();
         const abort = () => controller.abort(bad("请求已取消", 499));
         res.once("close", abort);
@@ -599,7 +632,7 @@ export async function createBridge({
         try {
           if (res.destroyed || req.aborted) abort();
           controller.signal.throwIfAborted();
-          await Promise.race([Promise.all([requireFeature(feature), ...(submittedJob?.generation !== undefined ? [requireFeature("generation")] : [])]), new Promise((_, reject) => {
+          await Promise.race([Promise.all([requireFeature(feature), ...(submittedJob?.generation !== undefined && imageSettings.view().provider === "codex" ? [requireFeature("generation")] : [])]), new Promise((_, reject) => {
             controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true });
           })]);
         } finally {
@@ -640,7 +673,7 @@ export async function createBridge({
         }
         assertSessionRequestActive();
         if (shuttingDown || deletionFailed) throw bad("服务状态已变化，请重新打开项目后重试", 503);
-        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+        if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
         return result;
       };
       if (req.method === "GET" && path === "/health") {
@@ -666,69 +699,98 @@ export async function createBridge({
           ready: Boolean(skill),
           serviceReady: true, skillReady: Boolean(skill), cli: cliSummary,
           compatibility: compatibility.snapshot(),
-          active: runtime.count + batches.active.filter(item => item.status === "queued").length + Number(models.busy) + Number(cliBusy()),
-          visibleActive: runtime.visibleCount(id => showHidden || !projects.isHidden(id)) + batches.active.filter(item => item.status === "queued" && (showHidden || !projects.isHidden(item.projectId))).length + Number(models.busy) + Number(cliBusy()),
+          active: runtime.count + batches.active.filter(item => item.status === "queued").length + Number(agents.busy) + Number(cliBusy()),
+          visibleActive: runtime.visibleCount(id => showHidden || !projects.isHidden(id)) + batches.active.filter(item => item.status === "queued" && (showHidden || !projects.isHidden(item.projectId))).length + Number(agents.busy) + Number(cliBusy()),
           hiddenProjectIds: projects.hiddenProjectIds,
           cliBusy: cliBusy(),
-          modelBusy: models.busy,
-          model: models.selectedModel,
+          modelBusy: agents.busy,
+          agent: agents.selected,
+          model: agents.modelStore().selectedModel,
+          generationModel: imageSettings.view().provider === "codex" ? models.selectedModel : (imageSettings.view().configs[imageSettings.view().provider].hasApiKey ? imageSettings.view().configs[imageSettings.view().provider].model : null),
+          generationProvider: imageSettings.view().provider,
         });
         return;
       }
       if (req.method === "POST" && path === "/sessions/list") {
-        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+        if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
         const body = await readBody(req);
         try { json(200, await readSessions(signal => sessions.list(body, signal))); }
         catch (error) { throw error.status ? error : bad("无法读取本机 Codex 会话，请检查 CLI 后重试", 503); }
         return;
       }
       if (req.method === "POST" && path === "/sessions/index") {
-        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+        if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
         const body = await readBody(req);
         if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => key !== "action") || !["refresh", "clear", "status"].includes(body.action)) throw bad("无效的索引操作");
         try { json(200, await readSessions(() => sessions.index(body.action), body.action === "refresh")); }
         catch (error) { throw error.status ? error : bad("无法访问本地会话索引，请重试", 503); }
         return;
       }
-      if (req.method === "GET" && path === "/models") {
-        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-        await requireFeature("models");
-        try { json(200, await models.list()); } catch (error) { throw Object.assign(error, { status: error.status || 503 }); }
+      if (path === "/image-settings" && (req.method === "GET" || req.method === "POST")) {
+        validateQuery([]);
+        json(200, req.method === "GET" ? imageSettings.view() : await imageSettings.save(await readBody(req)));
         return;
       }
-      if (req.method === "GET" && path === "/cli/status") {
-        const status = await cli.status();
-        json(200, { ...status, compatibility: cliBusy() ? compatibility.snapshot() : await compatibility.getCompatibility() });
-        return;
-      }
-      if (req.method === "POST" && ["/cli/check", "/cli/update"].includes(path)) {
+      if (req.method === "GET" && path === "/agents") { validateQuery([]); json(200, agents.view()); return; }
+      if (req.method === "POST" && path === "/agents/select") {
         const body = await readBody(req);
-        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) throw bad("Codex 管理操作不接受命令或路径参数。");
-        if (path.endsWith("/update") && codexBusy()) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
-        if (path.endsWith("/update")) {
+        if (!body || Object.keys(body).some(key => key !== "agent")) throw bad("无效 Agent 设置");
+        if (codexBusy() || cliBusy()) throw bad("请等待当前任务完成，再切换 Agent。", 409);
+        json(200, await agents.select(body.agent)); return;
+      }
+      if (req.method === "GET" && path === "/models") {
+        validateQuery(["agent"]);
+        const store = agents.modelStore(query.get("agent") || "codex");
+        if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
+        if (store === models) await requireFeature("models");
+        try { json(200, await store.list()); } catch (error) { throw Object.assign(error, { status: error.status || 503 }); }
+        return;
+      }
+      if (path.startsWith("/cli/") && (req.method === "GET" && path === "/cli/status" || req.method === "POST" && ["/cli/check", "/cli/update", "/cli/install"].includes(path))) {
+        validateQuery(["agent"]);
+        const target = query.has("agent") ? query.get("agent") : "codex";
+        if (!["codex", "pi"].includes(target)) throw bad("无效 Agent");
+        const manager = target === "pi" ? piCli : cli;
+        if (req.method === "GET") {
+          const status = await manager.status();
+          json(200, { ...status, agent: target, ...(target === "codex" ? { compatibility: cliBusy() ? compatibility.snapshot() : await compatibility.getCompatibility() } : {}) });
+          return;
+        }
+        const body = await readBody(req);
+        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) throw bad("Agent 管理操作不接受命令或路径参数。");
+        if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
+        if (path !== "/cli/check") {
+          if (codexBusy()) throw bad("已有任务或模型验证正在执行，请等待完成或取消。", 409);
+          const action = path.endsWith("/install") ? "install" : "update";
+          if (!manager[action]) throw bad("此 Agent 请按官方安装说明安装后重新检测。", 409);
           cliStarting = true;
-          try { json(202, await cli.update()); }
+          try { json(202, { ...await manager[action](), agent: target }); }
           finally { cliStarting = false; }
         } else {
-          const status = await cli.check();
-          const report = cliBusy() ? compatibility.snapshot() : await compatibility.getCompatibility({ force: true });
-          if (!cliBusy() && !runtime.reading && !sessions.busy) sessions.resetReader?.();
-          json(200, { ...status, compatibility: report });
+          const status = await manager.check();
+          if (target === "pi") json(200, { ...status, agent: target });
+          else {
+            const report = cliBusy() ? compatibility.snapshot() : await compatibility.getCompatibility({ force: true });
+            if (!cliBusy() && !runtime.reading && !sessions.busy) sessions.resetReader?.();
+            json(200, { ...status, agent: target, compatibility: report });
+          }
         }
         return;
       }
       if (req.method === "POST" && ["/models/refresh", "/models/verify"].includes(path)) {
-        if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
-        if (codexBusy()) throw bad("已有 Codex 任务正在执行，请等待完成或取消。", 409);
+        validateQuery(["agent"]);
+        const store = agents.modelStore(query.get("agent") || "codex");
+        if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
+        if (codexBusy()) throw bad("已有任务或模型验证正在执行，请等待完成或取消。", 409);
         const body = await readBody(req);
         if (path.endsWith("/verify") && (typeof body.model !== "string" || body.model.length > 200)) throw bad("请选择有效模型");
-        try { json(path.endsWith("/verify") ? 202 : 200, path.endsWith("/verify") ? await models.start(body.model, body.reasoningEffort) : await models.refresh()); }
+        try { json(path.endsWith("/verify") ? 202 : 200, path.endsWith("/verify") ? await store.start(body.model, body.reasoningEffort) : await store.refresh()); }
         catch (error) { throw Object.assign(error, { status: error.status || 503 }); }
         return;
       }
       if (req.method === "POST" && path === "/restart") {
         if (!allowShutdown || !restart) throw bad("此服务不支持插件内重启。请在原终端停止，再在插件目录运行 npm start。", 409);
-        if (codexBusy() || cliBusy()) throw bad("任务、模型验证或 Codex 操作执行中，请等待完成后再重启。", 409);
+        if (codexBusy() || cliBusy()) throw bad("任务、模型验证或 Agent CLI 操作执行中，请等待完成后再重启。", 409);
         const nextRestartId = randomUUID();
         let commit;
         try { commit = await restart({ root, dataDir, port: server.address().port, instanceId, restartId: nextRestartId, skillPath, generationSkillPath }); }
@@ -750,7 +812,7 @@ export async function createBridge({
         return;
       }
       if (req.method === "POST" && path === "/shutdown" && allowShutdown) {
-        if (codexBusy() || cliBusy()) throw bad("任务或 Codex 升级执行中，请等待完成后再停止服务。", 409);
+        if (codexBusy() || cliBusy()) throw bad("任务或 Agent CLI 安装更新执行中，请等待完成后再停止服务。", 409);
         shuttingDown = true;
         json(200, { stopped: true });
         server.close();
@@ -814,10 +876,10 @@ export async function createBridge({
             json(202, publicBatch(existing)); return;
           }
         }
-        if (cliBusy()) throw bad('Codex 正在升级，请等待完成。', 409);
-        if (models.busy) throw bad('正在验证模型，请稍候', 409);
-        const modelSettings = models.selection();
-        await Promise.all([requireFeature('reverse'), requireFeature('generation'), readFile(skillPath), readFile(generationSkillPath)]);
+        if (cliBusy()) throw bad('Agent CLI 正在安装或更新，请等待完成。', 409);
+        if (agents.busy) throw bad('正在验证模型，请稍候', 409);
+        const modelSettings = agents.selection(), generationModelSettings = generationSelection();
+        await Promise.all([...(agents.selected === "codex" ? [requireFeature('reverse')] : []), checkGeneration(generationModelSettings), readFile(skillPath)]);
         const items = [];
         for (const selectedItem of selected) {
           const title = projects.summary(selectedItem.projectId)?.title || '项目不存在';
@@ -827,10 +889,12 @@ export async function createBridge({
           } catch (error) { items.push({ ...selectedItem, title, eligible: false, error: error.message }); }
         }
         if (path.endsWith('/preview')) { json(200, { model: modelSettings.model, items: items.map(({ snapshot, ...item }) => item) }); return; }
-        const batch = { id: randomUUID(), requestId: body.requestId, requestHash, createdAt: new Date().toISOString(), modelSettings,
+        const batch = { id: randomUUID(), requestId: body.requestId, requestHash, createdAt: new Date().toISOString(), modelSettings, generationModelSettings: Object.fromEntries(Object.entries(generationModelSettings).filter(([key]) => key !== "apiKey")),
           language: body.language, ...(body.aspectRatio ? { aspectRatio: body.aspectRatio } : {}),
           items: items.map(({ eligible, inputRevision, ...item }) => ({ ...item, status: eligible ? 'queued' : 'rejected', stage: eligible ? '等待启动' : '未受理', ...(eligible ? { jobId: randomUUID() } : {}) })) };
-        await batches.put(batch);
+        batchGenerationSettings.set(batch.id, generationModelSettings);
+        try { await batches.put(batch); }
+        catch (error) { batchGenerationSettings.delete(batch.id); throw error; }
         json(202, publicBatch(batch)); return;
       }
       const batchCancelMatch = /^\/batches\/([\da-f-]{36})\/cancel$/.exec(path);
@@ -902,7 +966,7 @@ export async function createBridge({
         if (referenceBytes > 4 * 1024 * 1024) throw bad("参考图最多 4 MB，请压缩后重试");
         const input = { instruction: body.instruction };
         if (body.mode === "session") {
-          if (cliBusy()) throw bad("Codex 正在升级，请等待完成。", 409);
+          if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
           const ids = sessionIds(body.sessionIds ?? []);
           try { input.sessions = ids.length ? await readSessions(signal => sessions.metadata(ids, signal)) : []; }
           catch (error) { throw error.status ? error : bad("无法读取所选会话，请刷新后重试", 503); }
@@ -1116,9 +1180,12 @@ export async function createBridge({
   server.on("close", () => {
     void sessions.close?.();
     batchesClosed = true;
+    batchGenerationSettings.clear();
     taskFeed.close();
     cli.close();
+    piCli.close();
     models.close();
+    piModels.close();
     runtime.close();
   });
   return { server, token, tokenPath };
@@ -1140,7 +1207,7 @@ if (
   });
   server.listen(port, "127.0.0.1", () => {
     console.log(
-      `QC-Reframe ${version} 本机服务：http://127.0.0.1:${port}\n运行 npm run pair 查看配对码（保存在 ${tokenPath}）。\n仅调用本机 Codex，按 Ctrl+C 停止。`,
+      `QC-Reframe ${version} 本机服务：http://127.0.0.1:${port}\n运行 npm run pair 查看配对码（保存在 ${tokenPath}）。\n通过已配置的本机 Agent 或生图 API 执行，按 Ctrl+C 停止。`,
     );
   });
   for (const signal of ["SIGINT", "SIGTERM"])

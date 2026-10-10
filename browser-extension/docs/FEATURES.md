@@ -20,9 +20,9 @@
 
 [工作台操作](../README.md#工作台主操作) · [轻量界面与接续](../README.md#轻量界面与工作台)
 
-## Codex 全流程
+## 逆向与生图渠道
 
-**在 Codex 内置浏览器选图，通过本机 Codex CLI 直接交互，再用 Codex 直接生成图片。** 扩展将选中的图片和任务指令交给本机 `codex app-server`；逆向后可编辑、复制中英文提示词，或继续调用 Codex 内置 `image_gen` 生图。无需填写另一套模型 API Key，沿用 Codex 登录与额度。
+**在浏览器选图，通过本机 Agent 逆向，再用设置中选择的渠道生成图片。** 扩展将选中的图片和任务指令交给本机 `codex app-server`；逆向后可编辑、复制中英文提示词，或继续调用 Codex 内置 `image_gen` 生图。默认沿用 Codex 登录与额度；也可在「设置 → 生图渠道」配置 OpenAI 兼容 Images API 或 Gemini 原生 API 的地址、模型和 API Key，使用对应服务商的额度。
 
 插件可独立选择并验证模型，不修改 Codex 全局模型设置。Codex 内置浏览器是已有验证环境，也支持 Chrome 使用路径；不同客户端的扩展加载入口可能不同。内置生图需要本机 imagegen skill 及账户能力支持。
 

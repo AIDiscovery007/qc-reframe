@@ -125,7 +125,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const [connected, setConnected] = useState(false);
   const [connectionText, setConnectionText] = useState("尚未连接");
   const [serviceBusy, setServiceBusy] = useState(false);
+  const [reverseAgent, setReverseAgent] = useState("codex");
   const [modelBusy, setModelBusy] = useState(false);
+  const [generationModel, setGenerationModel] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -172,7 +174,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const referenceError = job && referenceErrors[job.id];
   const restoring = !!job && !references[job.id] && !referenceError;
   const inputConflict = !!selection?.inputs && (activeProject?.inputRevision || 0) > (selection.inputRevision || 0);
-  const blocked = inputConflict || !draftReady || !connected || !selectedModel || busy || savingMode || modelBusy || cliBusy || !!running || loadingProject || restoring;
+  const inputBlocked = inputConflict || !draftReady || !connected || busy || savingMode || modelBusy || cliBusy || !!running || loadingProject || restoring;
+  const blocked = inputBlocked || !selectedModel;
+  const generationBlocked = inputBlocked || !generationModel;
 
   useEffect(() => {
     setCopied(false);
@@ -295,7 +299,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         } else { previous = undefined; setSelection(undefined); setProject(undefined); }
         if (params.get("view") === "settings") {
           const section = params.get("section");
-          setSettingsSection(section === "models" || section === "connection" ? section : "cli");
+          setSettingsSection(section === "models" || section === "generation" || section === "connection" || section === "pi-cli" ? section : "cli");
           setSettings(true);
         }
         if (params.get("view") === "tasks") setTasksOpen(true);
@@ -373,7 +377,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       const revision = projectRevision.current;
       let delay = 10_000;
       try {
-        const health = await query<{ ready: boolean; serviceReady?: boolean; skill: string; active: number; visibleActive?: number; hiddenProjectIds?: string[]; projectsRevision?: string; modelBusy?: boolean; cliBusy?: boolean; model?: string; cli?: CliStatus | null }>("/health");
+        const health = await query<{ generationModel?: string; agent?: string; ready: boolean; serviceReady?: boolean; skill: string; active: number; visibleActive?: number; hiddenProjectIds?: string[]; projectsRevision?: string; modelBusy?: boolean; cliBusy?: boolean; model?: string; cli?: CliStatus | null }>("/health");
         if (cancelled) return delay;
         setConnected(health.serviceReady ?? true);
         setServiceBusy(health.active > 0);
@@ -384,7 +388,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         setCliBusy(!!health.cliBusy);
         setCliStatus(health.cli);
         setModelBusy(!!health.modelBusy);
+        setReverseAgent(health.agent || "codex");
         setSelectedModel(health.model || null);
+        setGenerationModel(health.generationModel === undefined ? health.model || null : health.generationModel || null);
         setConnectionText(health.ready ? `已连接 · ${health.skill}` : "未找到图片逆向技能");
         delay = health.active || health.modelBusy || health.cliBusy ? 2000 : 10_000;
         // An older bridge must report an upgrade need instead of silently showing an empty library.
@@ -767,7 +773,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   };
 
   const reverseStatus = reading ? selection?.stage || "正在读取图片…" : running ? `${job?.autoGeneration?.status === "pending" ? job.result ? "正在准备生图…" : "正在逆向，完成后自动生图…" : job?.stage || "正在逆向提示词…"} · 完成后会提醒你`
-    : restoring ? "正在恢复原图…" : loadingProject ? "正在读取模板项目…" : cliBusy ? "Codex 正在升级…"
+    : restoring ? "正在恢复原图…" : loadingProject ? "正在读取模板项目…" : cliBusy ? "Agent CLI 正在安装或更新…"
     : modelBusy ? "正在验证模型…" : busy ? "正在提交…" : undefined;
 
   const instructionStale = contextFor(preferences.mode).instructionStale || contextFor(preferences.mode).orderStale;
@@ -826,7 +832,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   }, [workspace, narrow, drawerOpen, resultPane]);
   const generationPanel = activeJob?.result ? <GenerationPanel key={activeJob.id} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace} onAspectRatioChange={ratio => setChainRatio({ key: drawerKey, ratio })}
                   drawerOpen={drawerOpen} requestError={drawer.error} requestPending={drawer.pending}
-                  onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabledReason={workspace ? promptDraft ? "编辑未保存，请保存或取消提示词修改。" : needsPrompt ? reverseHint || genericHint || "输入已修改，请更新提示词。" : "" : ""} disabled={blocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
+                  onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabledReason={workspace ? promptDraft ? "编辑未保存，请保存或取消提示词修改。" : needsPrompt ? reverseHint || genericHint || "输入已修改，请更新提示词。" : "" : ""} disabled={generationBlocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
                   subjectImage={(activeJob.mode === "recreate" || activeJob.mode === "session") ? undefined : subjectImage(activeJob.mode)}
                   inputPreview={multiPreview}
                   subjects={activeJob.mode === "multi-reenact" ? multiSubjects : undefined}
@@ -933,9 +939,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       {preferences.paired && !settings && (!connected || connectionText === "未找到图片逆向技能") && (
         <div className="error" role="alert">{connectionText} <RecoveryAction error={connectionText} /></div>
       )}
-      {connected && (!selectedModel || cliStatus && !cliStatus.installed) && !settings && <div className="model-notice">
-        <span>{cliStatus && !cliStatus.installed ? "未找到 Codex CLI，请先完成安装" : "先为 QC-Reframe 选择并验证模型"}</span>
-        <button className="text-button" onClick={() => openRecovery(cliStatus && !cliStatus.installed ? "cli" : "models")}>{cliStatus && !cliStatus.installed ? "检查 Codex" : "选择模型"}</button>
+      {connected && (!selectedModel || reverseAgent === "codex" && cliStatus && !cliStatus.installed) && !settings && <div className="model-notice">
+        <span>{reverseAgent === "codex" && cliStatus && !cliStatus.installed ? "未找到 Codex CLI，请先完成安装" : "先为 QC-Reframe 选择并验证模型"}</span>
+        <button className="text-button" onClick={() => openRecovery(reverseAgent === "codex" && cliStatus && !cliStatus.installed ? "cli" : "models")}>{reverseAgent === "codex" && cliStatus && !cliStatus.installed ? "检查 Codex" : "选择模型"}</button>
       </div>}
 
       {(visibilityNotice || (!tasksOpen && visibilityError)) && <ProjectVisibilityToast notice={visibilityNotice} error={tasksOpen ? "" : visibilityError} busy={busy} containerRef={visibilityFeedback}
@@ -1001,8 +1007,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           onRotateReference={image => applyReferenceRotation(image, preferences.mode, taskInstruction(preferences.mode))}
           onSwap={() => { if (preferences.mode !== "recreate" && preferences.mode !== "session") void swapImages(preferences.mode, taskInstruction(preferences.mode)); }}
           onReverse={() => reverse()} onGenerate={() => reverse(true)} chainDisabled={chainDisabled} continuous={!!job?.autoGeneration || job?.id === continuousJobId} submitting={busy && startPending.current} onCancel={cancel} onCopy={copy} onLanguage={setLang} onWorkspace={() => void openWorkspace()} onUpdate={updateJob} onGenerationViewUpdate={revealGeneratedImage}
-          generationHint={promptDraft ? "未保存的提示词请在工作台继续编辑" : instructionStale ? "输入已修改，请重新生成提示词" : reverseStatus || (!connected ? "请先连接服务" : !selectedModel ? "请在工作台选择模型" : "")}
-          generationDisabled={!connected || !selectedModel || blocked || !!promptDraft || needsPrompt || !!subjectUnavailable[subjectKey(preferences.mode)]}
+          generationHint={promptDraft ? "未保存的提示词请在工作台继续编辑" : instructionStale ? "输入已修改，请重新生成提示词" : reverseStatus || (!connected ? "请先连接服务" : !generationModel ? "请在工作台配置生图渠道" : "")}
+          generationDisabled={generationBlocked || !!promptDraft || needsPrompt || !!subjectUnavailable[subjectKey(preferences.mode)]}
         /> : <section className="empty"><span className="empty-mark"><Icon name="image" /></span><h1>选择一张参考图</h1></section>}
 
       </main>
