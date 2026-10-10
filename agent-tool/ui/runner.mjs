@@ -9,7 +9,7 @@ import { scenarios, rules, uncovered } from './catalog.mjs';
 import { probeLayout } from './probe.mjs';
 import { prepareExample, checkExample } from './examples.mjs';
 import { checkImageOrderKeyboard } from './image-order.mjs';
-import { checkEndToEndKeyboard } from './end-to-end.mjs';
+import { checkEndToEndKeyboard, checkGenerationReadiness } from './end-to-end.mjs';
 import { checkAgentSettings } from './agent-settings.mjs';
 
 const { chromium } = requireExtension('playwright');
@@ -265,6 +265,8 @@ async function runVerify({ coverage = false, scenario: id, scenarioIds, build = 
         } else if (scenario.batchKeyboard) {
           item.evidence.batchDialog = join(directory, scenario.id + '-dialog.png');
           item.checks.push(...await checkBatchKeyboard(page, item.evidence.batchDialog, scenario.batchAllAccepted));
+        } else if (scenario.generationReadiness) {
+          item.checks.push(...await checkGenerationReadiness(page, scenario));
         } else if (scenario.flowKeyboardCase) {
           item.checks.push(...await checkEndToEndKeyboard(page, scenario));
         } else if (scenario.keyboardCase) {

@@ -1,3 +1,69 @@
+// user: Given a verified reverse model, When image-provider readiness changes,
+// Then composite flows require both capabilities; reverse-only keeps its own guards.
+export async function checkGenerationReadiness(page, scenario) {
+  const checks = [], popup = scenario.surface === 'popup';
+  const reverse = page.locator(popup ? '.quick-submit-actions .text-button' : '.canvas-generate').first();
+  const chain = page.getByRole('button', { name: '逆向并生图', exact: true });
+  await page.waitForFunction(() => {
+    const reverse = document.querySelector('.quick-submit-actions .text-button, .canvas-generate');
+    return reverse && !reverse.disabled && reverse.getAttribute('aria-disabled') !== 'true';
+  });
+  await page.getByRole('combobox', { name: '逆向模式', exact: true }).selectOption('recreate');
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent === '逆向并生图' && !button.disabled && button.getAttribute('aria-disabled') !== 'true'));
+  await page.evaluate(() => {
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+    window.generationReadiness = { patch: {}, received: 0 };
+    chrome.runtime.sendMessage = async message => {
+      const response = await send(message);
+      if (message.type === 'alchemy:query' && message.path === '/health' && response.ok) {
+        Object.assign(response.value, window.generationReadiness.patch);
+        window.generationReadiness.received++;
+      }
+      return response;
+    };
+  });
+  const cases = [
+    ['provider missing', { generationModel: null }, false, true],
+    ['provider ready', { generationModel: 'preview-image' }, false, false],
+    ['legacy health without generationModel', {}, false, false],
+    ['model verification busy', { generationModel: 'preview-image', modelBusy: true }, true, true],
+    ['CLI update busy', { generationModel: 'preview-image', cliBusy: true }, true, true],
+    ['service disconnected', { generationModel: 'preview-image', serviceReady: false }, true, true],
+    ['reverse model missing', { generationModel: 'preview-image', model: null }, true, true],
+  ];
+  const update = async patch => {
+    const received = await page.evaluate(patch => {
+      window.generationReadiness.patch = patch;
+      const before = window.generationReadiness.received;
+      document.dispatchEvent(new Event('visibilitychange'));
+      return before;
+    }, patch);
+    await page.waitForFunction(before => window.generationReadiness.received > before, received);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  };
+  const record = async (target, locator, expected) => {
+    const actual = await locator.evaluate(node => node.disabled || node.getAttribute('aria-disabled') === 'true');
+    checks.push({ ruleId: 'UI-BEHAVIOR', target, expected, actual, status: actual === expected ? 'passed' : 'failed' });
+  };
+  for (const [label, patch, reverseDisabled, generationDisabled] of cases) {
+    await update(patch);
+    await record(`${label}: reverse-only disabled`, reverse, reverseDisabled);
+    await record(`${label}: chained generation disabled`, chain, generationDisabled);
+  }
+  if (!popup) {
+    await update({ generationModel: 'preview-image' });
+    await page.getByRole('button', { name: '全部项目', exact: true }).click();
+    await page.getByRole('button', { name: '批量管理', exact: true }).click();
+    await page.getByRole('checkbox', { name: '选择本页', exact: true }).check();
+    const batch = page.getByRole('button', { name: '批量完整复刻', exact: true });
+    for (const [label, patch, , disabled] of cases) {
+      await update(patch);
+      await record(`${label}: batch recreation disabled`, batch, disabled);
+    }
+  }
+  return checks;
+}
+
 // Real Enter/Tab input; synthetic preview messages observe requests without replacing UI actions.
 export async function checkEndToEndKeyboard(page, scenario) {
   const checks = [], which = scenario.flowKeyboardCase, popup = scenario.surface === 'popup';

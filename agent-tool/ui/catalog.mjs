@@ -45,6 +45,12 @@ export const scenarios = [
   { id: 'popup-narrow', surface: 'popup', path: '/popup.html?state=alignment', viewport: { width: 320, height: 740 }, rules: ['UI-LAYOUT-QUICK', 'UI-IMAGE-PREVIEW'] },
   { id: 'popup-image-failed', surface: 'popup', path: '/popup.html?state=alignment', viewport: { width: 400, height: 740 }, prepare: 'image-failed', rules: ['UI-LAYOUT-QUICK', 'UI-IMAGE-PREVIEW'] },
   { id: 'generation-actions', surface: 'workspace', path: '/workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200', viewport: wide, regression: 'generationActionsRegression', rules: [] },
+  ...['workspace', 'workspace-narrow', 'popup'].map(surface => ({
+    id: `generation-readiness-${surface}`, surface: surface === 'popup' ? 'popup' : 'workspace',
+    path: `/${surface === 'popup' ? 'popup' : 'workspace'}.html?state=alignment&mode=recreate`,
+    viewport: surface === 'workspace' ? wide : { width: 360, height: 740 },
+    regression: 'generationReadiness', generationReadiness: true, rules: [],
+  })),
   ...['workspace', 'popup'].flatMap(surface => ['cancel', 'legacy', 'failure', 'tab', 'tab-failure', 'project', 'project-failure'].map(flowKeyboardCase => ({
     id: `end-to-end-keyboard-${surface}-${flowKeyboardCase}`, surface,
     path: `/${surface}.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000${flowKeyboardCase === 'legacy' ? '&start=legacy' : flowKeyboardCase.includes('failure') ? '&start=failed' : ''}`,

@@ -122,6 +122,8 @@ node agent-tool/ui.mjs evidence --report /absolute/gate.json --sha256 DIGEST --r
 
 正常产品场景归最终gate统一执行。工具自测保留检查器代表正例及错误状态、隐藏/禁用动作、几何故障、取消、清理和来源漂移反例；不再逐一重复全部正常样例。只改产品时按风险选择工具测试，工具改动运行相关自测；最终产品回归和共享界面覆盖不因此减少。交付最少列明变更、定向复核、最终报告及可信摘要、未覆盖项、实际耗时/重跑原因；不为小样式改动扩建无需求的工具或复制日志全文。
 
+生图就绪回归：`node agent-tool/ui.mjs verify --scenario generation-readiness-workspace`，另有 `generation-readiness-workspace-narrow`、`generation-readiness-popup`。使用生产 React 界面和合成健康响应验证渠道缺配置、恢复、旧服务回退、模型验证中、CLI 更新中、断线及逆向模型缺失；工作台同时验证已选项目的批量入口。不访问真实服务或模型，不改 React 内部状态。
+
 ## 状态样例、视觉、扩展与门禁
 
 | 命令 | 用途 / 输出 |

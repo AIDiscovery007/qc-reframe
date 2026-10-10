@@ -20,7 +20,7 @@ const compiled = ts.transpileModule(names.map(name => `const ${name} = ${declara
 function fixture(mode, overrides = {}) {
   const calls = [], drafts = {}, exports = {};
   runInNewContext(compiled, {
-    exports, workspace: true, chainRatio: undefined, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, promptDraft: undefined,
+    exports, workspace: true, chainRatio: undefined, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, generationBlocked: false, promptDraft: undefined,
     selection: { image: 'reference' }, referenceError: undefined, displayImage: 'reference', subjectDraftKey: mode => `project:${mode}:new`, subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
     taskInstruction: () => 'instruction', defaultInstructions: { [mode]: 'instruction' }, subjectImage: () => 'subject',
     multiSubjects: [{ id: 'one', subjectImage: 'one' }, { id: 'two', subjectImage: 'two' }], multiPrompt: 'instruction', multiStale: false,
@@ -159,6 +159,19 @@ test('missing subject resources block style extraction; valid replacements and e
   }
 });
 
+
+test('user can reverse without submitting a chain while image generation is blocked', () => {
+  // Given valid reverse input but an unavailable image-generation provider.
+  const ui = fixture('recreate', { generationBlocked: true });
+  // When the shared handler receives a chain request, Then no task is submitted.
+  ui.reverse(true);
+  assert.equal(ui.chainDisabled, true);
+  assert.equal(ui.calls.length, 0);
+  // When the user chooses reverse-only, Then it still submits without generation.
+  ui.reverse();
+  assert.equal(ui.calls.length, 1);
+  assert.equal(ui.calls[0].generate, false);
+});
 
 test('continuous action uses a new reverse submission and blocks incomplete inputs or invalid ratios', () => {
   for (const mode of ['style', 'recreate', 'reenact', 'multi-reenact']) {

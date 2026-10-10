@@ -774,7 +774,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const reverseDisabled = blocked || !!reverseHint || !!promptDraft;
   const ratio = workspace ? chainRatio?.key === drawerKey ? chainRatio.ratio : undefined
     : job?.generations?.length ? job.generations.at(-1)?.aspectRatio : job?.autoGeneration?.aspectRatio;
-  const chainDisabled = reverseDisabled || (preferences.mode === "style" && !subjectImage("style")) || !validGenerationRatio(ratio);
+  const chainDisabled = reverseDisabled || generationBlocked || (preferences.mode === "style" && !subjectImage("style")) || !validGenerationRatio(ratio);
   const reverse = (generate = false) => {
     if (generate ? chainDisabled : reverseDisabled) return;
     const mode = preferences.mode;
@@ -935,7 +935,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       {!workspace && draftError && <p className="error" role="alert">{draftError}</p>}
       <main className={workspace && !historyOpen && !galleryOpen && selection ? "canvas-main" : undefined}>
         {historyOpen ? (
-          <ProjectHistory hiddenProjectIds={hiddenProjectIds} batchDisabled={!connected || !selectedModel || modelBusy || cliBusy} onTasks={() => setTasksOpen(true)} searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
+          <ProjectHistory hiddenProjectIds={hiddenProjectIds} batchDisabled={!connected || !selectedModel || !generationModel || modelBusy || cliBusy} onTasks={() => setTasksOpen(true)} searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
         ) : workspace && selection ? <CanvasWorkspace onPromptRevealed={() => setTargetPrompt(undefined)} revealPrompt={targetPrompt?.jobId === activeJob?.id ? targetPrompt?.request : undefined} contextKey={drawerKey} mode={preferences.mode}
           sessionTitle={selectedSessions().length === 1 ? selectedSessions()[0]!.title : selectedSessions().length ? `已选 ${selectedSessions().length} 个会话` : undefined} onSessions={() => setSessionPicker(drawerKey)}
           image={displayImage} subjectImage={subjectImage(preferences.mode)} subjects={multiSubjects}

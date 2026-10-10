@@ -57,6 +57,9 @@
 | popup-narrow | popup 320×740 | /popup.html?state=alignment | UI-LAYOUT-QUICK, UI-IMAGE-PREVIEW |
 | popup-image-failed | popup 400×740 | /popup.html?state=alignment / image-failed | UI-LAYOUT-QUICK, UI-IMAGE-PREVIEW |
 | generation-actions | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200 | generationActionsRegression |
+| generation-readiness-workspace | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate | generationReadiness |
+| generation-readiness-workspace-narrow | workspace 360×740 | /workspace.html?state=alignment&mode=recreate | generationReadiness |
+| generation-readiness-popup | popup 360×740 | /popup.html?state=alignment&mode=recreate | generationReadiness |
 | end-to-end-keyboard-workspace-cancel | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000 | endToEndKeyboard |
 | end-to-end-keyboard-workspace-legacy | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=legacy | endToEndKeyboard |
 | end-to-end-keyboard-workspace-failure | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=failed | endToEndKeyboard |
