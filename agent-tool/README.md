@@ -55,6 +55,10 @@
 
 ## 界面预览
 
+逆向 Agent 设置：`node agent-tool/ui.mjs verify --scenarios agent-settings-wide agent-settings-narrow agent-settings-legacy`。覆盖 Codex/Pi 卡片、独立模型目录、保存失败、重开与旧服务兼容，使用合成消息，不调用真实 CLI 或模型。
+
+生图 API 设置：`node agent-tool/ui.mjs verify --scenarios image-settings-wide image-settings-narrow image-settings-legacy`。复用生产设置组件，覆盖两种 API、保存失败、重开、密钥不回显、清除和窄屏；仅合成消息，不访问真实凭据、供应商或项目。桥接与协议反例：`node --test browser-extension/tests/image-api-bridge.test.mjs browser-extension/tests/image-api.test.mjs browser-extension/tests/image-settings.test.mjs`，使用临时配置、合成图片与 stub，不调用真实模型。
+
 先运行 `npm --prefix browser-extension run build`，再运行 `npm --prefix browser-extension run preview`。原来的 `cd browser-extension && npm run preview` 入口保留。仅监听 `127.0.0.1`，按 Ctrl+C 停止自己的预览进程。
 
 - `PREVIEW_PORT`：默认 `43188`，整数 0–65535；0 自动分配空闲端口，实际地址见 stdout。占用端口报错，不关闭已有服务。
@@ -68,6 +72,10 @@
 - 查询参数和界面场景见 [扩展预览文档](../browser-extension/README.md)。回归脚本仍位于 `browser-extension/tests/`；预览只负责加载。
 
 预览读取构建文件、示例图及显式指定的图片，缩略图在内存生成。浏览器 fixture 会使用当前预览 origin 的 localStorage/sessionStorage；不写真实项目资产、不连接 bridge、不调用 Codex。模拟行为及 HTTP 资源测试不能替代实际扩展与真实模型验收。
+
+自动连接补充验收：`node agent-tool/ui.mjs verify --scenarios automatic-connection-workspace automatic-connection-workspace-narrow automatic-connection-popup`。合成未配对状态、首次健康请求失败及下一轮成功，验证自动恢复、无手填配对、首次不强制打开设置、离线本地设置可用与恢复后导航保留；不启动真实本机服务或调用模型。
+
+模型设置补充验收：`node agent-tool/ui.mjs verify --scenarios agent-settings-layout-wide agent-settings-layout-narrow agent-settings-layout-loading agent-settings-layout-missing agent-settings-layout-failed agent-settings-layout-custom agent-settings-layout-updating agent-settings-layout-installing`。沿用统一构建、隔离预览与Chromium，使用合成消息；分别输出模型/管理区截图，320px长路径另存详情图，并检查真实Space/Enter/Tab焦点。既有`agent-settings-*`负责业务往返，`image-settings-*`与`settings-recovery{,-narrow}`覆盖共享导航。`verify --fault settings-overflow`与`--fault settings-focus`应非零退出，分别证明横溢出与不可见卡片焦点会被检测。默认构建会写入构建产物，临时报告/profile及进程由工具管理；不访问真实账户、CLI、模型、用户数据或接受视觉基线。有效构建可加`--no-build`复用。
 
 ## UIUX 规范与诊断
 
@@ -113,6 +121,8 @@ node agent-tool/ui.mjs evidence --report /absolute/gate.json --sha256 DIGEST --r
 报告包含 `reason`、`startedAt/finishedAt`、`timing.durationMs`、阶段耗时与场景 `durationMs`；gate区分静态、预览、隔离扩展、视觉候选，preview区分构建/核验、启动与清理。`waitMs: 0` 仅表示锁不等待，不是团队没有等待。人工开发、评审和协调等待在任务日志按开始/结束或实际估计记录，并标注估计；重跑写明原因，不把缺失工时算0。比较须同机器、同构建模式、同场景及合理负载；历史数字只作历史参考。
 
 正常产品场景归最终gate统一执行。工具自测保留检查器代表正例及错误状态、隐藏/禁用动作、几何故障、取消、清理和来源漂移反例；不再逐一重复全部正常样例。只改产品时按风险选择工具测试，工具改动运行相关自测；最终产品回归和共享界面覆盖不因此减少。交付最少列明变更、定向复核、最终报告及可信摘要、未覆盖项、实际耗时/重跑原因；不为小样式改动扩建无需求的工具或复制日志全文。
+
+生图就绪回归：`node agent-tool/ui.mjs verify --scenario generation-readiness-workspace`，另有 `generation-readiness-workspace-narrow`、`generation-readiness-popup`。使用生产 React 界面和合成健康响应验证渠道缺配置、恢复、旧服务回退、模型验证中、CLI 更新中、断线及逆向模型缺失；工作台同时验证已选项目的批量入口。不访问真实服务或模型，不改 React 内部状态。
 
 ## 状态样例、视觉、扩展与门禁
 

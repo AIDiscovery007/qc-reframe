@@ -99,7 +99,7 @@ export default function GenerationPanel({ onAspectRatioChange, targetGeneration,
     {!validRatio && <p id={ratioHintId} className="ratio-hint ratio-error" role="status">宽高请填 1–10000 的整数，比例范围为 1:20–20:1。</p>}
   </div>;
   const generateButton = <button className="primary generate-button" disabled={busy || !controls.canGenerate} aria-busy={busy || !!running}
-    title={`使用${job.mode === "recreate" ? "" : job.mode === "session" ? "参考风格与" : "当前主体图、参考模板与"}${lang === "zh" ? "中文" : "英文"}提示词生成，包含排除项。使用 Codex 生图额度。`} onClick={() => act()}>
+    title={`使用${job.mode === "recreate" ? "" : job.mode === "session" ? "参考风格与" : "当前主体图、参考模板与"}${lang === "zh" ? "中文" : "英文"}提示词生成，包含排除项。使用设置中选择的生图渠道。`} onClick={() => act()}>
     {!running && !busy && <Icon name="image" />}{running ? workspace ? "图片生成中…" : "生成中，完成后提醒" : busy ? "正在提交…" : generations.length ? workspace ? "再生成图片" : "再生成一张" : "生成图片"}{!workspace && <Icon name="arrow" />}
   </button>;
   const warning = disabledReason || ((generic || incomplete) ? "请先上传主体图，生成专属提示词。" : !inputsReady ? multi ? "请添加至少 2 张可用的主体图。" : "请先上传可用的主体图。" : "");

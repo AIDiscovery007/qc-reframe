@@ -44,7 +44,7 @@ export async function prepareExample(page, scenario) {
     await page.waitForFunction(() => { const img = document.querySelector('.image-viewer-stage img'); return img?.complete && img.naturalWidth > 0 && img.style.width; });
     if (item.imageOpenViewport) await page.setViewportSize(item.viewport);
   } else if (item.example === 'empty') {
-    if (item.surface === 'workspace') { await page.getByRole('button', { name: '关闭设置', exact: true }).click(); await page.waitForSelector('main > .empty'); }
+    if (item.surface === 'workspace') await page.waitForSelector('main > .empty');
     else await page.waitForSelector('.quick-upload');
   } else if (item.example === 'loading') {
     await page.waitForSelector('.canvas-large .loading-placeholder');

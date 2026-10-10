@@ -24,3 +24,9 @@ test("capability summaries do not promise model/image access or block unknown ch
   assert.match(compatibilityMessage({ features: { reverse: { status: "supported" } } }), /账户权限/);
   assert.match(compatibilityMessage({ features: { sessions: { status: "unsupported" }, reverse: { status: "supported" } } }), /会话创作.*其他功能可继续使用/);
 });
+
+test("Given a historical Pi CLI failure, recovery opens Pi management without changing reverse selection", () => {
+  assert.equal(recoverySection("Pi CLI 未安装，请安装后重试"), "pi-cli");
+  assert.equal(recoverySection("Pi 无法启动，请检查路径"), "pi-cli");
+  assert.equal(recoverySection("Pi 模型当前不可用"), "models");
+});

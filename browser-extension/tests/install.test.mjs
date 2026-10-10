@@ -40,6 +40,47 @@ async function installation(t, copyRoot = false) {
   return { dir, env, run, installRoot };
 }
 
+test("user approves their separately loaded extension during setup and reconnects after restart without a code", { skip: process.platform === "win32" }, async t => {
+  // Given a fixed browser extension ID approved by the local installer; npm is stubbed to avoid rebuilding shared files.
+  const { dir, env, run } = await installation(t);
+  env.ALCHEMY_EXTENSION_ID = "b".repeat(32);
+  env.npm_execpath = join(dir, "npm-stub.mjs");
+  await writeFile(env.npm_execpath, "process.exit(0);\n");
+  await run("setup");
+  const config = JSON.parse(await readFile(join(dir, "config/runtime.json"), "utf8"));
+  assert.equal(config.ALCHEMY_EXTENSION_ID, env.ALCHEMY_EXTENSION_ID);
+  delete env.ALCHEMY_EXTENSION_ID;
+  // When the service starts and restarts using persisted runtime configuration.
+  const tokens = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const started = await run("start");
+    assert.match(started.stdout, /自动连接/);
+    const response = await fetch(`http://127.0.0.1:${env.ALCHEMY_PORT}/connection`, { method: "POST",
+      headers: { Origin: `chrome-extension://${config.ALCHEMY_EXTENSION_ID}`, "Content-Type": "application/json" }, body: "{}" });
+    assert.equal(response.status, 200);
+    tokens.push((await response.json()).token);
+    assert.ok(!started.stdout.includes(tokens.at(-1)));
+    await run("stop");
+  }
+  // Then the previously approved extension connects both times using the same private credential.
+  assert.equal(tokens[0], tokens[1]);
+  assert.equal((await readFile(join(dir, "config/token"), "utf8")).trim(), tokens[0]);
+});
+
+test("user mistypes an approved extension ID and setup preserves existing runtime configuration", { skip: process.platform === "win32" }, async t => {
+  // Given existing private configuration, when an installer supplies an invalid allowlist ID.
+  const { dir, env, run } = await installation(t);
+  const saved = JSON.stringify({ CODEX_BIN: env.CODEX_BIN, ALCHEMY_EXTENSION_ID: "b".repeat(32) });
+  await mkdir(join(dir, "config"));
+  await writeFile(join(dir, "config/runtime.json"), saved);
+  env.ALCHEMY_EXTENSION_ID = "*";
+  await assert.rejects(run("setup"), error => /ALCHEMY_EXTENSION_ID/.test(error.stderr));
+  // Then setup refuses before replacing the valid configuration or issuing a credential.
+  assert.equal(await readFile(join(dir, "config/runtime.json"), "utf8"), saved);
+  await assert.rejects(readFile(join(dir, "config/token")), { code: "ENOENT" });
+  delete env.ALCHEMY_EXTENSION_ID;
+});
+
 test("bundled Alchemy runs without author's external files and has no dangling runtime references", async () => {
   const skillRoot = join(root, ".agents/skills/alchemy");
   const files = ["SKILL.md", ...(await readdir(join(skillRoot, "references"))).map(name => `references/${name}`)];
@@ -155,7 +196,7 @@ if (process.argv[2] === 'run') {
   await writeFile(join(dir, "preserved-note.txt"), "user data");
   const result = await run("setup");
   assert.match(result.stderr, error);
-  assert.match(result.stderr, /启动并配对后.*设置中心/);
+  assert.match(result.stderr, /扩展自动连接后.*插件模型/);
   const quoted = `'${env.CODEX_BIN.replaceAll("'", "'\"'\"'")}'`;
   assert.ok(result.stderr.includes(issue === "logged-out" ? `${quoted} login` : issue === "old" ? `${quoted} --version` : quoted));
   assert.deepEqual((await readFile(join(installRoot, "npm-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line)), [["ci"], ["run", "build"]]);

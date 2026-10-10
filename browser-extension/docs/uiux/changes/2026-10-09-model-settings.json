@@ -1,0 +1,212 @@
+{
+  "schemaVersion": 1,
+  "intent": "按人类要求打磨插件模型页：逆向选择、模型表单与独立本机维护分层；窄屏完整内容宽度、明确操作反馈与真实键盘焦点，保持独立生图和既有异步保护",
+  "createdAt": "2026-10-09T15:39:59.584Z",
+  "reviewStatus": "proposed",
+  "files": [
+    {
+      "path": "browser-extension/entrypoints/popup/AgentSettings.tsx",
+      "sha256": "ecac6d3f2526e48c9e8cd3c534897c9701bae8265eb2ac676f6046d56040d763"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/AgentCliSettings.tsx",
+      "sha256": "0b776d8cb492b39a6d67f24d204ad226122e43d5ca5b65dea158d11100d2a641"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/ModelSettings.tsx",
+      "sha256": "c721c385327ce9dc601df7a12e0c9c36f1ca034bf722f24781a61bf75da354c6"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/settings-center.css",
+      "sha256": "cdbeb9c259d0bb93d02bc6af2f0f7fe1275647ba4da62517d4feb7ef0aeef92d"
+    },
+    {
+      "path": "agent-tool/preview.mjs",
+      "sha256": "ad0787b912d5a52821e397433017575436a34db8516978943c16e57c59784411"
+    },
+    {
+      "path": "agent-tool/ui/catalog.mjs",
+      "sha256": "14358bbb6a0c98e16005803112b6457ee491f128732278312793aa1b70a92847"
+    },
+    {
+      "path": "agent-tool/ui/runner.mjs",
+      "sha256": "9dd4af62e0c89e6dbe3009e17719d069e27e625c12c9905ac20125daf9db77ea"
+    },
+    {
+      "path": "agent-tool/ui/agent-settings.mjs",
+      "sha256": "1b2bc349c30f1f986358abffa86c80a414ae6a1302b4016ee753f22daa7ebf63"
+    },
+    {
+      "path": "agent-tool/ui.mjs",
+      "sha256": "e6e7358113cbe8328904b02768bb82fdf88cb4fc1699edbc415f704514391ce1"
+    },
+    {
+      "path": "browser-extension/tests/agent-settings.browser.js",
+      "sha256": "d97d10d26f91b891ce656028728dd99ed2674eba6a5d9b766762cbd4ca190fe9"
+    },
+    {
+      "path": "browser-extension/docs/uiux/README.md",
+      "sha256": "8dabca5a6c1aaac97027b186fa58b05b362bfd98996ab5b3b7ab953d155a3c0c"
+    },
+    {
+      "path": "agent-tool/README.md",
+      "sha256": "10f812fc169b291ab577507d29aa605d3dab46434bf8b89c8d1c046d0eb3117c"
+    }
+  ],
+  "rules": [
+    "UI-CSS-IMPORT",
+    "UI-TOKEN-DEFINED",
+    "UI-TOKEN-COLOR",
+    "UI-LAYOUT-CANVAS",
+    "UI-LAYOUT-QUICK",
+    "UI-IMAGE-PREVIEW",
+    "UI-IMAGE-VIEWPORT",
+    "UI-EXAMPLE-STATE",
+    "UI-EXAMPLE-KEYBOARD"
+  ],
+  "scenarios": [
+    "batch-toolbar-360",
+    "batch-toolbar-650",
+    "batch-toolbar-651",
+    "batch-toolbar-877",
+    "batch-toolbar-1440",
+    "batch-recreate-mixed",
+    "batch-recreate-retry",
+    "batch-recreate-late",
+    "batch-recreate-narrow",
+    "batch-recreate-keyboard",
+    "batch-recreate-history",
+    "batch-recreate-hidden",
+    "batch-recreate-all-accepted",
+    "batch-recreate-preflight-hidden",
+    "batch-recreate-retry-hidden",
+    "workspace-wide",
+    "workspace-prompt",
+    "workspace-narrow",
+    "popup",
+    "popup-narrow",
+    "popup-image-failed",
+    "generation-actions",
+    "end-to-end-keyboard-workspace-cancel",
+    "end-to-end-keyboard-workspace-legacy",
+    "end-to-end-keyboard-workspace-failure",
+    "end-to-end-keyboard-workspace-tab",
+    "end-to-end-keyboard-workspace-tab-failure",
+    "end-to-end-keyboard-workspace-project",
+    "end-to-end-keyboard-workspace-project-failure",
+    "end-to-end-keyboard-popup-cancel",
+    "end-to-end-keyboard-popup-legacy",
+    "end-to-end-keyboard-popup-failure",
+    "end-to-end-keyboard-popup-tab",
+    "end-to-end-keyboard-popup-tab-failure",
+    "end-to-end-keyboard-popup-project",
+    "end-to-end-keyboard-popup-project-failure",
+    "end-to-end-popup-start-failed",
+    "end-to-end-workspace",
+    "end-to-end-popup",
+    "end-to-end-cancel",
+    "end-to-end-phase-cancel",
+    "end-to-end-context",
+    "end-to-end-reverse-failed",
+    "end-to-end-generation-failed",
+    "image-order-paired",
+    "image-order-multi",
+    "image-order-legacy",
+    "image-order-failed",
+    "image-order-popup",
+    "image-instruction-default-paired",
+    "image-instruction-legacy-paired",
+    "image-instruction-default-multi",
+    "image-order-keyboard-new",
+    "image-order-keyboard-history",
+    "image-order-keyboard-failure",
+    "image-order-keyboard-late",
+    "auto-style",
+    "creation-context",
+    "settings-recovery-narrow",
+    "settings-recovery",
+    "image-settings-wide",
+    "image-settings-narrow",
+    "image-settings-legacy",
+    "example-workspace-empty",
+    "example-popup-empty",
+    "example-input-loading",
+    "example-reverse-busy",
+    "example-reverse-failed",
+    "example-no-model",
+    "example-long-instruction",
+    "example-narrow-input",
+    "example-narrow-result",
+    "example-image-viewer",
+    "example-image-viewer-portrait",
+    "example-image-viewer-narrow",
+    "example-image-viewer-short",
+    "example-image-viewer-result-short",
+    "example-image-viewer-result-popup",
+    "example-native-controls",
+    "agent-settings-layout-wide",
+    "agent-settings-layout-narrow",
+    "agent-settings-layout-loading",
+    "agent-settings-layout-missing",
+    "agent-settings-layout-failed",
+    "agent-settings-layout-custom",
+    "agent-settings-layout-updating",
+    "agent-settings-layout-installing",
+    "agent-settings-wide",
+    "agent-settings-narrow",
+    "agent-settings-legacy"
+  ],
+  "scopeReason": "共享/未知依赖没有完整影响图，回退全部登记场景，不静默跳过。",
+  "evidence": [
+    {
+      "kind": "targeted-preview",
+      "status": "passed",
+      "reportPath": "/var/folders/0d/cgp0j7d54qx310xj_4nx5bz00000gn/T/reframe-ui-hoYuwc/report.json",
+      "sha256": "95188b6e54a1a20498f030018f3974b033aaf3af25fa4d41e646e428ba6d4d6f",
+      "scenarios": 17,
+      "passedChecks": 49,
+      "skippedChecks": 1,
+      "durationMs": 21013,
+      "note": "真实构建+合成消息，含320px与宽屏的模型/管理/长路径分段截图和Space/Enter/Tab；原生系统picker既有能力例外，未接受视觉基线、未验证真实CLI或模型。"
+    },
+    {
+      "kind": "negative-injections",
+      "status": "passed",
+      "reports": [
+        "/tmp/reframe-model-settings-focus.json",
+        "/tmp/reframe-model-settings-overflow-final.json"
+      ],
+      "note": "两项预期失败均exit1，精确发现焦点不可见/表单横溢出。仅临时页面CSS，不修改生产文件。"
+    },
+    {
+      "kind": "restored-preview",
+      "status": "passed",
+      "reportPath": "/var/folders/0d/cgp0j7d54qx310xj_4nx5bz00000gn/T/reframe-ui-JDfAak/report.json",
+      "durationMs": 5108,
+      "note": "故障后无注入宽窄两场景复验通过。"
+    },
+    {
+      "kind": "tool-regression",
+      "status": "passed",
+      "tests": 15,
+      "skipped": 0,
+      "durationMs": 2374,
+      "log": "/tmp/reframe-model-settings-tool-tests.log"
+    },
+    {
+      "kind": "static-and-types",
+      "status": "passed",
+      "logs": [
+        "/tmp/reframe-model-settings-static.json",
+        "/tmp/reframe-model-settings-compile.log"
+      ],
+      "note": "增量静态0finding，tsc通过。最终完整回归及浏览器域审阅由监工/主执行者协调。"
+    }
+  ],
+  "reviewChecklist": [
+    "确认设计意图及合法变体",
+    "复核组件复用与所有受影响表面",
+    "附上静态/交互/截图证据",
+    "设计变化时单独审阅指定视觉基线"
+  ]
+}

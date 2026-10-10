@@ -19,7 +19,10 @@ flowchart TD
   Bridge --> Runtime[Task Runtime]
   Runtime --> Records[Task Records]
   Records --> Feed[已提交任务列表]
-  Runtime --> Codex[每任务独立 Codex 进程]
+  Runtime --> Agent[逆向 Agent 适配]
+  Agent --> Codex[每任务独立 Codex 进程]
+  Agent --> Pi[每任务独立 Pi 进程]
+  Runtime --> Generation[Codex 或 API 生图]
 ```
 
 ## 创作上下文
@@ -40,6 +43,24 @@ App 仍拥有页面导航、提醒、弹层、轮询和效果，不把所有 UI 
 每个挂载中的提示词版本有自己的生图会话。图片读取用序号丢弃迟到结果；版本离开后不再更新其展示，但已经提交的请求仍通过原版本 onUpdate 更新数据、onRequestState 收尾原抽屉。清理当前历史图片定位属于独立 onViewUpdate，仅允许原挂载生命周期、创作上下文及导航轮次仍有效时执行，离开再返回也不能接收旧请求的视图动作。关闭界面不取消本机任务。实际布局、抽屉、语言、尺寸控件与图片操作留在各自组件中。
 
 这个 seam 有两个实际 UI adapter，改动一处即可覆盖两端；不引入通用表单框架或全局事件总线。
+
+## 逆向 Agent
+
+`bridge/agent.mjs` 统一构造 Alchemy 输入、图片顺序和输出合同，再按提交时的 `modelSettings.agent` 分派 Codex 或 Pi。缺少旧字段按 Codex 解释，未知 Agent 明确失败。`bridge/agents.mjs` 持久化逆向选择，`models.mjs` 复用同一验证与保存流程，将 Codex 和 Pi 模型分别存入配置文件；切换不改动全局 CLI 设置或凭据。
+
+`bridge/pi-agent.mjs` 管理 Pi 子进程协议、模型目录、错误与取消；`pi-extension.mjs` 只开放本次图片取证及技能资料读取。图片操作复用 `inspection.mjs`，没有第二套裁切规则。Pi 不提供 Codex 的 OS sandbox，因此通过禁用默认工具、个人扩展和上下文文件限制模型可调用能力；该限制不声称隔离 CLI 自身或模型服务。
+
+任务和排队批次冻结逆向 Agent/provider/model/推理参数；自动生图另冻结所选生图渠道、模型及 API 配置。两阶段仍由既有 Task Runtime 和 Batch Store 调度，取消、保存失败及重启恢复使用原规则。会话正文读取独立使用 Codex，只把既有显式快照交给所选逆向 Agent。
+
+CLI 管理由 `cli.mjs` 与 `pi-cli.mjs` 分别验证安装来源，复用固定参数的子进程执行器。`/cli/*?agent=codex|pi` 显式指定管理目标；省略时兼容 Codex。安装更新与任务、模型验证全局互斥，完成后只清除对应 Agent 的模型信任；Codex 更新还复查兼容性并重建会话读取器。
+
+Pi 新安装使用固定官方 npm 包、私有暂存目录和禁用生命周期脚本的安装参数；验证成功后原子替换当前安装指针。外部 npm 安装先核对包身份、真实入口和运行时；具备原生自更新能力时调用原 CLI 的固定 `update --self --no-approve`，由 Pi 从自身安装位置确定原 prefix，不把资源包更新当作 CLI 升级。不支持原生自更新时仍仅允许已验证 npm manager 的原 prefix 更新。更新后复检路径、版本与 Reframe 接口；失败或取消时，已发生部分替换也须清除旧模型信任。App 或无法确认来源的安装不自动覆盖。管理操作不接受任意命令或路径，也不读取或复制登录凭据。设置中的管理目标独立于已保存的逆向 Agent；旧 `section=cli` 和 Pi 恢复入口只定位对应管理区域。
+
+## 生图渠道
+
+`bridge/image-settings.mjs` 原子保存渠道与各 API 配置；扩展专用 `/image-settings` 仅返回非敏感字段及密钥存在状态。`image-api.mjs` 处理 OpenAI Images 和 Gemini generateContent 协议、有序附图、比例适配、受限下载及取消；Codex 路径继续使用原 generator。完整复刻只发送提示词，其余模式沿用任务的图片顺序与分工。失败不回退其他渠道、不自动重试。
+
+手动、连续及批次任务在受理时冻结生图配置。凭据只保存在私有设置文件和在途内存快照，不进入任务、批次或历史响应；批次终结及服务关闭清理快照。历史保留渠道、地址和模型；重启沿既有规则终结中断批次，不读取当前密钥继续旧请求。
 
 ## 运行与持久化
 
@@ -79,3 +100,9 @@ App 仍拥有页面导航、提醒、弹层、轮询和效果，不把所有 UI 
 输入保存浏览器回归：启动 preview 后访问 `/workspace.html?state=alignment&mode=recreate&inputSaveDelay=1800&creationContextRegression=mode`；末项可改 `version`、`project` 或 `failure`（失败场景另加 `&swap=failed`）。使用真实画布上传及外部提醒导航，顶部应显示 PASS。保存期间普通导航控件禁用，测试不绕过 disabled。主操作回归入口为 `/workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200`。
 
 保留单机 JSON、不可变图片资产、任务独立 Codex 进程、会话 Worker 与只读 RPC 政策。本轮不更换数据库、不拆网络服务、不改变五模式产品语义。
+
+## 自动连接
+
+`bridge/connection.mjs` 根据 Chromium 的 unpacked ID 规则确定当前安装标准输出目录的扩展 Origin，合并安装配置中显式批准的 `ALCHEMY_EXTENSION_ID`。服务的 `POST /connection` 校验精确 Origin、Host、JSON 空请求及无查询参数后返回既有 token，并禁止缓存；其他业务接口保持 Bearer 认证。原 token、配置和项目数据不重置，普通网页和未知扩展不能自动注册。
+
+扩展后台按业务需要连接，并把凭据仅保存在 trusted local storage。并发请求共用一次握手，偏好写入串行合并，避免连接覆盖模式选择；收到明确 401 时最多恢复一次，网络失败和业务错误不重放请求。界面可见时轮询健康状态，首次未配对也会连接，关闭或切换设置不改变进行中的任务。Codex 与 Pi 共用此连接，安装/登录/模型验证仍由各自渠道管理；连接不依赖 Codex 技能或模型就绪。

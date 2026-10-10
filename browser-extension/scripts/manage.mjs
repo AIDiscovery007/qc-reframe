@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { storagePaths, ensureStorage, migrateStorage, moveLegacyFile, readStoredConfig, rotateServiceLog } from "../bridge/storage.mjs";
+import { connectionOrigins } from "../bridge/connection.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = resolve(process.env.ALCHEMY_DATA_DIR || join(root, ".local"));
@@ -15,7 +16,7 @@ const configFile = paths.settings;
 const port = Number(process.env.ALCHEMY_PORT || 43187);
 const url = `http://127.0.0.1:${port}`;
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-const runtimeKeys = ["CODEX_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH"];
+const runtimeKeys = ["CODEX_BIN", "PI_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const readable = async path => { try { await access(path); return true; } catch { return false; } };
 const cliCommand = path => process.platform === "win32" ? `& '${path.replaceAll("'", "''")}'` : `'${path.replaceAll("'", "'\"'\"'")}'`;
@@ -62,10 +63,10 @@ async function doctor(env, maintenance = false) {
     else if (cli.status !== 0) cliIssue = `此 Codex CLI 不支持 app-server，请在设置中心检查并按原安装方式升级，再用 ${command} --version 复查实际版本。`;
   }
   if (cliIssue && !maintenance) throw new Error(cliIssue);
-  if (cliIssue) console.warn(`CLI 待处理，Reframe 初始化和本机管理仍可继续：${cliIssue}\n启动并配对后，请在设置中心检查 Codex CLI、选择并验证模型，再开始逆向或生图。`);
+  if (cliIssue) console.warn(`CLI 待处理，Reframe 初始化和本机管理仍可继续：${cliIssue}\n扩展自动连接后，请在插件模型中检查 Agent CLI、选择并验证模型，再开始逆向或生图。`);
   await checkSkill(env);
   const imagegen = await readable(env.IMAGEGEN_SKILL_PATH);
-  console.log(`QC-Reframe ${version}\nNode.js ${process.versions.node}\nCodex CLI：${cliIssue ? "需要处理，请在设置中心检查" : "已登录"}\nAlchemy skill：就绪\n插件模型：在扩展连接设置中选择并验证\nimagegen：${imagegen ? "已找到（实际生图能力以账户和模型为准）" : "未找到；可逆向提示词，生图前需配置 IMAGEGEN_SKILL_PATH"}`);
+  console.log(`QC-Reframe ${version}\nNode.js ${process.versions.node}\nCodex CLI：${cliIssue ? "需要处理，请在设置中心检查" : "已登录"}\nAlchemy skill：就绪\n插件模型：在设置中心选择 Agent 并验证模型\nimagegen：${imagegen ? "已找到（实际生图能力以账户和模型为准）" : "未找到；可逆向提示词，Codex 内置生图前需配置 IMAGEGEN_SKILL_PATH，也可在设置中选择 API 生图"}`);
   return env;
 }
 
@@ -88,7 +89,7 @@ async function probe() {
 }
 
 function connectionInfo() {
-  console.log(`\n服务：${url}\n扩展目录：${join(root, ".output/chrome-mv3")}\n数据目录：${dataDir}\n配对码：运行 npm run pair 查看，只粘贴到 QC-Reframe 设置。\n首次加载说明：${join(root, "docs/INSTALL_WITH_CODEX.md")}\n检查：npm run status　停止：npm stop`);
+  console.log(`\n服务：${url}\n扩展目录：${join(root, ".output/chrome-mv3")}\n数据目录：${dataDir}\n连接：从上述目录加载的扩展会自动连接，无需填写配对码。\n首次加载说明：${join(root, "docs/INSTALL_WITH_CODEX.md")}\n检查：npm run status　停止：npm stop`);
 }
 
 async function start(env) {
@@ -156,6 +157,8 @@ async function main() {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("ALCHEMY_PORT 无效。");
   const command = process.argv[2];
   const env = await environment();
+  if (["setup", "start", "run", "restart-after"].includes(command))
+    connectionOrigins(join(root, ".output/chrome-mv3"), env.ALCHEMY_EXTENSION_ID);
   if (command === "restart-after") {
     if (!process.send || !process.argv[3] || !process.env.ALCHEMY_RESTART_ID) throw new Error("重启必须从已连接的插件发起。");
     const cancelled = new AbortController();
@@ -225,7 +228,7 @@ async function main() {
     await moveLegacyFile(join(dataDir, "runtime.json"), configFile);
     await writeFile(`${configFile}.tmp`, JSON.stringify(Object.fromEntries(runtimeKeys.map(key => [key, env[key]])), null, 2) + "\n", { mode: 0o600 });
     await rename(`${configFile}.tmp`, configFile);
-    console.log("初始化完成。运行 npm start 启动；首次仍需在浏览器加载扩展并配对。");
+    console.log("初始化完成。运行 npm start 启动；首次在浏览器加载扩展后会自动连接。");
     return;
   }
   if (command === "start") return start(env);

@@ -15,10 +15,10 @@ export function newerVersion(latest, current) {
 }
 
 // Never forward subprocess output on failure: user package-manager configuration may contain credentials.
-export function runCliCommand(file, args, { env = process.env, signal, timeout = 15_000 } = {}) {
+export function runCliCommand(file, args, { env = process.env, signal, cwd, timeout = 15_000 } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error("操作已停止。"));
-    const proc = spawn(file, args, { env, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    const proc = spawn(file, args, { env, cwd, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
     let stdout = "", failure;
     const stop = (message) => {
       failure ||= new Error(message);
@@ -43,7 +43,10 @@ export function runCliCommand(file, args, { env = process.env, signal, timeout =
 }
 
 export async function resolveCodexExecutable(env = process.env) {
-  const binary = env.CODEX_BIN || "codex";
+  return resolveExecutable(env.CODEX_BIN || "codex", env);
+}
+
+export async function resolveExecutable(binary, env = process.env) {
   const candidates = /[/\\]/.test(binary) ? [resolve(binary)] : (env.PATH || "").split(delimiter).filter(Boolean).map(dir => join(dir, binary));
   for (const executable of candidates) {
     try {

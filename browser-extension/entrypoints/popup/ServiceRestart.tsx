@@ -44,12 +44,12 @@ export default function ServiceRestart({ connected, busy, onConnected }: { conne
     finally { pending.current = false; }
   };
   const message = phase === "requesting" ? "正在准备重启…" : phase === "waiting" ? "正在等待本机服务重新连接…"
-    : !connected || unreachable ? "服务未连接。请在插件目录运行 npm start；未配对时先填写配对码。"
+    : !connected || unreachable ? "本机服务未运行，启动后将自动连接。"
     : !health ? "正在检测本机服务…"
     : phase === "done" ? `本机服务已重启并重新连接（${health.version}）。`
     : !health.managed ? "此服务由终端直接启动。请在原终端按 Ctrl+C 停止，再在插件目录运行 npm start。"
     : !health.canRestart ? "当前服务尚不支持插件内重启。首次启用需在插件目录运行 npm stop，再运行 npm start。"
-    : serviceBusy ? "请等待逆向、生图、模型验证或 Codex 操作完成后重启。"
+    : serviceBusy ? "请等待逆向、生图、模型验证或 Agent CLI 操作完成后重启。"
     : "重新加载本机服务代码，保留项目、图片和配对。";
   return <section className="settings-update-card" aria-label="重启本机服务" aria-busy={running}>
     <div className="settings-update-top"><strong>本机服务{health?.version ? ` · ${health.version}` : ""}</strong></div>

@@ -25,7 +25,7 @@ const help = `Reframe UIUX tools (run from any directory)
 verify builds by default, starts its own isolated preview/browser, writes reports to
 an OS temporary directory and stops its own processes. --no-build requires a matching
 source/build fingerprint from a prior verify. No bridge, real data or model calls.
-Faults: canvas-padding, quick-height, image-offset (expected to FAIL).
+Faults: canvas-padding, quick-height, image-offset, settings-overflow, settings-focus (expected to FAIL).
 sync updates the generated catalog only; no visual baseline updates.
 baseline proposes candidates; accept requires explicit review of one named scene.
 extension checks an existing fingerprinted build in a disposable profile.
@@ -75,8 +75,8 @@ function parse(args) {
   if (command === 'change' && (options.record ? options.files.length || options.reason || options.output : !options.files.length || !options.reason)) throw new Error('change 使用 --record 或 --files/--reason，不能混用');
   if (['visual', 'baseline', 'accept'].includes(command) && options.scenario && !['workspace-wide', 'workspace-narrow', 'popup'].includes(options.scenario)) throw new Error('非视觉核心场景');
   if (options.scenario && !scenarios.some(scenario => scenario.id === options.scenario)) throw new Error('未知场景 ' + options.scenario);
-  if (options.fault && !['canvas-padding', 'quick-height', 'image-offset'].includes(options.fault)) throw new Error('未知故障 ' + options.fault);
-  if (options.fault && options.scenario && options.scenario !== (options.fault === 'canvas-padding' ? 'workspace-wide' : 'popup')) throw new Error('故障与场景不匹配');
+  if (options.fault && !['canvas-padding', 'quick-height', 'image-offset', 'settings-overflow', 'settings-focus'].includes(options.fault)) throw new Error('未知故障 ' + options.fault);
+  if (options.fault && options.scenario && options.scenario !== ({ 'canvas-padding': 'workspace-wide', 'settings-overflow': 'agent-settings-layout-narrow', 'settings-focus': 'agent-settings-layout-wide' }[options.fault] || 'popup')) throw new Error('故障与场景不匹配');
   return options;
 }
 
