@@ -56,7 +56,7 @@ const choose = async provider => {
   fill(section().querySelector('select'), provider);
   if (provider === 'magpie') {
     await wait(() => section().querySelector('[aria-label="生图模型"]') && !section().querySelector('[aria-label="生图模型"]').disabled, 'Magpie 模型目录应加载');
-    fill(section().querySelector('[aria-label="生图模型"]'), 'fixture/image');
+    fill(section().querySelector('[aria-label="生图模型"]'), 'fixture/gpt-image-2');
   }
   await wait(() => !section().querySelector('.primary').disabled, '渠道应允许保存');
 };

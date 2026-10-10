@@ -8,8 +8,8 @@ import ProjectItem from "./ProjectItem";
 import Icon from "./Icon";
 import HiddenProjectsToggle from "./HiddenProjectsToggle";
 
-export default function ProjectHistory({ projects, busy, onOpen, onDelete, workspace = false, searchTarget, page, total, pageSize, search, status, loading, loadError, onPage, onSearch, onStatus, onRetry, showHidden, hiddenProjectIds, onSetHidden, onToggleHidden, batchDisabled = false, pixelSize = false, onTasks }: {
-  batchDisabled?: boolean; pixelSize?: boolean; onTasks?(): void;
+export default function ProjectHistory({ generationModel, projects, busy, onOpen, onDelete, workspace = false, searchTarget, page, total, pageSize, search, status, loading, loadError, onPage, onSearch, onStatus, onRetry, showHidden, hiddenProjectIds, onSetHidden, onToggleHidden, batchDisabled = false, pixelSize = false, onTasks }: {
+  generationModel?: string; batchDisabled?: boolean; pixelSize?: boolean; onTasks?(): void;
   page: number; total: number; pageSize: number; search: string; loading: boolean; loadError: string;
   status?: "unstarted"; onStatus(value: "unstarted" | undefined): void;
   onPage(page: number): void; onSearch(value: string): void; onRetry(): void;
@@ -151,7 +151,7 @@ export default function ProjectHistory({ projects, busy, onOpen, onDelete, works
     </nav>}
     <div className={workspace ? listView ? "workspace-project-list" : "workspace-project-grid" : "project-page-items"} role={workspace ? "list" : undefined} aria-label={workspace ? "项目" : undefined} aria-busy={loading} data-loading={loading}>{items}</div>
     </div>
-    {batchProjects && <BatchRecreate pixelSize={pixelSize} projects={batchProjects} showHidden={showHidden} hiddenProjectIds={hiddenProjectIds} onClose={() => setBatchProjects(undefined)} onStarted={started} />}
+    {batchProjects && <BatchRecreate generationModel={generationModel} pixelSize={pixelSize} projects={batchProjects} showHidden={showHidden} hiddenProjectIds={hiddenProjectIds} onClose={() => setBatchProjects(undefined)} onStarted={started} />}
     <dialog ref={dialog} className={workspace ? "result-dialog modal dialog-small" : "delete-dialog"} aria-labelledby="delete-title" aria-describedby="delete-description"
       onCancel={(event) => { event.stopPropagation(); event.preventDefault(); if (!busy) setPending([]); }}
       onKeyDown={(event) => { if (event.key === "Escape") event.stopPropagation(); }}>

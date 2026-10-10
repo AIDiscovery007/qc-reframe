@@ -63,3 +63,15 @@ JSON 的 response_format 被读入结构体，但未进入内部 drawing；向�
 ## I0 必须补齐的真实证据
 
 实际 Magpie 版本、根地址/鉴权模式、两个完整来源/模型 ID；各来源至少一张文生图和一张附图结果；请求的原始比例与实际 size、返回 MIME/尺寸/模型字段、顺序与主体保真检查；明确多图数量上限的证据或标为未知；失败/断网/取消/URL 分支的验证方式。合成 fixture、源码检查或 stub 能证明接口假设，不能替代两条真实来源链路通过。
+
+## 2026-10-10 尺寸归一化补充
+
+本节补充当前安装提交 `d7a1b020329f9dbc6aab412ecd957557cc3fdf14` 的源码依据，与上文旧固定提交分开。目录没有尺寸范围元数据；Images 路径直接透传像素 `size`，Google/Chat 转换使用十种比例，不传分辨率档位。见 [size 透传](https://github.com/yetone/magpie/blob/d7a1b020329f9dbc6aab412ecd957557cc3fdf14/internal/gateway/draw.go#L819)、[Google imageConfig](https://github.com/yetone/magpie/blob/d7a1b020329f9dbc6aab412ecd957557cc3fdf14/internal/gateway/draw.go#L1091)、[十比例匹配](https://github.com/yetone/magpie/blob/d7a1b020329f9dbc6aab412ecd957557cc3fdf14/internal/gateway/draw.go#L1236)。
+
+当前 [OpenAI API size 参考](https://developers.openai.com/api/reference/resources/images/methods/generate) 明确列出 GPT Image 2、2.5 Flare/Sunburst 及对应 dated 型号可自定义尺寸，并包含 3840×2160 上界。[2.5 参数指南](https://developers.openai.com/api/docs/guides/image-prompting#model-parameters) 规定步长16、单边≤3840、长短比≤3、面积655360–8294400；超过3686400像素为实验。2026-04-21 [旧 cookbook](https://developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide) 已标 archived/outdated，其 GPT2 的严格小于3840文字与当前API不一致；本轮优先当前API，不将3840强行改为3824。仅明确型号使用此profile，未识别的 `gpt-image-2.5` 别名不套用。
+
+Gemini 的[原生图像接口](https://ai.google.dev/gemini-api/docs/image-generation) 区分比例与分辨率参数，而本机网关转换只传比例，因此 Reframe 的 Gemini 选项仅表示十种可传比例，不承诺1K/2K/4K。像素载体是网关请求格式，并非实际输出预测；普通 Images 来源可能有额外限制，未逐模型生图验证。
+
+产品定义“最近”：正有限请求 W,H 与合法候选 w,h 之间，D=4·log((w/h)/(W/H))²+log((w·h)/(W·H))²；先最小D，等距依次最小面积误差、最小总像素、最小宽度。实现使用log宽高的差/和防溢出，1e-12内视为数值相等。已合法值原样返回。GPT穷举有界16px格点同时满足四项限制；Gemini按对数比例距离取十比例中最近者，同距保持目录顺序。该距离是Reframe产品约定，并非原厂算法。
+
+正有限的原意图可JSON往返；空/负/非有限不伪造尺寸，使用明确默认。`submittedImageSize: null` 与 `sizeRule` 区分已按规则选择默认和旧记录缺字段。三入口在受理时由后端计算并冻结，后续配置/规则/表单变化不回写既有任务。真实输出仅从图片解码取得。原厂参考契约不等于中转模型实测支持。

@@ -1,41 +1,50 @@
-import { useId, useState } from "react";
-import { validImageSize } from "../../lib/image-size.mjs";
+import { useId, useMemo, useState } from "react";
+import { magpieSizePresets, magpieSizeProfile } from "../../lib/image-size.mjs";
 import { validGenerationRatio } from "../../lib/generation-session";
-import { parseImageDimensions } from "../../lib/generation-size";
+import { magpieSizePreview, parseImageDimensions, parsePixelDimensions } from "../../lib/generation-size";
 import type { ImageSize } from "../../lib/types";
 import SelectField from "./SelectField";
 
 const ratios = ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"];
-const pixels = ["1024:1024", "1536:1024", "1024:1536", "2048:2048"];
 
-export default function GenerationSizeFields({ pixelSize = false, value, onChange, disabled, workspace = false }: {
-  pixelSize?: boolean; value?: ImageSize; onChange(size?: ImageSize): void; disabled?: boolean; workspace?: boolean;
+export default function GenerationSizeFields({ generationModel, pixelSize = false, value, onChange, disabled, workspace = false }: {
+  generationModel?: string; pixelSize?: boolean; value?: ImageSize; onChange(size?: ImageSize): void; disabled?: boolean; workspace?: boolean;
 }) {
-  const presets = pixelSize ? pixels : ratios;
+  const presets: { label: string; key: string; value: ImageSize; group?: string }[] = pixelSize ? magpieSizePresets(generationModel).map(item => ({ ...item, key: `${item.value.width}:${item.value.height}` }))
+    : ratios.map(ratio => ({ label: ratio, key: ratio, value: parseImageDimensions(...ratio.split(":") as [string, string]) }));
   const initial = value ? `${value.width}:${value.height}` : "auto";
-  const [choice, setChoice] = useState(presets.includes(initial) || initial === "auto" ? initial : "custom");
+  const [custom, setCustom] = useState(initial !== "auto" && !presets.some(item => item.key === initial));
+  const choice = custom ? "custom" : initial === "auto" || presets.some(item => item.key === initial) ? initial : "custom";
   const [width, setWidth] = useState(String(value?.width || (pixelSize ? 1024 : 1)));
   const [height, setHeight] = useState(String(value?.height || (pixelSize ? 1024 : 1)));
   const [touched, setTouched] = useState(false);
   const hintId = useId();
-  const valid = pixelSize ? validImageSize(value) : validGenerationRatio(value);
-  const message = pixelSize ? "宽高各为 1–10000 的整数，总像素不超过 4000 万；实际尺寸以模型返回为准。" : "宽高请填 1–10000 的整数，比例范围为 1:20–20:1。";
-  return <div className="generation-ratio" data-pixel-size={pixelSize || undefined}>
-    {choice === "custom" && <p id={hintId} className={`ratio-hint${touched && !valid ? " ratio-error" : ""}`} role={touched && !valid ? "status" : undefined}>{message}</p>}
+  const valid = pixelSize || validGenerationRatio(value);
+  const parse = pixelSize ? parsePixelDimensions : parseImageDimensions;
+  const message = useMemo(() => pixelSize ? magpieSizePreview(generationModel, value) : "宽高请填 1–10000 的整数，比例范围为 1:20–20:1。", [pixelSize, generationModel, value?.width, value?.height]);
+  return <div className="generation-ratio" data-pixel-size={pixelSize || undefined} data-size-profile={pixelSize ? magpieSizeProfile(generationModel) : undefined}>
+    {(pixelSize || choice === "custom") && <p id={hintId} className={`ratio-hint${touched && !valid ? " ratio-error" : ""}`} role={pixelSize || touched && !valid ? "status" : undefined}>{message}</p>}
     <div className="generation-ratio-fields">
-      <SelectField label={pixelSize || workspace ? "目标尺寸" : "图片比例"} aria-label={pixelSize || workspace ? "目标尺寸" : "图片比例"} title={pixelSize ? "像素尺寸；自动使用 Magpie 网关默认" : "按宽高比例生成，实际像素以结果为准"} value={choice} disabled={disabled} onChange={event => {
+      <SelectField label={pixelSize || workspace ? "目标尺寸" : "图片比例"} aria-label={pixelSize || workspace ? "目标尺寸" : "图片比例"} title={pixelSize ? "按当前模型适配尺寸，实际图片以返回结果为准" : "按宽高比例生成，实际像素以结果为准"} value={choice} disabled={disabled} onChange={event => {
         const next = event.target.value;
-        setChoice(next); setTouched(false);
-        onChange(next === "auto" ? undefined : next === "custom" ? parseImageDimensions(width, height) : parseImageDimensions(...next.split(":") as [string, string]));
+        setCustom(next === "custom"); setTouched(false);
+        if (next === "auto") onChange(undefined);
+        else if (next === "custom") onChange(parse(width, height));
+        else {
+          const preset = presets.find(item => item.key === next)!;
+          setWidth(String(preset.value.width)); setHeight(String(preset.value.height)); onChange({ ...preset.value });
+        }
       }}>
         <option value="auto">{pixelSize ? "自动（网关默认）" : "自动"}</option>
-        {presets.map(option => <option key={option} value={option}>{pixelSize ? `${option.replace(":", " × ")} px` : option}</option>)}
+        {[...new Set(presets.map(option => option.group))].map(group => group
+          ? <optgroup key={group} label={group}>{presets.filter(option => option.group === group).map(option => <option key={option.key} value={option.key}>{option.label}</option>)}</optgroup>
+          : presets.filter(option => !option.group).map(option => <option key={option.key} value={option.key}>{option.label}</option>))}
         <option value="custom">自定义</option>
       </SelectField>
       {choice === "custom" && <div className="custom-ratio">
-        <label>宽<input type="number" inputMode="numeric" required min={1} max={10000} step={1} value={width} disabled={disabled} aria-label={pixelSize ? "像素宽" : "比例宽"} aria-invalid={touched && !valid} aria-describedby={hintId} onBlur={() => setTouched(true)} onChange={event => { setWidth(event.target.value); onChange(parseImageDimensions(event.target.value, height)); }} /></label>
+        <label>宽<input type="number" inputMode={pixelSize ? "decimal" : "numeric"} required={!pixelSize} min={pixelSize ? undefined : 1} max={pixelSize ? undefined : 10000} step={pixelSize ? "any" : 1} value={width} disabled={disabled} aria-label={pixelSize ? "像素宽" : "比例宽"} aria-invalid={touched && !valid} aria-describedby={hintId} onBlur={() => setTouched(true)} onChange={event => { setWidth(event.target.value); onChange(parse(event.target.value, height)); }} /></label>
         <span aria-hidden="true">{pixelSize ? "×" : ":"}</span>
-        <label>高<input type="number" inputMode="numeric" required min={1} max={10000} step={1} value={height} disabled={disabled} aria-label={pixelSize ? "像素高" : "比例高"} aria-invalid={touched && !valid} aria-describedby={hintId} onBlur={() => setTouched(true)} onChange={event => { setHeight(event.target.value); onChange(parseImageDimensions(width, event.target.value)); }} /></label>
+        <label>高<input type="number" inputMode={pixelSize ? "decimal" : "numeric"} required={!pixelSize} min={pixelSize ? undefined : 1} max={pixelSize ? undefined : 10000} step={pixelSize ? "any" : 1} value={height} disabled={disabled} aria-label={pixelSize ? "像素高" : "比例高"} aria-invalid={touched && !valid} aria-describedby={hintId} onBlur={() => setTouched(true)} onChange={event => { setHeight(event.target.value); onChange(parse(width, event.target.value)); }} /></label>
       </div>}
     </div>
   </div>;

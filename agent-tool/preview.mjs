@@ -52,7 +52,7 @@ const job = {
 // Receipts travel over the parent IPC channel, never through page-controlled state.
 const regressions = Object.fromEntries(['image-settings-sync', 'magpie-workflows', 'generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
   .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
-const previewSources = ['agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs', 'browser-extension/lib/operation-policy.ts', 'browser-extension/bridge/image-order.mjs'];
+const previewSources = ['browser-extension/lib/image-size.mjs', 'agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs', 'browser-extension/lib/operation-policy.ts', 'browser-extension/bridge/image-order.mjs'];
 const digest = value => createHash('sha256').update(value).digest('hex');
 const sourceHashes = process.send ? Object.fromEntries(await Promise.all([...new Set([...previewSources, ...Object.values(regressions)])]
   .map(async file => [file, digest(await readFile(new URL('../' + file, import.meta.url)))]))) : {};
@@ -75,6 +75,10 @@ const server = createServer(async (req, res) => {
     const path = new URL(req.url, "http://127.0.0.1").pathname;
     res.setHeader("Cache-Control", "no-store");
     if (galleryAsset(path, res)) return;
+    if (path === '/preview-image-size.mjs') {
+      await sendScript(req, res, await readFile(new URL('../browser-extension/lib/image-size.mjs', import.meta.url)), ['agent-tool/preview.mjs', 'browser-extension/lib/image-size.mjs']);
+      return;
+    }
     if (regressions[path]) {
       await sendScript(req, res, await readFile(new URL('../' + regressions[path], import.meta.url)), ['agent-tool/preview.mjs', regressions[path]]);
       return;
@@ -268,6 +272,7 @@ const server = createServer(async (req, res) => {
           if(chained&&saved.autoGeneration.status!=='pending')return;
           if(previewOptions.get('generationStart')==='failed')throw new Error('示例：生成请求提交失败，请重试');
           const generation={id:crypto.randomUUID(),status:'running',stage:'正在生成图片…',language:message.language,extension:'png',createdAt:new Date().toISOString(),prompt:message.language==='zh'?saved.result.promptZh:saved.result.promptEn,negativePrompt:saved.result.negativePrompt,model:saved.model||models.selected,referenceIndex:savedReferenceIndex(saved),subjectImage:message.subjectImage,subjects:message.subjects?structuredClone(message.subjects):undefined,aspectRatio:message.aspectRatio,...(previewOptions.has('magpieWorkflowsRegression')||imageSettingsSync?{provider:message.provider||imageSettings.provider,imageSize:message.imageSize,sizeMode:message.imageSize?'explicit':(message.provider||imageSettings.provider)==='magpie'?'gateway-default':undefined,outputSize:{width:320,height:400}}:{})};
+          if(generation.provider==='magpie') { const {normalizeMagpieSize}=await import('/preview-image-size.mjs');Object.assign(generation,normalizeMagpieSize(message.generationModel||imageSettings.configs.magpie.model,message.imageSize)); }
           saved.generations||=[];saved.generations.push(generation);touch(projects.find(p=>p.id===saved.projectId));
           setTimeout(()=>{if(generation.status==='running'){
             generation.status=previewOptions.get('fx')==='failed'?'failed':'completed';
@@ -289,10 +294,10 @@ const server = createServer(async (req, res) => {
       let imageSaveFailed=false, magpieSaveFailed=false, magpieChangingDirectoryReads=0;
       const imageSettings={provider:'codex',configs:{magpie:{baseUrl:'http://127.0.0.1:3425',model:''},openai:{baseUrl:'https://api.openai.com/v1',model:'',hasApiKey:false},gemini:{baseUrl:'https://generativelanguage.googleapis.com/v1beta',model:'',hasApiKey:false}}};
         const imageSettingsSync=previewOptions.get('imageSettingsSyncRegression');
-        if(imageSettingsSync){imageSaveFailed=true;magpieSaveFailed=true;imageSettings.provider=imageSettingsSync.startsWith('magpie-to-')?'magpie':'codex';imageSettings.configs.magpie.model='fixture/image';}
+        if(imageSettingsSync){imageSaveFailed=true;magpieSaveFailed=true;imageSettings.provider=imageSettingsSync.startsWith('magpie-to-')?'magpie':'codex';imageSettings.configs.magpie.model='fixture/gpt-image-2';}
         const magpieWorkflow=previewOptions.get('magpieWorkflowsRegression');
         if(magpieWorkflow) {
-          imageSettings.provider='magpie';imageSettings.configs.magpie.model='fixture/image';
+          imageSettings.provider='magpie';imageSettings.configs.magpie.model=previewOptions.get('imageModel')||'fixture/gpt-image-2';
           for(const project of projects)for(const saved of project.jobs) {
             if(['quick','history','save-retry','save-asset'].includes(magpieWorkflow)&&saved.result) {
               saved.generations=[{id:'magpie-history-image',createdAt:saved.createdAt,status:magpieWorkflow.startsWith('save-')?'failed':'completed',stage:magpieWorkflow.startsWith('save-')?'图片等待保存':'图片已生成',language:'zh',prompt:saved.result.promptZh,model:'fixture/image',provider:magpieWorkflow==='history'?'codex':'magpie',...(magpieWorkflow==='history'?{aspectRatio:{width:3,height:2}}:{imageSize:{width:1536,height:1024},sizeMode:'explicit',outputSize:{width:320,height:400}}),...(magpieWorkflow.startsWith('save-')?{resultSavePending:true,error:'示例：生成结果尚未保存，请重试保存'}:{}),...(magpieWorkflow==='save-asset'?{imageAsset:'preview-stored-asset'}:{})}];
@@ -302,7 +307,7 @@ const server = createServer(async (req, res) => {
         let magpieSaveAttempts=0;
         const generationReadiness=previewOptions.get('generationReadinessRegression');
         if(['ready','legacy-empty'].includes(generationReadiness)){models.selected=null;models.verifiedAt=undefined;}
-        const generationHealth=generationReadiness==='magpie'||magpieWorkflow?{generationReady:true,generationModel:'fixture/image',generationProvider:'magpie'}:generationReadiness==='ready'?{generationReady:true,generationModel:null}:generationReadiness==='blocked'?{generationReady:false,generationModel:'preview-image'}:generationReadiness==='legacy'?{generationModel:'preview-image'}:{};
+        const generationHealth=generationReadiness==='magpie'||magpieWorkflow?{generationReady:true,generationModel:magpieWorkflow?imageSettings.configs.magpie.model:'fixture/gpt-image-2',generationProvider:'magpie'}:generationReadiness==='ready'?{generationReady:true,generationModel:null}:generationReadiness==='blocked'?{generationReady:false,generationModel:'preview-image'}:generationReadiness==='legacy'?{generationModel:'preview-image'}:{};
         const agents={selected:'codex',agents:[{id:'codex',label:'Codex',model:'preview-vision'},{id:'pi',label:'Pi',model:'preview/pi-model'}]};
         let piVerificationCount=0, piContextChanged=false;
         const piModels={verifiedAt:'2026-10-01T00:00:00.000Z',selected:'preview/pi-model',accountLabel:'Pi · 预览',models:[{model:'preview/pi-model',label:'Pi Model',isDefault:true,status:'verified',supportedReasoningEfforts:[]},{model:'preview/pi-draft',label:'Pi Draft Model',status:'unverified',supportedReasoningEfforts:[]}]};
@@ -365,7 +370,7 @@ const server = createServer(async (req, res) => {
               batches.push(batch);batchRequests.set(message.requestId,batch);
             }
             await new Promise(resolve=>setTimeout(resolve,Number(previewOptions.get('batchStartDelay'))||100));
-            if(['retry','retry-hidden'].includes(previewOptions.get('batchRecreateRegression'))&&!batchReplyLost){batchReplyLost=true;throw new Error('示例：响应丢失，请重试');}
+            if((['retry','retry-hidden'].includes(previewOptions.get('batchRecreateRegression'))||magpieWorkflow==='batch-snapshot')&&!batchReplyLost){batchReplyLost=true;throw new Error('示例：响应丢失，请重试');}
             return {ok:true,value:structuredClone(batch)};
           }
           if(message.type==='alchemy:batches')return {ok:true,value:structuredClone(batches.map(batch=>({...batch,items:batch.items.filter(item=>showHiddenProjects||!projects.find(p=>p.id===item.projectId)?.hidden)})).filter(batch=>batch.items.length))};
@@ -486,7 +491,7 @@ const server = createServer(async (req, res) => {
             if(message.baseUrl.endsWith(':3428'))return {ok:true,value:{version:'fixture',models:[]}};
             if(message.baseUrl.endsWith(':3430'))return {error:'Not found'};
             const removed=message.baseUrl.endsWith(':3429')&&++magpieChangingDirectoryReads>2;
-            return {ok:true,value:{version:'fixture',models:[{id:stale?'old/image':removed?'fixture/replacement':'fixture/image',name:stale?'旧目录':'Fixture Image',inputImages:false}]}};
+            return {ok:true,value:{version:'fixture',models:[{id:stale?'old/image':removed?'fixture/replacement':imageSettingsSync?'fixture/gpt-image-2':'fixture/image',name:stale?'旧目录':'Fixture Image',inputImages:false}]}};
           }
           if(message.type==='alchemy:image-settings-save') {
             if(!imageSaveFailed){imageSaveFailed=true;return {error:'生图设置保存失败（预览）'};}
@@ -551,7 +556,7 @@ const server = createServer(async (req, res) => {
           }
           ${galleryMessages}
           if(message.type==='alchemy:generation-thumbnail')return {ok:true,value:{image:state==='alignment'?alignment[1].image:state==='gallery'?gallery.result:template,source:{kind:'generation',jobId:message.id,generationId:message.generationId}}};
-          if(message.type==='alchemy:query')return {ok:true,value:structuredClone(message.path==='/health'?{...service,...generationHealth,...(imageSettingsSync?{generationProvider:imageSettings.provider,generationReady:true,generationModel:imageSettings.provider==='magpie'?'fixture/image':'preview-image'}:{}),ready:true,serviceReady:true,skillReady:true,cli,hiddenProjectIds:projects.filter(p=>p.hidden).map(p=>p.id),visibleActive:visibleProjects().flatMap(p=>p.jobs).reduce((n,j)=>n+Number(j.status==='running')+(j.generations||[]).filter(g=>g.status==='running').length,0),projectsRevision:'preview-'+projectsRevision,skill:'alchemy · 预览',model:models.selected,modelBusy:models.verification?.status==='running',active:models.verification?.status==='running'?1:projects.some(p=>p.jobs.some(j=>j.status==='running'||j.generations?.some(g=>g.status==='running')))?1:0}:message.path==='/jobs'?visibleProjects().flatMap(p=>p.jobs):message.path==='/projects'?visibleProjects().map(summary):message.path.startsWith('/projects/')?structuredClone({...summary(projects.find(p=>p.id===message.path.split('/')[2])),jobs:projects.find(p=>p.id===message.path.split('/')[2]).jobs}):findJob(message.path.split('/')[2]))};
+          if(message.type==='alchemy:query')return {ok:true,value:structuredClone(message.path==='/health'?{...service,...generationHealth,...(imageSettingsSync?{generationProvider:imageSettings.provider,generationReady:true,generationModel:imageSettings.provider==='magpie'?imageSettings.configs.magpie.model:'preview-image'}:{}),ready:true,serviceReady:true,skillReady:true,cli,hiddenProjectIds:projects.filter(p=>p.hidden).map(p=>p.id),visibleActive:visibleProjects().flatMap(p=>p.jobs).reduce((n,j)=>n+Number(j.status==='running')+(j.generations||[]).filter(g=>g.status==='running').length,0),projectsRevision:'preview-'+projectsRevision,skill:'alchemy · 预览',model:models.selected,modelBusy:models.verification?.status==='running',active:models.verification?.status==='running'?1:projects.some(p=>p.jobs.some(j=>j.status==='running'||j.generations?.some(g=>g.status==='running')))?1:0}:message.path==='/jobs'?visibleProjects().flatMap(p=>p.jobs):message.path==='/projects'?visibleProjects().map(summary):message.path.startsWith('/projects/')?structuredClone({...summary(projects.find(p=>p.id===message.path.split('/')[2])),jobs:projects.find(p=>p.id===message.path.split('/')[2]).jobs}):findJob(message.path.split('/')[2]))};
           if(message.type==='alchemy:delete-projects') {
             if(state==='delete-failed')return {error:'本机服务暂时不可用，请重试'};
             if(projects.some(p=>message.ids.includes(p.id)&&summary(p).busy))return {error:'所选项目仍在逆向或生图'};
@@ -576,7 +581,7 @@ const server = createServer(async (req, res) => {
             await new Promise(resolve=>setTimeout(resolve,Math.min(10000,Math.max(0,Number(previewOptions.get('startDelay'))||0))));
             if(previewOptions.get('start')==='failed')throw new Error('示例：逆向提交失败，请重试');
             const project=projects.find(p=>p.id===message.projectId);
-            const next={id:crypto.randomUUID(),model:models.selected,...(message.generation&&previewOptions.get('start')!=='legacy'?{autoGeneration:{...structuredClone(message.generation),...(magpieWorkflow||imageSettingsSync?{provider:imageSettings.provider}:{}),status:'pending'}}:{}),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,referenceIndex:message.referenceIndex,instruction:message.instruction,...(message.mode==='session'?{sessionContext:{sources:selectedSessionRows(message.sessionIds),capturedAt:new Date().toISOString(),hash:'preview-snapshot',messageCount:6,attachmentCount:0}}:{}),reenact:message.reenact?structuredClone(message.reenact):undefined};
+            const next={id:crypto.randomUUID(),model:models.selected,...(message.generation&&previewOptions.get('start')!=='legacy'?{autoGeneration:{...structuredClone(message.generation),...(magpieWorkflow||imageSettingsSync?{provider:imageSettings.provider,generationModel:imageSettings.configs.magpie.model}:{}),status:'pending'}}:{}),projectId:project.id,mode:message.mode,status:'running',stage:'正在逆向…',createdAt:new Date().toISOString(),sourceUrl:project.sourceUrl,capture:'original',image:message.referenceJobId?findJob(message.referenceJobId).image:project.image||template,referenceIndex:message.referenceIndex,instruction:message.instruction,...(message.mode==='session'?{sessionContext:{sources:selectedSessionRows(message.sessionIds),capturedAt:new Date().toISOString(),hash:'preview-snapshot',messageCount:6,attachmentCount:0}}:{}),reenact:message.reenact?structuredClone(message.reenact):undefined};
             project.jobs.unshift(next);project.inputs={...project.inputs,[message.mode]:{referenceIndex:message.referenceIndex,instruction:message.instruction,...structuredClone(message.reenact),...(message.mode==='session'?{sessions:selectedSessionRows(message.sessionIds)}:{})}};project.inputVersions={...project.inputVersions,[message.mode]:next.id};project.inputRevision=(project.inputRevision||0)+1;touch(project);const submittedSelection={...selection(project),jobId:next.id,reenact:structuredClone(message.reenact)};
             if(data.selection?.id===selectedAtStart)data.selection=submittedSelection;
             setTimeout(async()=>{

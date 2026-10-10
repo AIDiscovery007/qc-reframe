@@ -20,7 +20,7 @@
 
 | 组件 | 用法 | 源码 |
 | --- | --- | --- |
-| GenerationSizeFields | 原尺寸位置复用自动、像素预设/自定义与比例；像素和比例分别校验、分别提交。 | [browser-extension/entrypoints/popup/GenerationSizeFields.tsx](../../../browser-extension/entrypoints/popup/GenerationSizeFields.tsx) |
+| GenerationSizeFields | 原尺寸位置按生图模型展示预设与适配预览；保留原始像素意图和历史提交快照，比例渠道独立。 | [browser-extension/entrypoints/popup/GenerationSizeFields.tsx](../../../browser-extension/entrypoints/popup/GenerationSizeFields.tsx) |
 | ImageGenerationSettings | 设置中的生图渠道、私有凭据及保存反馈。 | [browser-extension/entrypoints/popup/ImageGenerationSettings.tsx](../../../browser-extension/entrypoints/popup/ImageGenerationSettings.tsx) |
 | AgentCliSettings | 按管理目标读取CLI状态、安装与更新，不改变逆向Agent，迟到响应按目标隔离。 | [browser-extension/entrypoints/popup/AgentCliSettings.tsx](../../../browser-extension/entrypoints/popup/AgentCliSettings.tsx) |
 | AgentSettings | 设置中的原生 Agent 单选卡片，独立模型、失败保留与旧服务回退。 | [browser-extension/entrypoints/popup/AgentSettings.tsx](../../../browser-extension/entrypoints/popup/AgentSettings.tsx) |
@@ -129,6 +129,10 @@
 | magpie-workflows-history | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=history&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
 | magpie-workflows-save-retry | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=save-retry&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
 | magpie-workflows-save-asset | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=save-asset&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-gemini-ratios | workspace 360×740 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=gemini-ratios&imageModel=fixture/gemini-3-pro-image&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-unknown-auto | workspace 360×740 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=unknown-auto&imageModel=fixture/unknown&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-model-switch | workspace 360×740 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=model-switch&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
+| magpie-workflows-batch-snapshot | workspace 1440×1000 | /workspace.html?state=library&count=4&mode=style&magpieWorkflowsRegression=batch-snapshot&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
 | image-settings-wide | workspace 1440×1000 | /workspace.html?state=library&imageSettingsRegression=wide | imageSettingsRegression |
 | image-settings-narrow | workspace 360×740 | /workspace.html?state=library&imageSettingsRegression=narrow | imageSettingsRegression |
 | image-settings-legacy | workspace 1440×1000 | /workspace.html?state=library&imageSettingsRegression=legacy | imageSettingsRegression |

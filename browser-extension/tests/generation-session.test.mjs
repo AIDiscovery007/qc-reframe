@@ -18,11 +18,11 @@ test('user submits Magpie pixels with immutable image inputs instead of an aspec
   f.requests[0].resolve(job()); await action;
 });
 
-test('user cannot submit invalid pixels or mix pixel and ratio channels', async () => {
+test('user cannot submit malformed pixels or mix pixel and ratio channels', async () => {
   // Given a valid prompt, When dimensions are invalid or belong to another channel, Then no generation request is sent.
   const f = fixture();
   for (const patch of [
-    ...[null, { width: 0, height: 1024 }, { width: 1.5, height: 1024 }, { width: 10001, height: 1 }, { width: 10000, height: 10000 }, { width: NaN, height: 1024 }].map(imageSize => ({ imageSize, pixelSize: true })),
+    ...[{ width: '1024', height: 1024 }, { width: 1024 }, { width: 1024, height: 1024, extra: true }].map(imageSize => ({ imageSize, pixelSize: true })),
     { pixelSize: true, aspectRatio: { width: 1, height: 1 } }, { imageSize: { width: 1024, height: 1024 } },
   ]) {
     assert.equal(generationReadiness(input(patch)).canGenerate, false);
@@ -213,4 +213,18 @@ test('automatic handoff blocks manual generation until settled and allows failed
   assert.equal(f.requests.length, 1);
   f.requests[0].resolve(job());
   assert.equal(await retry, true);
+});
+
+
+test('user submits unrestricted finite Magpie intent and unusable values become automatic', async () => {
+  // Given a ready Magpie task, When raw dimensions require correction or automatic fallback, Then readiness remains open and the captured message has no NaN or Infinity.
+  for (const imageSize of [null, { width: 10000, height: 10000 }, { width: 1.5, height: 1024 }, { width: 1e100, height: 2 }, { width: NaN, height: 1024 }, { width: Infinity, height: 1024 }, { width: -1, height: 1024 }, { width: null, height: 1024 }]) {
+    const f = fixture(), candidate = input({ pixelSize: true, imageSize });
+    assert.equal(generationReadiness(candidate).canGenerate, true);
+    const action = f.session.act(candidate, false, f.callbacks);
+    const positive = [imageSize?.width, imageSize?.height].every(value => Number.isFinite(value) && value > 0);
+    assert.deepEqual(f.requests[0].message.imageSize, positive ? imageSize : undefined);
+    assert.equal(f.requests[0].message.aspectRatio, undefined);
+    f.requests[0].resolve(job()); await action;
+  }
 });

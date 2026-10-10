@@ -21,6 +21,7 @@ function fixture(provider = 'codex') {
   const source = names.map(name => `const ${name} = ${declarations[name]};`).join('\n') + '\nObject.assign(exports,{applyGenerationHealth,saveImageSettings});';
   runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
     exports, generationSettingsSync: sync,
+    setGenerationModel: value => { state.generationModel = value; },
     setMagpie: value => { state.magpie = value; }, setGenerationReady: value => { state.ready = value; },
     setGenerationSettingsPending: value => { state.pending = value; }, setError: value => { state.error = value; },
     setGenerationSettingsError: value => { state.error = value; }, setImageSettingsRevision: update => { state.settingsRevision = update(state.settingsRevision); },
@@ -74,4 +75,17 @@ test('user failed settings write preserves its error and refreshes the still-act
   const rejected = assert.rejects(saving, /write failed/);
   f.requests[0].reject(new Error('write failed')); await tick(); f.reads[0].resolve(health('codex')); await rejected;
   assert.equal(f.state.magpie, false); assert.equal(f.state.ready, true); assert.equal(f.state.pending, false);
+});
+
+
+test('user size profile follows only the accepted image-model health snapshot', async () => {
+  // Given a prior health poll, When a model save refreshes health, Then stale polls and the reverse-model fallback cannot select the size profile.
+  const f = fixture(), before = f.sync.current, saving = f.saveImageSettings({ provider: 'magpie' });
+  f.requests[0].resolve({ provider: 'magpie' }); await tick();
+  f.reads[0].resolve({ ...health('magpie'), generationModel: 'gpt-image-2', model: 'reverse-model' }); await saving;
+  assert.equal(f.state.generationModel, 'gpt-image-2');
+  f.applyGenerationHealth({ ...health('magpie'), generationModel: 'gemini-3-pro-image' }, before);
+  assert.equal(f.state.generationModel, 'gpt-image-2');
+  f.applyGenerationHealth({ ...health('magpie'), model: 'reverse-model' }, f.sync.current);
+  assert.equal(f.state.generationModel, undefined);
 });

@@ -1,4 +1,4 @@
-import { validImageSize } from "./image-size.mjs";
+import { requestedImageSize, validImageSizeRequest } from "./image-size.mjs";
 import type { AspectRatio, Generation, ImageSize, Job, MultiSubject } from "./types";
 
 export type GenerationInput = {
@@ -32,7 +32,7 @@ export function generationReadiness({ job, lang, disabled, subjectImage, subject
   const generic = job.mode === "style" && !job.reenact;
   const incomplete = /\[SUBJECT\]/i.test((lang === "zh" ? job.result?.promptZh : job.result?.promptEn) || "");
   const validRatio = validGenerationRatio(aspectRatio);
-  const validSize = pixelSize ? aspectRatio === undefined && validImageSize(imageSize) : imageSize === undefined && validRatio;
+  const validSize = pixelSize ? aspectRatio === undefined && validImageSizeRequest(imageSize) : imageSize === undefined && validRatio;
   return { running, recovery, multi, inputsReady, generic, incomplete, validRatio, validSize,
     canGenerate: !!job.result && job.autoGeneration?.status !== "pending" && !disabled && !requestPending && !running && !recovery && inputsReady && !generic && !incomplete && validSize && (allowMulti || !multi) };
 }
@@ -60,10 +60,11 @@ export function createGenerationSession(jobId: string, request: Request) {
       const epoch = lifecycle;
       const subjectImage = !cancel && input.job.mode !== "recreate" && input.job.mode !== "session" ? input.subjectImage : undefined;
       const subjects = !cancel && readiness.multi ? input.subjects?.map(subject => ({ ...subject })) : undefined;
+      const imageSize = input.pixelSize ? requestedImageSize(input.imageSize) : undefined;
       const message = cancel ? { type: "alchemy:generation-cancel", id: jobId, generationId: readiness.running!.id }
         : { type: "alchemy:generate", id: jobId, language: input.lang,
           ...(input.aspectRatio ? { aspectRatio: { ...input.aspectRatio } } : {}),
-          ...(input.imageSize ? { imageSize: { ...input.imageSize } } : {}),
+          ...(imageSize ? { imageSize } : {}),
           ...(readiness.multi ? { subjects } : subjectImage !== undefined ? { subjectImage } : {}) };
       update({ busy: true, submitting: !cancel, error: "" });
       let failure = "";

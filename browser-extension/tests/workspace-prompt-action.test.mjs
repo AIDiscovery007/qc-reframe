@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-import { validImageSize } from '../lib/image-size.mjs';
+import { validImageSizeRequest } from '../lib/image-size.mjs';
 import { inheritedGenerationSize } from '../lib/generation-size.ts';
 import { validGenerationRatio } from '../lib/generation-session.ts';
 import { creationContext, emptyCreationState, resolveCreation } from '../lib/creation-context.ts';
@@ -22,7 +22,7 @@ const compiled = ts.transpileModule(names.map(name => `const ${name} = ${declara
 function fixture(mode, overrides = {}) {
   const calls = [], drafts = {}, exports = {};
   runInNewContext(compiled, {
-    exports, workspace: true, magpie: false, chainSize: undefined, targetGeneration: undefined, validImageSize, inheritedGenerationSize, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, generationBlocked: false, promptDraft: undefined,
+    exports, workspace: true, magpie: false, chainSize: undefined, targetGeneration: undefined, validImageSizeRequest, inheritedGenerationSize, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, generationBlocked: false, promptDraft: undefined,
     selection: { image: 'reference' }, referenceError: undefined, displayImage: 'reference', subjectDraftKey: mode => `project:${mode}:new`, subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
     taskInstruction: () => 'instruction', defaultInstructions: { [mode]: 'instruction' }, subjectImage: () => 'subject',
     multiSubjects: [{ id: 'one', subjectImage: 'one' }, { id: 'two', subjectImage: 'two' }], multiPrompt: 'instruction', multiStale: false,
@@ -204,9 +204,8 @@ test('user can start Magpie continuous generation while ready and retain reverse
     ui.reverse(true);
     assert.equal(ui.calls.length, 1);
     assert.equal(ui.calls[0].generate, true);
-    for (const overrides of [{ generationBlocked: true }, { blocked: true },
-      { chainSize: { key: 'project:mode:version', pixelSize: true, size: { width: 0, height: 1024 } } }]) {
-      // Given an unavailable channel, busy UI, or invalid pixels, When chained, Then no task starts.
+    for (const overrides of [{ generationBlocked: true }, { blocked: true }]) {
+      // Given an unavailable channel or busy UI, When chained, Then no task starts.
       const guarded = fixture(mode, { magpie: true, ...overrides });
       assert.equal(guarded.chainDisabled, true);
       guarded.reverse(true);
@@ -216,5 +215,17 @@ test('user can start Magpie continuous generation while ready and retain reverse
       assert.equal(guarded.calls.length, overrides.blocked ? 0 : 1);
       if (!overrides.blocked) assert.equal(guarded.calls[0].generate, false);
     }
+  }
+});
+
+
+test('user Magpie continuous generation accepts correction and automatic fallback without losing global guards', () => {
+  // Given oversized, partial or unusable pixel intent, When starting a ready chain, Then dimensions do not block it while unavailable channels still do.
+  for (const size of [undefined, { width: 10000, height: 10000 }, { width: 0, height: 1024 }, { width: NaN, height: 1024 }]) {
+    const chainSize = { key: 'project:mode:version', pixelSize: true, size };
+    const ready = fixture('style', { magpie: true, chainSize });
+    ready.reverse(true); assert.equal(ready.calls.length, 1);
+    const blocked = fixture('style', { magpie: true, chainSize, generationBlocked: true });
+    blocked.reverse(true); assert.equal(blocked.calls.length, 0);
   }
 });

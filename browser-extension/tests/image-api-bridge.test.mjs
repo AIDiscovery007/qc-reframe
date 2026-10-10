@@ -172,7 +172,7 @@ test('user rejects incompatible Magpie dimensions before catalog or model calls'
   const project = (await s.request('/projects', { image })).body;
   const task = await s.request('/jobs', { image, mode: 'recreate' });
   await wait(() => s.reverse.length); s.reverse[0].resolve(result); await wait(async () => !(await s.request('/health')).body.active);
-  for (const size of [{ aspectRatio: { width: 1, height: 1 } }, { imageSize: null }, { imageSize: { width: 0, height: 20 } }, { imageSize: { width: 10000, height: 4001 } }]) {
+  for (const size of [{ aspectRatio: { width: 1, height: 1 } }, { imageSize: { width: '1024', height: 1024 } }, { imageSize: { width: 1024, height: 1024, extra: true } }, { submittedImageSize: { width: 1024, height: 1024 } }, { sizeRule: 'forged' }]) {
     assert.equal((await s.request(`/jobs/${task.body.id}/generations`, { language: 'en', ...size })).status, 400);
     assert.equal((await s.request('/jobs', { image, mode: 'recreate', generation: { language: 'en', ...size } })).status, 400);
     assert.equal((await s.request('/batches', { requestId: 'invalid-size', language: 'en', projects: [{ projectId: project.id, inputRevision: project.inputRevision }], ...size })).status, 400);
@@ -232,23 +232,25 @@ for (const imageSize of [undefined, { width: 1337, height: 911 }]) test(`user ru
   await wait(() => s.generation.length);
   assert.equal(s.generation[0].args.referenceIndex, 1); assert.ok(s.generation[0].args.imagePath);
   assert.equal(s.generation[0].args.subjectImagePaths.length, 2); assert.deepEqual(s.generation[0].args.subjects.map(item => item.id), ['a', 'b']);
-  assert.deepEqual(s.generation[0].args.imageSize, imageSize); assert.equal(s.generation[0].args.aspectRatio, undefined);
+  assert.equal(s.generation[0].args.imageSize, undefined); assert.equal(s.generation[0].args.aspectRatio, undefined);
   s.generation[0].resolve({ ...decodeImage(image), outputSize: { width: 1, height: 1 } }); await wait(async () => !(await s.request('/health')).body.active);
   const saved = (await s.request(`/jobs/${task.body.id}`)).body.generations[0];
-  assert.equal(saved.sizeMode, imageSize ? 'explicit' : 'gateway-default'); assert.deepEqual(saved.imageSize, imageSize); assert.deepEqual(saved.outputSize, { width: 1, height: 1 });
+  assert.equal(saved.sizeMode, 'gateway-default'); assert.deepEqual(saved.imageSize, imageSize); assert.equal(saved.submittedImageSize, null); assert.ok(saved.sizeRule); assert.deepEqual(saved.outputSize, { width: 1, height: 1 });
 });
 
 test('user changes Magpie settings during a continuous workflow without changing its frozen input or dimensions', async t => {
   // Given a submitted Magpie flow, When settings change during reverse, Then automatic generation uses the old provider, model, images and pixel dimensions.
-  const s = await setup(t); await s.request('/image-settings', magpie);
-  const imageSize = { width: 1500, height: 1000 };
+  const model = { ...magpie, model: 'fixture/gpt-image-2' };
+  const s = await setup(t, async () => ({ models: [{ id: model.model }] })); await s.request('/image-settings', model);
+  const imageSize = { width: 1025, height: 1024 };
   const task = await s.request('/jobs', { image, mode: 'reenact', referenceIndex: 0, reenact: { subjectImage: image, basePrompt: 'cat' }, generation: { language: 'en', imageSize } });
   assert.equal(task.status, 202); assert.equal(task.body.autoGeneration.provider, 'magpie'); assert.deepEqual(task.body.autoGeneration.imageSize, imageSize);
+  assert.deepEqual(task.body.autoGeneration.submittedImageSize, { width: 1024, height: 1024 }); assert.ok(task.body.autoGeneration.sizeRule);
   await wait(() => s.reverse.length); await s.request('/image-settings', settings); s.reverse[0].resolve(result); await wait(() => s.generation.length);
-  const args = s.generation[0].args; assert.equal(args.settings.provider, 'magpie'); assert.equal(args.settings.model, magpie.model);
-  assert.deepEqual(args.imageSize, imageSize); assert.equal(args.referenceIndex, 0); assert.ok(args.imagePath); assert.ok(args.subjectImagePath);
-  s.generation[0].resolve(decodeImage(image)); await wait(async () => !(await s.request('/health')).body.active);
-  const job = (await s.request(`/jobs/${task.body.id}`)).body; assert.equal(job.generations.length, 1); assert.equal(job.generations[0].sizeMode, 'explicit');
+  const args = s.generation[0].args; assert.equal(args.settings.provider, 'magpie'); assert.equal(args.settings.model, model.model);
+  assert.deepEqual(args.imageSize, { width: 1024, height: 1024 }); assert.equal(args.referenceIndex, 0); assert.ok(args.imagePath); assert.ok(args.subjectImagePath);
+  s.generation[0].resolve({ ...decodeImage(image), outputSize: { width: 1, height: 1 } }); await wait(async () => !(await s.request('/health')).body.active);
+  const job = (await s.request(`/jobs/${task.body.id}`)).body; assert.equal(job.generations.length, 1); assert.equal(job.generations[0].sizeMode, 'explicit'); assert.deepEqual(job.generations[0].imageSize, imageSize); assert.deepEqual(job.generations[0].submittedImageSize, task.body.autoGeneration.submittedImageSize); assert.equal(job.generations[0].sizeRule, task.body.autoGeneration.sizeRule); assert.deepEqual(job.generations[0].outputSize, { width: 1, height: 1 });
 });
 
 for (const cancelled of [false, true]) test(`user ${cancelled ? 'cancels' : 'fails'} Magpie reverse without starting subsequent image generation`, async t => {
@@ -264,22 +266,30 @@ for (const cancelled of [false, true]) test(`user ${cancelled ? 'cancels' : 'fai
 
 test('user keeps Magpie batch dimensions, per-item inputs and provider frozen while stopping only queued work', async t => {
   // Given four accepted batch items, When inputs/settings change and remaining work stops, Then running flows use submitted snapshots and queued items never call a model.
-  const s = await setup(t); await s.request('/image-settings', magpie);
+  const model = { ...magpie, model: 'fixture/gpt-image-2' };
+  const s = await setup(t, async () => ({ models: [{ id: model.model }] })); await s.request('/image-settings', model);
   const projects = [];
   for (let i = 0; i < 4; i++) { const p = (await s.request('/projects', { image: i ? `data:image/jpeg;base64,${Buffer.from([255,216,255,i]).toString('base64')}` : image })).body; projects.push({ projectId: p.id, inputRevision: p.inputRevision }); }
   assert.equal((await s.request('/batches/preview', { projects })).status, 200);
-  const imageSize = { width: 1200, height: 800 }, payload = { requestId: 'magpie-batch', projects, language: 'en', imageSize };
+  const imageSize = { width: 1025, height: 1024 }, payload = { requestId: 'magpie-batch', projects, language: 'en', imageSize };
   const batch = await s.request('/batches', payload); assert.equal(batch.status, 202); assert.deepEqual(batch.body.imageSize, imageSize); assert.equal(batch.body.provider, 'magpie');
+  assert.deepEqual(batch.body.submittedImageSize, { width: 1024, height: 1024 }); assert.ok(batch.body.sizeRule);
   await wait(() => s.reverse.length === 2); await s.request('/image-settings', settings);
+  const retry = await s.request('/batches', payload); assert.equal(retry.body.id, batch.body.id); assert.deepEqual(retry.body.submittedImageSize, batch.body.submittedImageSize); assert.equal(retry.body.sizeRule, batch.body.sizeRule);
   await s.request(`/projects/${projects[2].projectId}/input`, { expectedRevision: projects[2].inputRevision, mode: 'recreate', instruction: 'later edit' });
-  s.reverse[0].resolve(result); await wait(() => s.generation.length === 1); s.generation[0].resolve(decodeImage(image)); await wait(() => s.reverse.length === 3);
+  s.reverse[0].resolve(result); await wait(() => s.generation.length === 1); s.generation[0].resolve({ ...decodeImage(image), outputSize: { width: 1, height: 1 } }); await wait(() => s.reverse.length === 3);
   assert.notEqual(s.reverse[2].args.instruction, 'later edit');
   const stopped = await s.request(`/batches/${batch.body.id}/cancel`, {}); assert.equal(stopped.body.items[3].status, 'cancelled');
   s.reverse[1].resolve(result); s.reverse[2].resolve(result); await wait(() => s.generation.length === 3);
-  for (const call of s.generation) { assert.equal(call.args.settings.provider, 'magpie'); assert.equal(call.args.settings.model, magpie.model); assert.deepEqual(call.args.imageSize, imageSize); assert.equal(call.args.imagePath, undefined); call.resolve(decodeImage(image)); }
+  for (const call of s.generation) { assert.equal(call.args.settings.provider, 'magpie'); assert.equal(call.args.settings.model, model.model); assert.deepEqual(call.args.imageSize, { width: 1024, height: 1024 }); assert.equal(call.args.imagePath, undefined); call.resolve({ ...decodeImage(image), outputSize: { width: 1, height: 1 } }); }
   await wait(async () => !(await s.request('/health')).body.active);
   assert.equal(s.reverse.length, 3); assert.equal(s.generation.length, 3);
-  const saved = JSON.parse(await readFile(join(s.dir, 'records/batches.json')))[0]; assert.deepEqual(saved.imageSize, imageSize); assert.equal(saved.generationModelSettings.imageProvider, 'magpie');
+  const settled = await wait(async () => { const value = (await s.request('/batches')).body.find(value => value.id === batch.body.id); return value.items.every(item => ['completed', 'cancelled'].includes(item.status)) && value; });
+  for (const item of settled.items.filter(item => item.status === 'completed')) {
+    const generated = (await s.request(`/jobs/${item.jobId}`)).body.generations[0];
+    assert.deepEqual(generated.imageSize, imageSize); assert.deepEqual(generated.submittedImageSize, batch.body.submittedImageSize); assert.equal(generated.sizeRule, batch.body.sizeRule); assert.deepEqual(generated.outputSize, { width: 1, height: 1 });
+  }
+  const saved = JSON.parse(await readFile(join(s.dir, 'records/batches.json')))[0]; assert.deepEqual(saved.imageSize, imageSize); assert.equal(saved.generationModelSettings.imageProvider, 'magpie'); assert.deepEqual(saved.submittedImageSize, batch.body.submittedImageSize); assert.equal(saved.sizeRule, batch.body.sizeRule);
 });
 
 for (const change of ['cancel', 'save failure']) test(`user prevents Magpie image calls when reverse handoff meets ${change}`, async t => {
@@ -354,8 +364,9 @@ test('user sees a failed batch item complete after retrying only local image sav
 
 for (const action of ['recover', 'delete']) test(`user can ${action} paid output after every final task commit fails without a second model call`, async t => {
   // Given a distinct paid image and persistent task-record failures, When restarting or deleting, Then recovery preserves only surviving tasks and never calls a model again.
-  const s = await setup(t); await s.request('/image-settings', settings);
-  const task = await s.request('/jobs', { image, mode: 'recreate', generation: { language: 'en' } });
+  const model = { ...magpie, model: 'fixture/gpt-image-2' }, imageSize = { width: 1025, height: 1024 };
+  const s = await setup(t, async () => ({ models: [{ id: model.model }] })); await s.request('/image-settings', model);
+  const task = await s.request('/jobs', { image, mode: 'recreate', generation: { language: 'en', imageSize } });
   await wait(() => s.reverse.length); s.reverse[0].resolve(result); await wait(() => s.generation.length);
   const bytes = await sharp({ create: { width: 2, height: 1, channels: 3, background: '#fe2301' } }).png().toBuffer();
   assert.notDeepEqual(bytes, decodeImage(image).bytes);
@@ -368,7 +379,7 @@ for (const action of ['recover', 'delete']) test(`user can ${action} paid output
   };
   syncBuiltinESMExports();
   try {
-    s.generation[0].resolve({ bytes, extension: 'png' });
+    s.generation[0].resolve({ bytes, extension: 'png', outputSize: { width: 2, height: 1 } });
     await wait(async () => !(await s.request('/health')).body.active);
     assert.ok(failures >= 2, 'both completed and failed-state commits were rejected');
     const disk = JSON.parse(await readFile(record, 'utf8'));
@@ -384,6 +395,7 @@ for (const action of ['recover', 'delete']) test(`user can ${action} paid output
   } else {
     await s.restart();
     const recovered = (await s.request(`/jobs/${task.body.id}`)).body.generations[0];
+    assert.deepEqual(recovered.imageSize, imageSize); assert.deepEqual(recovered.submittedImageSize, { width: 1024, height: 1024 }); assert.equal(recovered.sizeRule, task.body.autoGeneration.sizeRule); assert.deepEqual(recovered.outputSize, { width: 2, height: 1 });
     assert.equal(recovered.status, 'failed'); assert.equal(recovered.resultSavePending, true); assert.equal(recovered.imageAsset, asset);
     assert.deepEqual(await readFile(file), bytes, 'startup collection preserves paid output');
     const saved = await s.request(`/jobs/${task.body.id}/generations/${recovered.id}/save`, {});
@@ -422,5 +434,43 @@ test('user cancellation during image persistence remains cancelled after restart
   assert.equal(cancelled.status, 'cancelled'); assert.equal(cancelled.resultSavePending, undefined); assert.equal(cancelled.imageAsset, undefined);
   assert.equal((await s.request(`/jobs/${task.body.id}/generations/${generationId}/save`, {})).status, 409);
   await assert.rejects(readFile(file), { code: 'ENOENT' });
+  assert.equal(s.generation.length, 1); assert.equal(s.reverse.length, 1);
+});
+
+for (const imageSize of [{ width: 1025, height: 1024 }, { width: 1024.5, height: 1024 }, { width: 100000, height: 100000 }, { width: 0, height: 1024 }, { width: -1, height: 200 }, { width: null, height: null }, null]) test('user records requested and submitted Magpie dimensions separately from actual output', async t => {
+  // Given raw dimensions or an invalid numeric draft, When manual generation is accepted, Then only the frozen legal size reaches the API and history retains valid raw intent.
+  const model = { ...magpie, model: 'fixture/gpt-image-2' }, raw = imageSize?.width > 0 && imageSize?.height > 0 ? imageSize : undefined;
+  const s = await setup(t, async () => ({ models: [{ id: model.model }] })); await s.request('/image-settings', model);
+  const task = await s.request('/jobs', { image, mode: 'recreate' });
+  await wait(() => s.reverse.length); s.reverse[0].resolve(result); await wait(async () => !(await s.request('/health')).body.active);
+  const response = await s.request(`/jobs/${task.body.id}/generations`, { language: 'en', imageSize });
+  assert.equal(response.status, 202);
+  const snapshot = response.body.generations[0], submitted = raw ? raw.width > 3840 ? { width: 2880, height: 2880 } : { width: 1024, height: 1024 } : null;
+  assert.deepEqual(snapshot.imageSize, raw); assert.deepEqual(snapshot.submittedImageSize, submitted); assert.ok(snapshot.sizeRule);
+  await wait(() => s.generation.length); assert.deepEqual(s.generation[0].args.imageSize, submitted || undefined);
+  s.generation[0].resolve({ ...decodeImage(image), outputSize: { width: 1, height: 1 } }); await wait(async () => !(await s.request('/health')).body.active);
+  const saved = (await s.request(`/jobs/${task.body.id}`)).body.generations[0];
+  assert.deepEqual(saved.imageSize, raw); assert.deepEqual(saved.submittedImageSize, submitted); assert.equal(saved.sizeRule, snapshot.sizeRule); assert.deepEqual(saved.outputSize, { width: 1, height: 1 });
+});
+
+test('user reopens legacy Magpie batch history without rewriting its requested dimensions or replaying work', async t => {
+  // Given a completed pre-rule batch and generation, When restarting and repeating its idempotent request, Then old snapshots remain unchanged and no model runs.
+  const s = await setup(t); await s.request('/image-settings', magpie);
+  const project = (await s.request('/projects', { image })).body, imageSize = { width: 1337, height: 911 };
+  const payload = { requestId: 'legacy-size', language: 'en', projects: [{ projectId: project.id, inputRevision: project.inputRevision }], imageSize };
+  const batch = await s.request('/batches', payload); assert.equal(batch.status, 202);
+  await wait(() => s.reverse.length); s.reverse[0].resolve(result); await wait(() => s.generation.length); s.generation[0].resolve(decodeImage(image));
+  const item = await wait(async () => { const value = (await s.request('/batches')).body[0].items[0]; return value.status === 'completed' && value; });
+  const path = join(s.dir, 'records', 'batches.json'), batches = JSON.parse(await readFile(path, 'utf8'));
+  delete batches[0].sizeRule; delete batches[0].submittedImageSize;
+  await writeFile(path, JSON.stringify(batches));
+  const record = join(s.dir, 'records', `${item.jobId}.json`), job = JSON.parse(await readFile(record, 'utf8'));
+  delete job.generations[0].sizeRule; delete job.generations[0].submittedImageSize;
+  await writeFile(record, JSON.stringify(job));
+  await s.restart();
+  const reopened = (await s.request('/batches', payload)).body;
+  assert.equal(reopened.id, batch.body.id); assert.deepEqual(reopened.imageSize, imageSize); assert.equal(reopened.sizeRule, undefined); assert.equal(reopened.submittedImageSize, undefined);
+  const historical = (await s.request(`/jobs/${item.jobId}`)).body.generations[0];
+  assert.deepEqual(historical.imageSize, imageSize); assert.equal(historical.sizeRule, undefined); assert.equal(historical.submittedImageSize, undefined);
   assert.equal(s.generation.length, 1); assert.equal(s.reverse.length, 1);
 });

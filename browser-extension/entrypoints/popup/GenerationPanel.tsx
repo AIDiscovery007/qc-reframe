@@ -17,8 +17,8 @@ import { generationSizeDescription, inheritedGenerationSize } from "../../lib/ge
 
 export const GenerationEffectContext = createContext<ComponentType<{ running: boolean; image: string; failed: boolean }> | null>(null);
 
-export default function GenerationPanel({ pixelSize = false, onAspectRatioChange, onImageSizeChange, targetGeneration, onTargetSelected, job, lang, disabled, disabledReason = "", subjectImage, subjects, inputPreview, onUpdate, workspace = false, actionsTarget, hideActions = false, versionNumber = 1, drawerOpen = true, onRequestState, requestError = "", requestPending = false }: {
-  pixelSize?: boolean;
+export default function GenerationPanel({ generationModel, pixelSize = false, onAspectRatioChange, onImageSizeChange, targetGeneration, onTargetSelected, job, lang, disabled, disabledReason = "", subjectImage, subjects, inputPreview, onUpdate, workspace = false, actionsTarget, hideActions = false, versionNumber = 1, drawerOpen = true, onRequestState, requestError = "", requestPending = false }: {
+  generationModel?: string; pixelSize?: boolean;
   onAspectRatioChange?(ratio?: AspectRatio): void;
   onImageSizeChange?(size?: AspectRatio): void;
   targetGeneration?: string; onTargetSelected?(): void; requestPending?: boolean; requestError?: string; drawerOpen?: boolean; onRequestState?(pending: boolean, error?: string): void;
@@ -84,7 +84,7 @@ export default function GenerationPanel({ pixelSize = false, onAspectRatioChange
     }
   };
 
-  const ratioControls = <GenerationSizeFields key={`${pixelSize}:${selected}`} pixelSize={pixelSize} value={size} onChange={setSize} workspace={workspace} disabled={disabled || busy || !!running || !!recovery} />;
+  const ratioControls = <GenerationSizeFields generationModel={generationModel} key={`${pixelSize}:${selected}`} pixelSize={pixelSize} value={size} onChange={setSize} workspace={workspace} disabled={disabled || busy || !!running || !!recovery} />;
   const generateButton = <button className="primary generate-button" disabled={busy || (recovery ? !!running : !controls.canGenerate)} aria-busy={busy || !!running}
     title={`使用${job.mode === "recreate" ? "" : job.mode === "session" ? "参考风格与" : "当前主体图、参考模板与"}${lang === "zh" ? "中文" : "英文"}提示词生成，包含排除项。使用设置中选择的生图渠道。`} onClick={() => act()}>
     {!running && !busy && <Icon name="image" />}{recovery ? busy ? "正在保存…" : "重试保存" : running ? workspace ? "图片生成中…" : "生成中，完成后提醒" : busy ? "正在提交…" : generations.length ? workspace ? "再生成图片" : "再生成一张" : "生成图片"}{!workspace && <Icon name="arrow" />}

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
-import { validImageSize } from "../lib/image-size.mjs";
+import { validImageSizeRequest } from "../lib/image-size.mjs";
 import { validGenerationRatio } from "../lib/generation-session.ts";
 import * as operationPolicy from "../lib/operation-policy.ts";
 
@@ -47,7 +47,7 @@ function background(local = { preferences: { token: "private-token" } }) {
       "../lib/reminder-background": { startReminderService: () => ({ wake: async () => {}, projectsChanged: async () => {} }) },
       "wxt/browser": { browser }, "../lib/bridge": { bridge },
       "../lib/operation-policy": operationPolicy,
-      "../lib/image-size.mjs": { validImageSize }, "../lib/generation-session": { validGenerationRatio },
+      "../lib/image-size.mjs": { validImageSizeRequest }, "../lib/generation-session": { validGenerationRatio },
       "../lib/capture": { captureImage: async () => ({ image, capture: "original" }) },
     })[name],
   });
@@ -331,8 +331,12 @@ test('user pixel generation and save recovery reach their own endpoints without 
   assert.equal(bg.calls[1].path, `/jobs/${id}/generations/${generationId}/save`);
   assert.deepEqual(bg.calls[1].body, {});
   assert.equal(await bg.send({ type: 'alchemy:save-generation', jobId: id, generationId }, { ...sender, id: 'foreign' }), undefined);
-  // Given invalid or ambiguous pixels, When submitted, Then no bridge call occurs.
-  for (const fields of [{ imageSize: { width: 10000, height: 10000 } }, { imageSize: { width: '1536', height: 1024 } }, { imageSize, aspectRatio: { width: 3, height: 2 } }])
+  // Oversized intent reaches the bridge unchanged for model-specific normalization.
+  const oversized = { width: 10000, height: 10000 };
+  assert.equal((await bg.send({ type: 'alchemy:generate', id, language: 'zh', imageSize: oversized })).ok, true);
+  assert.deepEqual(bg.calls[2].body.imageSize, oversized);
+  // Malformed or ambiguous fields still cannot reach the bridge.
+  for (const fields of [{ imageSize: { width: '1536', height: 1024 } }, { imageSize, aspectRatio: { width: 3, height: 2 } }])
     assert.match((await bg.send({ type: 'alchemy:generate', id, language: 'zh', ...fields })).error, /像素|比例/);
-  assert.equal(bg.calls.length, 2);
+  assert.equal(bg.calls.length, 3);
 });

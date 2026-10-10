@@ -4,7 +4,7 @@ import { browser } from "wxt/browser";
 import { bridge as fetchBridge, BridgeError } from "../lib/bridge";
 import { operationFor, allowsOperation, messageSource, PORT_KEEP_ALIVE } from "../lib/operation-policy";
 import { captureImage } from "../lib/capture";
-import { validImageSize } from "../lib/image-size.mjs";
+import { validImageSizeRequest } from "../lib/image-size.mjs";
 import { validGenerationRatio } from "../lib/generation-session";
 import type {
   ImageTarget,
@@ -175,7 +175,7 @@ export default defineBackground(() => {
     if (selecting) throw new Error("正在处理图片，请稍候");
     if (generation !== undefined) {
       if (!generation || typeof generation !== "object" || Array.isArray(generation) || Object.keys(generation).some(key => !["language", "aspectRatio", "imageSize"].includes(key))
-        || !["zh", "en"].includes(generation.language) || !validGenerationRatio(generation.aspectRatio) || !validImageSize(generation.imageSize)
+        || !["zh", "en"].includes(generation.language) || !validGenerationRatio(generation.aspectRatio) || !validImageSizeRequest(generation.imageSize)
         || (generation.aspectRatio !== undefined && generation.imageSize !== undefined)) throw new Error("无效连续生图参数");
       generation = { language: generation.language, ...(generation.aspectRatio ? { aspectRatio: { ...generation.aspectRatio } } : {}), ...(generation.imageSize ? { imageSize: { ...generation.imageSize } } : {}) };
     }
@@ -366,7 +366,7 @@ export default defineBackground(() => {
         if (message.type === "alchemy:batch-preview") return bridge("/batches/preview", token, { projects }, signal);
         const { requestId, language, aspectRatio, imageSize } = message;
         if (typeof requestId !== "string" || !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(requestId) || !["zh", "en"].includes(language) ||
-          !validImageSize(imageSize) || (imageSize !== undefined && aspectRatio !== undefined) ||
+          !validImageSizeRequest(imageSize) || (imageSize !== undefined && aspectRatio !== undefined) ||
           (aspectRatio !== undefined && (!aspectRatio || ![aspectRatio.width, aspectRatio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000) || aspectRatio.width / aspectRatio.height < 1 / 20 || aspectRatio.width / aspectRatio.height > 20))) throw new Error("无效批量参数");
         const batch = await bridge("/batches", token, { requestId, projects, language, ...(aspectRatio ? { aspectRatio: { width: aspectRatio.width, height: aspectRatio.height } } : {}), ...(imageSize ? { imageSize: { ...imageSize } } : {}) }, signal);
         void reminders.wake();
@@ -586,7 +586,7 @@ export default defineBackground(() => {
         if (message.type === "alchemy:generate") {
           if (!["zh", "en"].includes(message.language)) throw new Error("无效提示词语言");
           const { aspectRatio, imageSize } = message;
-          if (!validImageSize(imageSize) || (imageSize !== undefined && aspectRatio !== undefined)) throw new Error("像素宽高须为 1–10000 的整数，总像素不能超过 4000 万；不能同时填写比例");
+          if (!validImageSizeRequest(imageSize) || (imageSize !== undefined && aspectRatio !== undefined)) throw new Error("像素尺寸格式无效；不能同时填写比例");
           if (aspectRatio !== undefined && (!aspectRatio || typeof aspectRatio !== "object" || Array.isArray(aspectRatio)
             || Object.keys(aspectRatio).some(key => !["width", "height"].includes(key))
             || ![aspectRatio.width, aspectRatio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000)

@@ -5,13 +5,13 @@ import type { AspectRatio, Batch, BatchPreview, BatchProject, ProjectSummary } f
 import SelectField from "./SelectField";
 import GenerationSizeFields from "./GenerationSizeFields";
 import { inheritedGenerationSize } from "../../lib/generation-size";
-import { validImageSize } from "../../lib/image-size.mjs";
+import { requestedImageSize, validImageSizeRequest } from "../../lib/image-size.mjs";
 import { validGenerationRatio } from "../../lib/generation-session";
 
-type Submission = { requestId: string; projects: BatchProject[]; language: "zh" | "en"; aspectRatio?: AspectRatio; imageSize?: AspectRatio; pixelSize?: boolean };
+type Submission = { generationModel?: string; requestId: string; projects: BatchProject[]; language: "zh" | "en"; aspectRatio?: AspectRatio; imageSize?: AspectRatio; pixelSize?: boolean };
 
-export default function BatchRecreate({ pixelSize = false, projects, showHidden, hiddenProjectIds, onClose, onStarted }: {
-  pixelSize?: boolean; projects: ProjectSummary[]; showHidden: boolean; hiddenProjectIds: string[]; onClose(): void; onStarted(batch: Batch): void;
+export default function BatchRecreate({ generationModel, pixelSize = false, projects, showHidden, hiddenProjectIds, onClose, onStarted }: {
+  generationModel?: string; pixelSize?: boolean; projects: ProjectSummary[]; showHidden: boolean; hiddenProjectIds: string[]; onClose(): void; onStarted(batch: Batch): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const alive = useRef(false);
@@ -28,7 +28,7 @@ export default function BatchRecreate({ pixelSize = false, projects, showHidden,
   const [sizeDraft, setSizeDraft] = useState(() => ({ pixelSize: usePixels, size: inheritedGenerationSize(usePixels, submission) }));
   const size = sizeDraft.pixelSize === usePixels ? sizeDraft.size : undefined;
   const setSize = (size?: AspectRatio) => setSizeDraft({ pixelSize: usePixels, size });
-  const validSize = usePixels ? validImageSize(size) : validGenerationRatio(size);
+  const validSize = usePixels ? validImageSizeRequest(size) : validGenerationRatio(size);
   const [preview, setPreview] = useState<BatchPreview>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -54,13 +54,14 @@ export default function BatchRecreate({ pixelSize = false, projects, showHidden,
   const eligible = previewItems.filter(item => item.eligible);
   const start = async () => {
     if (pending.current || (!submission && (!eligible.length || !validSize))) return;
+    const requestedSize = pixelSize ? requestedImageSize(size) : size;
     const body = submission || { requestId: crypto.randomUUID(), projects: eligible.map(({ projectId, inputRevision }) => ({ projectId, inputRevision })), language,
-      pixelSize, ...(size ? pixelSize ? { imageSize: { ...size } } : { aspectRatio: { ...size } } : {}) };
+      generationModel, pixelSize, ...(requestedSize ? pixelSize ? { imageSize: { ...requestedSize } } : { aspectRatio: { ...requestedSize } } : {}) };
     pending.current = true; setBusy(true); setError(""); setSubmission(body);
     // Retain the exact request after an uncertain response, including across a page reload.
     try { sessionStorage.setItem(storageKey, JSON.stringify(body)); } catch { /* The open dialog still retains the request. */ }
     try {
-      const { pixelSize: _pixelSize, ...snapshot } = body;
+      const { pixelSize: _pixelSize, generationModel: _generationModel, ...snapshot } = body;
       const batch = await request<Batch>({ type: "alchemy:batch-start", ...snapshot });
       try { sessionStorage.removeItem(storageKey); } catch { /* A repeated request is still idempotent. */ }
       if (alive.current) started.current(batch);
@@ -78,7 +79,7 @@ export default function BatchRecreate({ pixelSize = false, projects, showHidden,
         <SelectField label="提示词语言" aria-label="提示词语言" value={language} disabled={busy || !!submission} onChange={event => setLanguage(event.target.value as "zh" | "en")}>
           <option value="zh">中文</option><option value="en">英文</option>
         </SelectField>
-        <GenerationSizeFields key={String(usePixels)} pixelSize={usePixels} value={size} onChange={setSize} disabled={busy || !!submission} />
+        <GenerationSizeFields generationModel={submission ? submission.generationModel : generationModel} key={String(usePixels)} pixelSize={usePixels} value={size} onChange={setSize} disabled={busy || !!submission} />
       </div>
       {submission && !busy && <p role="status">上次提交结果尚未确认。重试会核对同一请求，不会重复启动；也可关闭后在任务中心查看。</p>}
       {!preview && !error && <p role="status">正在检查 {projects.filter(item => visible(item.id)).length} 个项目…</p>}

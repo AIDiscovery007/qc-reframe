@@ -16,15 +16,24 @@ const setValue = (element, value) => {
   element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
 };
 const settled = async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); };
-const messages = [];
+const messages = [], healthModels = [];
+let healthModel;
 const send = chrome.runtime.sendMessage;
-chrome.runtime.sendMessage = async message => { messages.push(structuredClone(message)); return send(message); };
+chrome.runtime.sendMessage = async message => {
+  messages.push(structuredClone(message));
+  const response = await send(message);
+  if (message.type === 'alchemy:query' && message.path === '/health') {
+    if (healthModel) response.value.generationModel = healthModel;
+    healthModels.push(response.value.generationModel);
+  }
+  return response;
+};
 const generates = () => messages.filter(message => message.type === 'alchemy:generate');
 const saveRequests = () => messages.filter(message => message.type === 'alchemy:save-generation');
 const generate = () => find('.canvas-generation-actions .generate-button, .quick-result .primary');
 const sizes = () => find('.canvas-generation-actions .generation-ratio select');
 const run = async () => {
-  if (scenario === 'batch') {
+  if (scenario.startsWith('batch')) {
     await wait(async () => (await send({ type: 'alchemy:query', path: '/health' })).value.generationProvider === 'magpie', '批量入口应使用 Magpie 渠道');
     await wait(() => find('[aria-label="全部项目"]') && !find('[aria-label="全部项目"]').disabled, '项目库应可打开');
     find('[aria-label="全部项目"]').click();
@@ -34,10 +43,29 @@ const run = async () => {
     await wait(() => button('启动 3 个项目'), '预检应保留合格项目');
     const dialog = find('dialog:open');
     setValue(dialog.querySelector('.generation-ratio select'), '1536:1024');
+    if (scenario === 'batch-snapshot') {
+      // Given an unconfirmed accepted request, When the active model changes, Then retries retain the original raw size and preview model.
+      setValue(dialog.querySelector('.generation-ratio select'), 'custom'); await settled();
+      setValue(dialog.querySelector('[aria-label="像素宽"]'), '10000'); setValue(dialog.querySelector('[aria-label="像素高"]'), '10000');
+    }
     await settled();
     button('启动 3 个项目', dialog).click();
     await wait(() => messages.some(message => message.type === 'alchemy:batch-start'), '批量应提交');
     const body = messages.find(message => message.type === 'alchemy:batch-start');
+    if (scenario === 'batch-snapshot') {
+      await wait(() => button('重试提交', dialog), '响应丢失后应保留同一批量请求');
+      assert(dialog.textContent.includes('2880 × 2880'), '待确认请求应显示原 GPT 归一化预览');
+      healthModel = 'gemini-3-pro-image'; document.dispatchEvent(new Event('visibilitychange'));
+      await wait(() => healthModels.includes(healthModel), '新生图模型健康状态应送达'); await settled();
+      assert(dialog.querySelector('.generation-ratio').dataset.sizeProfile === 'gpt' && dialog.textContent.includes('2880 × 2880'), '新模型不能改变待确认批次的展示快照');
+      button('重试提交', dialog).click();
+      await wait(() => messages.filter(message => message.type === 'alchemy:batch-start').length === 2, '应核对同一批量请求');
+      const requests = messages.filter(message => message.type === 'alchemy:batch-start');
+      assert(JSON.stringify(requests[0]) === JSON.stringify(requests[1]), '重试必须保留原 requestId 与尺寸快照');
+      assert(body.imageSize.width === 10000 && body.imageSize.height === 10000 && !body.aspectRatio && !('generationModel' in body), '批量必须保留原始尺寸且不发送本地展示模型');
+      await wait(() => !find('.batch-recreate'), '同一批次确认成功后应关闭对话框');
+      return;
+    }
     assert(body.imageSize.width === 1536 && body.imageSize.height === 1024 && !body.aspectRatio && !('pixelSize' in body), '批量仅发送像素快照，不发送比例或本地展示字段');
     return;
   }
@@ -67,18 +95,56 @@ const run = async () => {
     assert(!generates()[0].imageSize && !generates()[0].aspectRatio, '自动尺寸不传历史比例或像素');
     return;
   }
+  if (scenario === 'gemini-ratios') {
+    // Given a Gemini image model, When choosing its ratio, Then exactly ten aspect labels map to gateway pixel carriers without a resolution promise.
+    const labels = [...sizes().options].filter(option => !['auto', 'custom'].includes(option.value)).map(option => option.textContent);
+    assert(labels.join(',') === '1:1,2:3,3:2,3:4,4:3,4:5,5:4,9:16,16:9,21:9', 'Gemini 必须展示完整十比例选项');
+    assert(!labels.some(label => /1K|2K|4K/.test(label)), 'Gemini 不能承诺像素档位');
+    setValue(sizes(), '1536:864'); await settled();
+    assert(find('.generation-ratio').textContent.includes('按 16:9 提交，像素由网关决定（网关参数 1536 × 864）'), '预览必须显示真实网关尺寸与目标比例');
+    generate().click(); await wait(() => generates().length === 1, 'Gemini 比例应可提交');
+    assert(generates()[0].imageSize.width === 1536 && generates()[0].imageSize.height === 864 && !generates()[0].aspectRatio, 'Magpie Gemini 仅提交尺寸原意图');
+    return;
+  }
+  if (scenario === 'model-switch' || scenario === 'unknown-auto') {
+    // Given a raw custom draft, When the model changes or is unknown, Then the draft stays intact while the normalized preview safely changes.
+    setValue(sizes(), 'custom'); await settled();
+    setValue(find('[aria-label="像素宽"]'), '1001.5'); setValue(find('[aria-label="像素高"]'), '1000'); await settled();
+    if (scenario === 'model-switch') {
+      assert(find('.generation-ratio').textContent.includes('1008 × 1008'), 'GPT 应预览修正后的 16 倍数尺寸');
+      for (const [model, profile, preview] of [['gemini-3-pro-image', 'gemini', '1024 × 1024'], ['fixture/unknown', 'unknown', '自动（网关默认）'], ['gpt-image-2', 'gpt', '1008 × 1008']]) {
+        healthModel = model; document.dispatchEvent(new Event('visibilitychange'));
+        await wait(() => find('.generation-ratio').dataset.sizeProfile === profile, '尺寸规则应跟随可信的新模型');
+        assert(find('[aria-label="像素宽"]').value === '1001.5' && find('[aria-label="像素高"]').value === '1000', '模型变化不能重挂并丢失原始草稿');
+        assert(find('.generation-ratio').textContent.includes(preview), '提交预览应跟随当前模型');
+      }
+    } else {
+      assert([...sizes().options].map(option => option.value).join(',') === 'auto,custom', '未知模型不冒充 GPT/Gemini 预设');
+      assert(find('.generation-ratio').textContent.includes('自动（网关默认）') && find('.generation-ratio').textContent.includes('未确认模型'), '未知模型必须明确自动降级');
+    }
+    assert(!generate().disabled, '模型适配或自动降级不能拦截提交');
+    generate().click(); await wait(() => generates().length === 1, '原始意图应可提交');
+    assert(generates()[0].imageSize.width === 1001.5 && generates()[0].imageSize.height === 1000 && !generates()[0].aspectRatio, '预览不能覆盖提交的用户原始意图');
+    return;
+  }
   if (scenario.startsWith('custom')) {
     setValue(sizes(), 'custom');
     await wait(() => find('[aria-label="像素宽"]'), '自定义像素输入应出现');
     setValue(find('[aria-label="像素宽"]'), '10000'); setValue(find('[aria-label="像素高"]'), '10000');
-    await wait(() => generate().disabled, '超过像素预算应阻止提交');
-    assert(!generates().length, '非法尺寸不能发出请求');
+    await wait(() => !generate().disabled && find('.generation-ratio').textContent.includes('2880 × 2880'), '超预算应显示自动修正预览并保留提交能力');
+    assert(!generates().length, '编辑尺寸本身不能发出请求');
     assert([...document.querySelectorAll('.custom-ratio input')].every(input => input.getBoundingClientRect().width >= 60), '窄屏输入框必须完整容纳五位数像素与原生步进按钮');
     find('[aria-label="像素高"]').focus(); find('[aria-label="像素高"]').blur();
-    await wait(() => find('[aria-label="像素高"]').getAttribute('aria-invalid') === 'true' && find('.ratio-error'), '交互后应展示尺寸校验错误');
-    if (scenario === 'custom-invalid') { find('.generation-ratio').scrollIntoView({ block: 'center' }); await settled(); return; }
-    setValue(find('[aria-label="像素宽"]'), '1536'); setValue(find('[aria-label="像素高"]'), '1024');
-    await wait(() => !generate().disabled, '修正像素后应恢复提交');
+    assert(find('[aria-label="像素高"]').getAttribute('aria-invalid') !== 'true' && !find('.ratio-error'), '自动修正不能显示阻断错误');
+    if (scenario === 'custom-invalid') {
+      for (const value of ['', '-1', '0', '1e309']) {
+        setValue(find('[aria-label="像素宽"]'), value); await settled();
+        assert(!generate().disabled && find('.generation-ratio').textContent.includes('自动（网关默认）'), '空、负数与非有限输入必须自动降级且不阻断');
+      }
+      generate().click(); await wait(() => generates().length === 1, '自动尺寸应允许提交');
+      assert(!generates()[0].imageSize && !generates()[0].aspectRatio, '自动尺寸必须省略原始尺寸且不得发送 NaN');
+      find('.generation-ratio').scrollIntoView({ block: 'center' }); await settled(); return;
+    }
   } else setValue(sizes(), '1536:1024');
   await settled();
   if (scenario === 'continuous') {
@@ -94,11 +160,13 @@ const run = async () => {
   const recordsBefore = document.querySelectorAll('.result-thumb').length;
   generate().click();
   await wait(() => generates().length === 1, '应提交 Magpie 附图生图');
-  assert(generates()[0].subjectImage && generates()[0].imageSize.width === 1536 && generates()[0].imageSize.height === 1024 && !generates()[0].aspectRatio, '附图和像素尺寸应同时提交');
+  const expected = scenario === 'custom' ? [10000, 10000] : [1536, 1024];
+  assert(generates()[0].subjectImage && generates()[0].imageSize.width === expected[0] && generates()[0].imageSize.height === expected[1] && !generates()[0].aspectRatio, '附图与用户原始像素意图应同时提交');
   await wait(() => document.querySelectorAll('.result-thumb').length === recordsBefore + 1 && find('.generated-pane')?.dataset.pending === 'false' && !generate().disabled, '新增图片记录完成后应可查看生成信息');
   await wait(() => find('[aria-label="生成信息"]') && !find('[aria-label="生成信息"]').disabled, '应可查看生成记录');
   find('[aria-label="生成信息"]').click();
-  await wait(() => find('dialog:open')?.textContent.includes('请求尺寸：1536 × 1024 px'), '历史应展示请求像素');
+  await wait(() => find('dialog:open')?.textContent.includes(`请求尺寸：${expected[0]} × ${expected[1]} px`), '历史应展示请求像素');
+  assert(find('dialog:open').textContent.includes(scenario === 'custom' ? '提交尺寸：2880 × 2880 px' : '提交尺寸：1536 × 1024 px'), '历史必须展示已保存的归一化提交尺寸');
   assert(find('dialog:open').textContent.includes('实际图片：320 × 400 px'), '实际返回尺寸必须单独展示');
   if (scenario === 'custom') { find('[aria-label="关闭窗口"]').click(); await wait(() => !find('dialog:open'), '应关闭信息并展示自定义尺寸'); find('.generation-ratio').scrollIntoView({ block: 'center' }); await settled(); }
 };

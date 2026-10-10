@@ -1,3 +1,4 @@
+import { magpieSizeProfile, normalizeMagpieSize, requestedImageSize } from "./image-size.mjs";
 import type { AspectRatio, Generation, ImageSize, ImageProvider } from "./types";
 
 type SizeSource = { provider?: ImageProvider; aspectRatio?: AspectRatio; imageSize?: ImageSize };
@@ -6,7 +7,7 @@ type SizeSource = { provider?: ImageProvider; aspectRatio?: AspectRatio; imageSi
 export function inheritedGenerationSize(pixelSize: boolean, source?: SizeSource) {
   const fromPixels = source?.provider === "magpie" || source?.imageSize !== undefined;
   const size = pixelSize ? fromPixels ? source?.imageSize : undefined : fromPixels ? undefined : source?.aspectRatio;
-  return size ? { ...size } : undefined;
+  return pixelSize ? requestedImageSize(size) : size ? { ...size } : undefined;
 }
 
 export function parseImageDimensions(width: string, height: string): ImageSize {
@@ -14,9 +15,21 @@ export function parseImageDimensions(width: string, height: string): ImageSize {
   return { width: integer(width), height: integer(height) };
 }
 
+export function parsePixelDimensions(width: string, height: string): ImageSize | undefined {
+  return requestedImageSize({ width: Number(width), height: Number(height) });
+}
+
+export function magpieSizePreview(model: string | undefined, size?: ImageSize) {
+  const normalized = normalizeMagpieSize(model, size);
+  const submitted = normalized.submittedImageSize;
+  if (submitted && normalized.aspectRatio) return `提交预览：按 ${normalized.aspectRatio} 提交，像素由网关决定（网关参数 ${submitted.width} × ${submitted.height}）；实际图片以返回结果为准。`;
+  return `${submitted ? `提交预览：${submitted.width} × ${submitted.height} px` : "提交预览：自动（网关默认）"}${magpieSizeProfile(model) === "unknown" ? " · 未确认模型尺寸规则" : normalized.experimental ? " · 实验尺寸" : ""}；实际图片以返回结果为准。`;
+}
+
 export function generationSizeDescription(generation: Generation) {
   const requested = generation.provider === "magpie" || generation.imageSize
     ? generation.imageSize ? `请求尺寸：${generation.imageSize.width} × ${generation.imageSize.height} px` : "请求尺寸：Magpie 网关默认"
     : generation.aspectRatio ? `请求比例：${generation.aspectRatio.width}:${generation.aspectRatio.height}` : "请求比例：自动";
-  return `${requested}${generation.outputSize ? ` · 实际图片：${generation.outputSize.width} × ${generation.outputSize.height} px` : ""}`;
+  const submitted = generation.sizeRule ? generation.submittedImageSize ? ` · 提交尺寸：${generation.submittedImageSize.width} × ${generation.submittedImageSize.height} px` : " · 提交尺寸：自动（网关默认）" : "";
+  return `${requested}${submitted}${generation.outputSize ? ` · 实际图片：${generation.outputSize.width} × ${generation.outputSize.height} px` : ""}`;
 }
