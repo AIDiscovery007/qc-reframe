@@ -35,4 +35,4 @@ export function browserDomain(files) {
     || ['agent-tool/preview.mjs','agent-tool/gallery-preview.mjs','browser-extension/bridge/image-order.mjs','browser-extension/package.json','browser-extension/package-lock.json','browser-extension/wxt.config.ts'].includes(file));
   return createHash('sha256').update(JSON.stringify(selected.sort(([a],[b])=>a.localeCompare(b,'en')))).digest('hex');
 }
-export const reviewedBrowserDomain = "badf40350d316157c5c8075cb2fca88440b3b799a7533a47f77cacbc61b35da1";
+export const reviewedBrowserDomain = "9ecf13a2ab493a8591779b4341cc8da7dad2beb659486bc4dbba7e12a7f4670d";
