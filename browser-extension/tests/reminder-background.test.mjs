@@ -42,9 +42,9 @@ async function harness({ denied = false, stored, audioFails = false, paired = fa
   const exports = {};
   runInNewContext(serviceCode, { exports, Date: Clock, URLSearchParams, console, crypto: webcrypto,
     setTimeout: (fn, delay) => { const id = ++serial; timers.set(id, { fn, at: now + delay }); return id; }, clearTimeout: id => timers.delete(id),
-    require: name => name === 'wxt/browser' ? { browser } : name === './task-reminders' ? stateExports : name === './workspace-navigation' ? navigation : { bridge: async path => feed ? feed(path) : ({ revision: String(now), tasks }) },
+    require: name => name === 'wxt/browser' ? { browser } : name === './task-reminders' ? stateExports : name === './workspace-navigation' ? navigation : undefined,
   });
-  const service = exports.startReminderService(); await tick();
+  const service = exports.startReminderService(async path => feed ? feed(path) : ({ revision: String(now), tasks })); await tick();
   const message = (type, props = {}, tab = 1) => new Promise((resolve, reject) => listener({ type: `alchemy:reminder-${type}`, ...props }, { id: 'test', url: 'chrome-extension://test/workspace.html', tab: { id: tab } }, reply => reply.error ? reject(new Error(reply.error)) : resolve(reply.value)));
   return { local, session, notices, sounds, tabs, badges, updates, windows, message, openWorkspace: navigation.openWorkspace, setFeed(next) { feed = next; }, projectsChanged: service.projectsChanged,
     async snapshot(next) { tasks = next; local.preferences = { token: 'test-only' }; await service.wake(); },

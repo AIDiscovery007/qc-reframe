@@ -1,13 +1,13 @@
 import { openWorkspace } from "./workspace-navigation";
 import { browser } from 'wxt/browser';
-import { bridge } from './bridge';
+import type { bridge as Bridge } from './bridge';
 import { markRemindersRead, newReminderState, reconcileReminders, reminderSummary, reminderTone, type ReminderState, type TaskNotice } from './task-reminders';
 
 const key = 'taskReminders';
 const alarm = 'reframe-task-reminders';
 const notificationId = 'reframe-tasks';
 
-export function startReminderService() {
+export function startReminderService(bridge: typeof Bridge) {
   let queue: Promise<unknown> = Promise.resolve();
   let watching = false, again = false, projectsRevision = 0;
   let flushTimer: ReturnType<typeof setTimeout>;

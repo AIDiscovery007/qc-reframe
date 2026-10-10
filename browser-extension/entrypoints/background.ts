@@ -74,7 +74,7 @@ export default defineBackground(() => {
       return fetchBridge<T>(path, renewed, body, signal);
     }
   };
-  const reminders = startReminderService();
+  const reminders = startReminderService(bridge);
   void browser.storage.local.setAccessLevel({
     accessLevel: "TRUSTED_CONTEXTS",
   });

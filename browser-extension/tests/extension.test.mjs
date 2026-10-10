@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
+import { isDeepStrictEqual } from "node:util";
 import ts from "typescript";
 import * as operationPolicy from "../lib/operation-policy.ts";
 
@@ -283,7 +284,7 @@ test("project messages restore a template and start only the explicitly chosen l
   assert.equal(calls.length, before);
 });
 
-async function background(fetch = async () => ({ ok: true, json: async () => ({ status: "running" }) }), globals = {}) {
+async function background(fetch = async () => ({ ok: true, json: async () => ({ status: "running" }) }), globals = {}, setup = () => {}) {
   const handlers = {};
   const messages = [];
   const tabs = [];
@@ -348,6 +349,7 @@ async function background(fetch = async () => ({ ok: true, json: async () => ({ 
       },
     },
   };
+  setup(chrome, handlers);
   runInNewContext(await readFile(new URL("background.js", build), "utf8"), {
     chrome,
     console,
@@ -1599,4 +1601,76 @@ test('closing a request during automatic connection prevents its business reques
   assert.equal(calls.filter(url => url.endsWith('/connection')).length, 1);
   assert.equal(calls.filter(url => url.endsWith('/sessions/index')).length, 0);
   assert.equal(storage.preferences.token, 'shared');
+});
+
+
+async function reminderBackground(respond) {
+  let now = 10000;
+  const clock = requestClock(), calls = [], notices = [];
+  const storage = { preferences: { token: 'expired', mode: 'reenact' } };
+  class Clock extends Date { static now() { return now; } }
+  const bg = await background(undefined, { ...clock, Date: Clock, fetch: async (url, options) => {
+    const call = { path: new URL(url).pathname, token: options.headers.Authorization };
+    calls.push(call);
+    return respond(call);
+  } }, (chrome, handlers) => {
+    chrome.alarms.onAlarm.addListener = fn => { handlers.alarm = fn; };
+    chrome.storage.onChanged.addListener = fn => { handlers.storage = fn; };
+    chrome.storage.local.get = async () => structuredClone(storage);
+    chrome.storage.local.remove = async key => { delete storage[key]; };
+    chrome.storage.local.set = async values => {
+      const changes = Object.fromEntries(Object.entries(values).filter(([key, value]) => !isDeepStrictEqual(storage[key], structuredClone(value))).map(([key, value]) => [key, { oldValue: storage[key], newValue: value }]));
+      Object.assign(storage, structuredClone(values));
+      handlers.storage?.(changes, 'local');
+    };
+    chrome.notifications = { onClicked: { addListener() {} }, getPermissionLevel: async () => 'granted', create: async (_id, value) => notices.push(value) };
+  });
+  return { calls, notices, storage,
+    async alarm() { bg.handlers.alarm({ name: 'reframe-task-reminders' }); await flushRequest(); },
+    async advance(ms) { now += ms; clock.tick(ms); await flushRequest(); },
+  };
+}
+const reminderResponse = (value, status = 200) => ({ ok: status === 200, status, json: async () => value });
+
+test('user receives background reminders after credentials expire without opening any UI', async () => {
+  // Given an expired persisted token and no UI request, hold the shared handshake in flight.
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const task = { id: 'done', jobId: 'done', projectId: 'a'.repeat(64), mode: 'style', status: 'completed', createdAt: new Date(10000).toISOString(), hidden: false };
+  const h = await reminderBackground(async ({ path, token }) => {
+    if (path === '/connection') { await pending; return reminderResponse({ token: 'renewed' }); }
+    assert.equal(path, '/task-feed');
+    return token === 'Bearer expired' ? reminderResponse({ error: 'expired' }, 401) : reminderResponse({ revision: '1', tasks: [task] });
+  });
+  // When worker startup and concurrent alarms poll, Then they share one renewal.
+  await h.alarm(); await h.alarm(); release(); await flushRequest();
+  assert.equal(h.calls.filter(call => call.path === '/connection').length, 1);
+  assert.deepEqual(h.storage.preferences, { token: 'renewed', mode: 'reenact' });
+  assert.deepEqual(h.storage.taskReminders.unread.map(task => task.id), ['done']);
+  assert.equal(h.storage.reminderConnectionError, undefined);
+  // When the delivery timer and subsequent alarms fire, Then the notification is delivered once.
+  await h.advance(5000); await h.alarm(); await h.advance(60000);
+  assert.equal(h.notices.length, 1);
+  assert.equal(h.calls.filter(call => call.path === '/connection').length, 1);
+  assert.ok(h.calls.filter(call => call.path === '/task-feed').slice(1).every(call => call.token === 'Bearer renewed'));
+});
+
+test('user background reminder failures preserve credentials and wait for the next alarm', async t => {
+  for (const failure of ['network', 'server', 'renewal-denied', 'renewal-offline', 'renewed-rejected']) await t.test(failure, async () => {
+    // Given an unavailable feed or renewal, When only the worker polls, Then no UI or retry loop is needed.
+    const h = await reminderBackground(({ path }) => {
+      if (failure === 'network' || path === '/connection' && failure === 'renewal-offline') throw new Error('offline');
+      if (path === '/connection' && failure === 'renewed-rejected') return reminderResponse({ token: 'expired' });
+      return reminderResponse({ error: 'unavailable' }, path === '/connection' ? 403 : failure === 'server' ? 500 : 401);
+    });
+    const expected = failure === 'renewed-rejected' ? ['/task-feed', '/connection', '/task-feed'] : failure.startsWith('renewal') ? ['/task-feed', '/connection'] : ['/task-feed'];
+    assert.deepEqual(h.calls.map(call => call.path), expected);
+    assert.equal(h.storage.preferences.token, 'expired');
+    assert.match(h.storage.reminderConnectionError, /连接中断/);
+    await flushRequest();
+    assert.equal(h.calls.length, expected.length, 'failure must not schedule an immediate retry');
+    // A later alarm may try again, but non-401 requests are never replayed within a poll.
+    await h.alarm();
+    assert.deepEqual(h.calls.map(call => call.path), [...expected, ...expected]);
+  });
 });
