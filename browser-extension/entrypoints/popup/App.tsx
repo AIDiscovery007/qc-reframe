@@ -1,3 +1,4 @@
+import type { ImageSettings } from "../../lib/types";
 import { validImageSize } from "../../lib/image-size.mjs";
 import { inheritedGenerationSize } from "../../lib/generation-size";
 import GenerationSizeFields from "./GenerationSizeFields";
@@ -132,6 +133,41 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const [magpie, setMagpie] = useState(false);
   const magpieHint = magpie ? "Magpie 支持自动或指定像素尺寸；附图支持取决于所选模型。" : "";
   const [generationReady, setGenerationReady] = useState(false);
+  const [generationSettingsPending, setGenerationSettingsPending] = useState(false);
+  const [generationSettingsError, setGenerationSettingsError] = useState("");
+  const [imageSettingsRevision, setImageSettingsRevision] = useState(0);
+  const generationSettingsSync = useRef({ saving: false });
+  const applyGenerationHealth = (health: { generationProvider?: string; generationReady?: boolean; generationModel?: string | null; model?: string }, snapshot: { saving: boolean }) => {
+    if (snapshot !== generationSettingsSync.current || snapshot.saving) return false;
+    setMagpie(health.generationProvider === "magpie");
+    setGenerationReady(health.generationReady ?? !!(health.generationModel === undefined ? health.model : health.generationModel));
+    setGenerationSettingsPending(false);
+    setGenerationSettingsError("");
+    return true;
+  };
+  const saveImageSettings = async (settings: Record<string, unknown>) => {
+    const saving = { saving: true };
+    generationSettingsSync.current = saving;
+    setGenerationSettingsPending(true); setGenerationReady(false); setGenerationSettingsError("");
+    try {
+      const saved = await request<ImageSettings>({ type: "alchemy:image-settings-save", settings });
+      setImageSettingsRevision(value => value + 1);
+      return saved;
+    } finally {
+      if (generationSettingsSync.current === saving) {
+        // Discard polls started before or during the write, including requests still in flight.
+        const refreshing = { saving: false };
+        generationSettingsSync.current = refreshing;
+        try { applyGenerationHealth(await query("/health"), refreshing); }
+        catch {
+          if (generationSettingsSync.current === refreshing) {
+            setGenerationSettingsPending(false);
+            setGenerationSettingsError("无法确认生图渠道状态，请检查本机服务；连接恢复后将自动刷新。");
+          }
+        }
+      }
+    }
+  };
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -180,7 +216,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const inputConflict = !!selection?.inputs && (activeProject?.inputRevision || 0) > (selection.inputRevision || 0);
   const inputBlocked = inputConflict || !draftReady || !connected || busy || savingMode || modelBusy || cliBusy || !!running || loadingProject || restoring;
   const blocked = inputBlocked || !selectedModel;
-  const generationBlocked = inputBlocked || !generationReady;
+  const generationBlocked = inputBlocked || generationSettingsPending || !generationReady;
 
   useEffect(() => {
     setCopied(false);
@@ -377,10 +413,11 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     let fetchedRevision: string | undefined;
     const stop = pollWhileVisible(async () => {
       const revision = projectRevision.current;
+      const generationSnapshot = generationSettingsSync.current;
       let delay = 10_000;
       try {
         const health = await query<{ generationProvider?: string; generationReady?: boolean; generationModel?: string | null; agent?: string; ready: boolean; serviceReady?: boolean; skill: string; active: number; visibleActive?: number; hiddenProjectIds?: string[]; projectsRevision?: string; modelBusy?: boolean; cliBusy?: boolean; model?: string; cli?: CliStatus | null }>("/health");
-        if (cancelled) return delay;
+        if (cancelled || !applyGenerationHealth(health, generationSnapshot)) return delay;
         setConnected(health.serviceReady ?? true);
         setPreferences(value => value.paired ? value : { ...value, paired: true });
         setServiceBusy(health.active > 0);
@@ -393,8 +430,6 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         setModelBusy(!!health.modelBusy);
         setReverseAgent(health.agent || "codex");
         setSelectedModel(health.model || null);
-        setMagpie(health.generationProvider === "magpie");
-        setGenerationReady(health.generationReady ?? !!(health.generationModel === undefined ? health.model : health.generationModel));
         setConnectionText(health.ready ? `已连接 · ${health.skill}` : "未找到图片逆向技能");
         delay = health.active || health.modelBusy || health.cliBusy ? 2000 : 10_000;
         // An older bridge must report an upgrade need instead of silently showing an empty library.
@@ -410,7 +445,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           }
         }
       } catch (e) {
-        if (!cancelled && revision === projectRevision.current) { setConnected(false); setConnectionText((e as Error).message); }
+        if (!cancelled && revision === projectRevision.current && generationSnapshot === generationSettingsSync.current && !generationSnapshot.saving) { setConnected(false); setConnectionText((e as Error).message); }
       }
       return delay;
     });
@@ -916,7 +951,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         onUndo={() => { if (visibilityNotice) void setProjectsHidden(visibilityNotice.ids, !visibilityNotice.hidden, true).catch(error => setVisibilityError(error.message)); }} />}
       {workspace && sessionPicker === drawerKey && preferences.mode === "session" && <SessionPicker value={selectedSessions()} onClose={() => setSessionPicker(undefined)} onConfirm={ids => saveInput("session", undefined, taskInstruction("session"), "", [], ids)} />}
       {workspace && newProjectOpen && <NewProject busy={busy} error={error} onClose={() => setNewProjectOpen(false)} onUpload={() => referenceInput.current?.click()} />}
-      {workspace && settings && <SettingsCenter section={settingsSection} onSectionChange={setSettingsSection} connected={connected} serviceBusy={serviceBusy} onClose={() => setSettings(false)} onConnected={() => setPreferences(value => ({ ...value, paired: true }))} />}
+      {workspace && settings && <SettingsCenter section={settingsSection} onSectionChange={setSettingsSection} connected={connected} serviceBusy={serviceBusy} onClose={() => setSettings(false)} onConnected={() => setPreferences(value => ({ ...value, paired: true }))} onSaveImageSettings={saveImageSettings} imageSettingsRevision={imageSettingsRevision} />}
       {tasksOpen && <TaskCenter workspace={workspace} visibilityError={visibilityError} unread={reminders.unread} onNoticeOpen={openNotice} showHidden={showHidden} hiddenProjectIds={hiddenProjectIds} busy={busy} onToggleHidden={() => void toggleHiddenProjects()} onClose={() => setTasksOpen(false)} onUpdate={updateJob} onOpen={async (_projectId, _mode, jobId, generationId) => {
         await noticeNavigation.current?.(new URLSearchParams({ task: jobId, ...(generationId ? { generation: generationId } : {}) }));
       }} />}
@@ -939,10 +974,11 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         }} /> : <div className={workspace ? "workspace-body" : undefined} data-results-open={drawerOpen} data-history={historyOpen}>
       <div ref={editor} className={workspace ? "workspace-editor" : undefined} inert={workspace && narrow && drawerOpen}>
       {!workspace && draftError && <p className="error" role="alert">{draftError}</p>}
+      {generationSettingsError && <p className="error" role="alert">{generationSettingsError}</p>}
       {magpieHint && !galleryOpen && <p className="hint" role="status">{magpieHint}</p>}
       <main className={workspace && !historyOpen && !galleryOpen && selection ? "canvas-main" : undefined}>
         {historyOpen ? (
-          <ProjectHistory hiddenProjectIds={hiddenProjectIds} pixelSize={magpie} batchDisabled={!connected || !selectedModel || !generationReady || modelBusy || cliBusy} onTasks={() => setTasksOpen(true)} searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
+          <ProjectHistory hiddenProjectIds={hiddenProjectIds} pixelSize={magpie} batchDisabled={!connected || !selectedModel || generationSettingsPending || !generationReady || modelBusy || cliBusy} onTasks={() => setTasksOpen(true)} searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
         ) : workspace && selection ? <CanvasWorkspace onPromptRevealed={() => setTargetPrompt(undefined)} revealPrompt={targetPrompt?.jobId === activeJob?.id ? targetPrompt?.request : undefined} contextKey={drawerKey} mode={preferences.mode}
           sessionTitle={selectedSessions().length === 1 ? selectedSessions()[0]!.title : selectedSessions().length ? `已选 ${selectedSessions().length} 个会话` : undefined} onSessions={() => setSessionPicker(drawerKey)}
           image={displayImage} subjectImage={subjectImage(preferences.mode)} subjects={multiSubjects}

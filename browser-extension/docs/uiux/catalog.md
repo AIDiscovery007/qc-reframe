@@ -36,6 +36,16 @@
 
 | ID | 表面 / 视口 | 状态 | 检查 |
 | --- | --- | --- | --- |
+| image-settings-sync-codex-to-magpie-manual | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=codex-to-magpie-manual&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
+| image-settings-sync-codex-to-magpie-continuous | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=codex-to-magpie-continuous&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
+| image-settings-sync-codex-to-magpie-batch | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=codex-to-magpie-batch&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
+| image-settings-sync-magpie-to-codex-manual | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=magpie-to-codex-manual&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
+| image-settings-sync-magpie-to-codex-continuous | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=magpie-to-codex-continuous&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
+| image-settings-sync-magpie-to-codex-batch | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=magpie-to-codex-batch&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
+| image-settings-sync-stale-health | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=stale-health&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
+| image-settings-sync-rapid-switch | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=rapid-switch&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
+| image-settings-sync-reopen-draft | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=reopen-draft&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
+| image-settings-sync-snapshot | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=snapshot&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
 | generation-readiness-popup-ready-delayed | popup 360×740 | /popup.html?state=alignment&mode=recreate&generationReadinessRegression=ready&quickDraftDelay=1000&generationDelay=60000 | generationReadinessRegression |
 | batch-toolbar-360 | workspace 360×1034 | /workspace.html?state=library&count=24 | batchToolbar |
 | batch-toolbar-650 | workspace 650×1034 | /workspace.html?state=library&count=24 | batchToolbar |

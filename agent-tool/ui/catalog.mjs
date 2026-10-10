@@ -29,6 +29,11 @@ export const components = [
 
 const wide = { width: 1440, height: 1000 };
 export const scenarios = [
+  ...['codex-to-magpie-manual', 'codex-to-magpie-continuous', 'codex-to-magpie-batch', 'magpie-to-codex-manual', 'magpie-to-codex-continuous', 'magpie-to-codex-batch', 'stale-health', 'rapid-switch', 'reopen-draft', 'snapshot'].map(flow => ({
+    id: `image-settings-sync-${flow}`, surface: 'workspace',
+    path: `/workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=${flow}&generationDelay=60000&reverseDelay=300`,
+    viewport: wide, regression: 'imageSettingsSyncRegression', rules: [],
+  })),
   { id: 'generation-readiness-popup-ready-delayed', surface: 'popup', path: '/popup.html?state=alignment&mode=recreate&generationReadinessRegression=ready&quickDraftDelay=1000&generationDelay=60000', viewport: { width: 360, height: 740 }, regression: 'generationReadinessRegression', rules: [] },
   ...[360, 650, 651, 877, 1440].map(width => ({
     id: `batch-toolbar-${width}`, surface: 'workspace', path: '/workspace.html?state=library&count=24',
