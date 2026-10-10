@@ -74,3 +74,5 @@
 .batch-checks li > * { min-width: 0; }
 .batch-checks span { color: var(--muted); }
 .batch-recreate .dialog-content { overflow: auto; }
+
+.batch-recreate .batch-options > .generation-ratio { flex: 1; min-width: 160px; margin: 0; }

@@ -60,8 +60,14 @@ export async function createImageStore(dataDir, recordsDir = dataDir) {
     if (hash(bytes) !== asset.slice(0, 64)) throw new Error("图片校验失败");
     return bytes;
   }
-  async function put({ bytes, extension }) {
+  const assetFor = ({ bytes, extension }) => {
     const asset = `${hash(bytes)}.${extension}`;
+    path(asset);
+    return asset;
+  };
+  async function put(output) {
+    const { bytes } = output;
+    const asset = assetFor(output);
     const file = path(asset);
     if (pending.has(asset)) return pending.get(asset);
     const operation = (async () => {
@@ -98,7 +104,7 @@ export async function createImageStore(dataDir, recordsDir = dataDir) {
     return entries;
   }
   return {
-    put, read, path, generationPath, legacy,
+    put, read, path, assetFor, generationPath, legacy,
     async migrate() {
       // A damaged record may still own images. Leave all legacy files intact in that case.
       let all;

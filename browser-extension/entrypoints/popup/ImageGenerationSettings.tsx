@@ -5,7 +5,7 @@ import type { ImageSettings, ImageProvider, MagpieModels } from "../../lib/types
 
 const labels = { magpie: "Magpie", codex: "Codex 内置生图", openai: "OpenAI 兼容 API", gemini: "Gemini 原生 API" };
 
-export default function ImageGenerationSettings() {
+export default function ImageGenerationSettings({ onSave, settingsRevision }: { settingsRevision: number; onSave(settings: Record<string, unknown>): Promise<ImageSettings> }) {
   const [saved, setSaved] = useState<ImageSettings>();
   const [provider, setProvider] = useState<ImageProvider>("codex");
   const [baseUrl, setBaseUrl] = useState("");
@@ -21,11 +21,12 @@ export default function ImageGenerationSettings() {
   const [notice, setNotice] = useState("");
   const alive = useRef(false);
   const saving = useRef(false);
+  const draftEdited = useRef(false);
   const validAddress = /^https?:\/\//.test(baseUrl) && URL.canParse(baseUrl);
   const selectedModelAvailable = !!catalog?.models.some(item => item.id === model);
-  const choose = (value: ImageProvider, settings = saved) => {
+  const choose = (value: ImageProvider, settings = saved, preserveNotice = false) => {
     revision.current++; setChecking(false); setCatalog(undefined); setCatalogError("");
-    setProvider(value); setApiKey(""); setNotice(""); setError("");
+    setProvider(value); setApiKey(""); if (!preserveNotice) setNotice(""); setError("");
     setBaseUrl(value === "codex" ? "" : settings?.configs[value]?.baseUrl || (value === "magpie" ? "http://127.0.0.1:3425" : ""));
     setModel(value === "codex" ? "" : settings?.configs[value]?.model || "");
   };
@@ -35,21 +36,21 @@ export default function ImageGenerationSettings() {
     void (async () => {
       try {
         const value = await request<ImageSettings>({ type: "alchemy:image-settings" });
-        if (!cancelled) { setSaved(value); choose(value.provider, value); }
+        if (!cancelled) { setSaved(value); if (!draftEdited.current) choose(value.provider, value, true); }
       } catch (e) {
         if (!cancelled) setError((e as Error).message === "Not found" ? "请更新并重启本机服务，以启用 API 生图设置。" : (e as Error).message);
       }
     })();
     return () => { cancelled = true; alive.current = false; revision.current++; };
-  }, []);
+  }, [settingsRevision]);
   const save = async (clearApiKey = false) => {
     if (!saved || saving.current || (provider === "magpie" && (checking || !selectedModelAvailable))) return;
     saving.current = true; setPending(true); setError(""); setNotice("");
     try {
-      const value = await request<ImageSettings>({ type: "alchemy:image-settings-save", settings: {
+      const value = await onSave({
         provider, ...(provider === "codex" ? {} : provider === "magpie" ? { baseUrl, model } : { baseUrl, model, apiKey: clearApiKey ? "" : apiKey, ...(clearApiKey ? { clearApiKey: true } : {}) }),
-      } });
-      if (alive.current) { setSaved(value); choose(value.provider, value); setNotice(clearApiKey ? "API Key 已清除。再次生图前请重新填写。" : "已保存，用于之后提交的生图任务。保存不会调用模型。" ); }
+      });
+      if (alive.current) { draftEdited.current = false; setSaved(value); choose(value.provider, value); setNotice(clearApiKey ? "API Key 已清除。再次生图前请重新填写。" : "已保存，用于之后提交的生图任务。保存不会调用模型。" ); }
     } catch (e) { if (alive.current) setError((e as Error).message); }
     finally { saving.current = false; if (alive.current) setPending(false); }
   };
@@ -76,7 +77,7 @@ export default function ImageGenerationSettings() {
     <h3 id="image-generation-title">生图渠道</h3>
     <p className="fine">独立选择图片生成服务，逆向 Agent 的选择保持不变。</p>
     {saved && <p className="fine">当前使用：{labels[saved.provider]}</p>}
-    <form onSubmit={event => { event.preventDefault(); void save(); }}>
+    <form onChange={() => { draftEdited.current = true; }} onSubmit={event => { event.preventDefault(); void save(); }}>
       <SelectField label="生图渠道" aria-label="生图渠道" value={provider} disabled={!saved || pending} onChange={event => choose(event.target.value as ImageProvider)}>
         {Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </SelectField>
@@ -90,7 +91,7 @@ export default function ImageGenerationSettings() {
           {catalog?.models.map(item => <option key={item.id} value={item.id}>{item.name === item.id ? item.id : `${item.name} · ${item.id}`}</option>)}
         </SelectField>
         <p id="magpie-model-status" className="fine" role={catalogError ? "alert" : "status"}>{catalogHint}</p>
-        <p className="fine">当前仅支持完整复刻的手动文生图，使用网关默认尺寸。附图、连续、批量和指定比例暂不可用。连接与保存不会生图；实际生图的提示词交给 Magpie，由所选来源计费。</p>
+        <p className="fine">支持手动、连续与批量生图，可使用网关默认尺寸或指定像素尺寸。附图及具体尺寸是否可用取决于所选模型；目录可见不代表已通过实际生图验证。连接与保存不会生图；生成时提示词和所需图片交给 Magpie，由所选来源计费。</p>
       </>}
       {provider !== "codex" && provider !== "magpie" && <>
         <p id="image-api-help" className="fine">{provider === "openai" ? "需要支持 Images generations / edits 的接口。带参考图时使用 edits；仅提供聊天接口的服务不适用。" : "需要支持 generateContent 图片输出的 Gemini 模型。"} 地址须包含版本路径，例如 {provider === "openai" ? "https://api.openai.com/v1" : "https://generativelanguage.googleapis.com/v1beta"}。</p>

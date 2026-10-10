@@ -4,9 +4,12 @@ import { browser } from "wxt/browser";
 import { bridge as fetchBridge, BridgeError } from "../lib/bridge";
 import { operationFor, allowsOperation, messageSource, PORT_KEEP_ALIVE } from "../lib/operation-policy";
 import { captureImage } from "../lib/capture";
+import { validImageSizeRequest } from "../lib/image-size.mjs";
+import { validGenerationRatio } from "../lib/generation-session";
 import type {
   ImageTarget,
   AspectRatio,
+  ImageSize,
   CollectionResult,
   Job,
   Mode,
@@ -168,8 +171,14 @@ export default defineBackground(() => {
     if (typeof id !== "string" || !/^[\da-f]{64}$/.test(id)) throw new Error("无效项目");
     return bridge<Selection>(`/projects/${id}/reference`, token);
   };
-  const start = async (id: string, mode: Mode, referenceJobId?: string, reenact?: SubjectInput, projectId?: string, instruction?: string, inputRevision?: number, sessionIds?: string[], signal?: AbortSignal, referenceIndex?: number, generation?: { language: "zh" | "en"; aspectRatio?: AspectRatio }) => {
+  const start = async (id: string, mode: Mode, referenceJobId?: string, reenact?: SubjectInput, projectId?: string, instruction?: string, inputRevision?: number, sessionIds?: string[], signal?: AbortSignal, referenceIndex?: number, generation?: { language: "zh" | "en"; aspectRatio?: AspectRatio; imageSize?: ImageSize }) => {
     if (selecting) throw new Error("正在处理图片，请稍候");
+    if (generation !== undefined) {
+      if (!generation || typeof generation !== "object" || Array.isArray(generation) || Object.keys(generation).some(key => !["language", "aspectRatio", "imageSize"].includes(key))
+        || !["zh", "en"].includes(generation.language) || !validGenerationRatio(generation.aspectRatio) || !validImageSizeRequest(generation.imageSize)
+        || (generation.aspectRatio !== undefined && generation.imageSize !== undefined)) throw new Error("无效连续生图参数");
+      generation = { language: generation.language, ...(generation.aspectRatio ? { aspectRatio: { ...generation.aspectRatio } } : {}), ...(generation.imageSize ? { imageSize: { ...generation.imageSize } } : {}) };
+    }
     selecting = true;
     try {
       const stored = (await browser.storage.local.get([
@@ -355,10 +364,11 @@ export default defineBackground(() => {
           new Set(message.projects.map((item: any) => item.projectId)).size !== message.projects.length) throw new Error("无效批量项目");
         const projects = message.projects.map(({ projectId, inputRevision }: { projectId: string; inputRevision: number }) => ({ projectId, inputRevision }));
         if (message.type === "alchemy:batch-preview") return bridge("/batches/preview", token, { projects }, signal);
-        const { requestId, language, aspectRatio } = message;
+        const { requestId, language, aspectRatio, imageSize } = message;
         if (typeof requestId !== "string" || !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(requestId) || !["zh", "en"].includes(language) ||
+          !validImageSizeRequest(imageSize) || (imageSize !== undefined && aspectRatio !== undefined) ||
           (aspectRatio !== undefined && (!aspectRatio || ![aspectRatio.width, aspectRatio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000) || aspectRatio.width / aspectRatio.height < 1 / 20 || aspectRatio.width / aspectRatio.height > 20))) throw new Error("无效批量参数");
-        const batch = await bridge("/batches", token, { requestId, projects, language, ...(aspectRatio ? { aspectRatio: { width: aspectRatio.width, height: aspectRatio.height } } : {}) }, signal);
+        const batch = await bridge("/batches", token, { requestId, projects, language, ...(aspectRatio ? { aspectRatio: { width: aspectRatio.width, height: aspectRatio.height } } : {}), ...(imageSize ? { imageSize: { ...imageSize } } : {}) }, signal);
         void reminders.wake();
         return batch;
       }
@@ -559,6 +569,12 @@ export default defineBackground(() => {
         }
         return bridge(`/jobs/${message.id}/prompt`, token, edits);
       }
+      case "alchemy:save-generation": {
+        if (![message.jobId, message.generationId].every(id => typeof id === "string" && /^[\da-f-]{36}$/.test(id))) throw new Error("无效生图记录");
+        const job = await bridge(`/jobs/${message.jobId}/generations/${message.generationId}/save`, token, {});
+        void reminders.wake();
+        return job;
+      }
       case "alchemy:generate":
       case "alchemy:generation-cancel":
       case "alchemy:generation-reference":
@@ -569,7 +585,8 @@ export default defineBackground(() => {
         const path = `/jobs/${message.id}/generations`;
         if (message.type === "alchemy:generate") {
           if (!["zh", "en"].includes(message.language)) throw new Error("无效提示词语言");
-          const { aspectRatio } = message;
+          const { aspectRatio, imageSize } = message;
+          if (!validImageSizeRequest(imageSize) || (imageSize !== undefined && aspectRatio !== undefined)) throw new Error("像素尺寸格式无效；不能同时填写比例");
           if (aspectRatio !== undefined && (!aspectRatio || typeof aspectRatio !== "object" || Array.isArray(aspectRatio)
             || Object.keys(aspectRatio).some(key => !["width", "height"].includes(key))
             || ![aspectRatio.width, aspectRatio.height].every(value => Number.isInteger(value) && value >= 1 && value <= 10000)
@@ -580,7 +597,7 @@ export default defineBackground(() => {
           if (message.subjects !== undefined && (!validSubjects(message.subjects) || message.subjectImage !== undefined))
             throw new Error("请添加 2–6 张有效主体图");
           const subjects = message.subjects?.map(({ id, subjectImage, role, detail }: MultiSubject) => ({ id, subjectImage, role, detail }));
-          const job = await bridge(path, token, { language: message.language, subjectImage: message.subjectImage, subjects, aspectRatio });
+          const job = await bridge(path, token, { language: message.language, subjectImage: message.subjectImage, subjects, aspectRatio, ...(imageSize ? { imageSize: { ...imageSize } } : {}) });
           void reminders.wake();
           return job;
         }

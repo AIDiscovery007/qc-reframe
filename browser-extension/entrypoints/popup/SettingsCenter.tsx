@@ -1,3 +1,4 @@
+import type { ImageSettings } from "../../lib/types";
 import { RecoveryContext } from "./RecoveryAction";
 import { type CliStatus } from "../../lib/codex-status";
 import ServiceRestart from "./ServiceRestart";
@@ -17,13 +18,15 @@ import { logo } from "../../lib/brand";
 const sections = { reminders: "任务提醒", appearance: "界面与动效", models: "插件模型", generation: "生图渠道", connection: "本机连接", storage: "本地数据" };
 export type SettingsSection = keyof typeof sections | "cli" | "pi-cli";
 
-export default function SettingsCenter({ section: selectedSection, onSectionChange: setSection, connected, serviceBusy, onClose, onConnected }: {
+export default function SettingsCenter({ section: selectedSection, onSectionChange: setSection, connected, serviceBusy, onClose, onConnected, onSaveImageSettings, imageSettingsRevision }: {
   section?: SettingsSection;
   onSectionChange(section: SettingsSection): void;
   connected: boolean;
   serviceBusy: boolean;
   onClose(): void;
   onConnected(): void;
+  imageSettingsRevision: number;
+  onSaveImageSettings(settings: Record<string, unknown>): Promise<ImageSettings>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const { preference, reduced } = useMotion();
@@ -77,7 +80,7 @@ export default function SettingsCenter({ section: selectedSection, onSectionChan
           {motionError && <div className="settings-info settings-error" role="alert">{motionError}</div>}
         </section>}
         {section === "models" && <section aria-label="模型设置">{connected ? <AgentSettings onSelected={() => setSection("models")} recoveryAgent={selectedSection === "cli" ? "codex" : selectedSection === "pi-cli" ? "pi" : undefined} loginCommand={cli?.instructions?.loginCommand} serviceBusy={serviceBusy || updating} /> : <><h3>选择创作模型</h3><div className="settings-info">本机服务未连接，恢复后将自动接入。</div><button className="primary" onClick={() => setSection("connection")}>检查本机服务</button></>}</section>}
-        {section === "generation" && (connected ? <ImageGenerationSettings /> : <section><h3>生图渠道</h3><p className="settings-info">本机服务未连接，恢复后将自动接入。</p><button className="primary" onClick={() => setSection("connection")}>检查本机服务</button></section>)}
+        {section === "generation" && (connected ? <ImageGenerationSettings onSave={onSaveImageSettings} settingsRevision={imageSettingsRevision} /> : <section><h3>生图渠道</h3><p className="settings-info">本机服务未连接，恢复后将自动接入。</p><button className="primary" onClick={() => setSection("connection")}>检查本机服务</button></section>)}
         <div hidden={section !== "connection"}><ServiceRestart connected={connected} busy={serviceBusy || updating} onConnected={onConnected} /></div>
         {section === "storage" && <section aria-labelledby="storage-title">
           <h3 id="storage-title">本地数据</h3>

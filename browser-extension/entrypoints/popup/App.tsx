@@ -1,3 +1,8 @@
+import type { ImageSettings } from "../../lib/types";
+import { requestedImageSize, validImageSizeRequest } from "../../lib/image-size.mjs";
+import { inheritedGenerationSize } from "../../lib/generation-size";
+import GenerationSizeFields from "./GenerationSizeFields";
+import GenerationModelField from "./GenerationModelField";
 import { validGenerationRatio } from "../../lib/generation-session";
 import { orderedImageIds } from "../../lib/image-order";
 import { creationContext, emptyCreationState, createInputWriter, resolveCreation, restoredQuickDraft } from "../../lib/creation-context";
@@ -127,8 +132,46 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const [reverseAgent, setReverseAgent] = useState("codex");
   const [modelBusy, setModelBusy] = useState(false);
   const [magpie, setMagpie] = useState(false);
-  const magpieHint = magpie ? "Magpie 当前仅支持完整复刻的手动生图，尺寸使用网关默认；附图、连续和批量暂不可用。" : "";
+  const [generationModel, setGenerationModel] = useState<string>();
+  const magpieHint = magpie ? "Magpie 按所选模型适配尺寸；附图支持取决于所选模型。" : "";
   const [generationReady, setGenerationReady] = useState(false);
+  const [generationSettingsPending, setGenerationSettingsPending] = useState(false);
+  const [generationSettingsError, setGenerationSettingsError] = useState("");
+  const [imageSettingsRevision, setImageSettingsRevision] = useState(0);
+  const generationSettingsSync = useRef({ saving: false });
+  const applyGenerationHealth = (health: { generationProvider?: string; generationReady?: boolean; generationModel?: string | null; model?: string }, snapshot: { saving: boolean }) => {
+    if (snapshot !== generationSettingsSync.current || snapshot.saving) return false;
+    setMagpie(health.generationProvider === "magpie");
+    setGenerationModel(health.generationModel || undefined);
+    setGenerationReady(health.generationReady ?? !!(health.generationModel === undefined ? health.model : health.generationModel));
+    setGenerationSettingsPending(false);
+    setGenerationSettingsError("");
+    return true;
+  };
+  const saveImageSettings = async (settings: Record<string, unknown>) => {
+    if (generationSettingsSync.current.saving) throw new Error("生图设置正在保存，请稍候。");
+    const saving = { saving: true };
+    generationSettingsSync.current = saving;
+    setGenerationSettingsPending(true); setGenerationReady(false); setGenerationSettingsError("");
+    try {
+      const saved = await request<ImageSettings>({ type: "alchemy:image-settings-save", settings });
+      setImageSettingsRevision(value => value + 1);
+      return saved;
+    } finally {
+      if (generationSettingsSync.current === saving) {
+        // Discard polls started before or during the write, including requests still in flight.
+        const refreshing = { saving: false };
+        generationSettingsSync.current = refreshing;
+        try { applyGenerationHealth(await query("/health"), refreshing); }
+        catch {
+          if (generationSettingsSync.current === refreshing) {
+            setGenerationSettingsPending(false);
+            setGenerationSettingsError("无法确认生图渠道状态，请检查本机服务；连接恢复后将自动刷新。");
+          }
+        }
+      }
+    }
+  };
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -177,7 +220,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const inputConflict = !!selection?.inputs && (activeProject?.inputRevision || 0) > (selection.inputRevision || 0);
   const inputBlocked = inputConflict || !draftReady || !connected || busy || savingMode || modelBusy || cliBusy || !!running || loadingProject || restoring;
   const blocked = inputBlocked || !selectedModel;
-  const generationBlocked = inputBlocked || !generationReady || (magpie && preferences.mode !== "recreate");
+  const generationBlocked = inputBlocked || generationSettingsPending || !generationReady;
 
   useEffect(() => {
     setCopied(false);
@@ -374,14 +417,15 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     let fetchedRevision: string | undefined;
     const stop = pollWhileVisible(async () => {
       const revision = projectRevision.current;
+      const generationSnapshot = generationSettingsSync.current;
       let delay = 10_000;
       try {
         const health = await query<{ generationProvider?: string; generationReady?: boolean; generationModel?: string | null; agent?: string; ready: boolean; serviceReady?: boolean; skill: string; active: number; visibleActive?: number; hiddenProjectIds?: string[]; projectsRevision?: string; modelBusy?: boolean; cliBusy?: boolean; model?: string; cli?: CliStatus | null }>("/health");
-        if (cancelled) return delay;
+        if (cancelled || !applyGenerationHealth(health, generationSnapshot)) return delay;
         setConnected(health.serviceReady ?? true);
         setPreferences(value => value.paired ? value : { ...value, paired: true });
-        setServiceBusy(health.active > 0);
         if (revision === projectRevision.current) {
+          setServiceBusy(health.active > 0);
           setActiveCount(health.visibleActive ?? health.active);
           setHiddenProjectIds(health.hiddenProjectIds || []);
         }
@@ -390,8 +434,6 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         setModelBusy(!!health.modelBusy);
         setReverseAgent(health.agent || "codex");
         setSelectedModel(health.model || null);
-        setMagpie(health.generationProvider === "magpie");
-        setGenerationReady(health.generationReady ?? !!(health.generationModel === undefined ? health.model : health.generationModel));
         setConnectionText(health.ready ? `已连接 · ${health.skill}` : "未找到图片逆向技能");
         delay = health.active || health.modelBusy || health.cliBusy ? 2000 : 10_000;
         // An older bridge must report an upgrade need instead of silently showing an empty library.
@@ -407,7 +449,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           }
         }
       } catch (e) {
-        if (!cancelled && revision === projectRevision.current) { setConnected(false); setConnectionText((e as Error).message); }
+        if (!cancelled && revision === projectRevision.current && generationSnapshot === generationSettingsSync.current && !generationSnapshot.saving) { setConnected(false); setConnectionText((e as Error).message); }
       }
       return delay;
     });
@@ -565,6 +607,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   };
   const updateJob = (updated: Job) => {
     projectRevision.current++;
+    if (updated.status === "running" || updated.autoGeneration?.status === "pending" || updated.generations?.some(item => item.status === "running")) setServiceBusy(true);
     setRefreshNonce(value => value + 1);
     setProject((current) => current && current.id === updated.projectId
       ? { ...current, jobs: [updated, ...current.jobs.filter((item) => item.id !== updated.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt)) }
@@ -577,18 +620,19 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   };
   const startPending = useRef(false);
   const [continuousJobId, setContinuousJobId] = useState("");
-  const [chainRatio, setChainRatio] = useState<{ key: string; ratio?: AspectRatio }>();
+  const [chainSize, setChainSize] = useState<{ key: string; pixelSize: boolean; size?: AspectRatio }>();
   const start = async (mode: Mode = preferences.mode, reenact?: SubjectInput, generate = false) => {
     if (!selection || !displayImage || !activeProject || blocked || startPending.current) return;
     startPending.current = true;
     const revision = selectionRevision.current, context = referenceContext.current;
+    const size = magpie ? requestedImageSize(targetSize) : targetSize;
     setBusy(true);
     setError("");
     try {
       const value = await request<{ selection: Selection; currentSelection: Selection; job: Job }>({
         type: "alchemy:start", referenceIndex: contextFor(mode).referenceIndex, id: selection.id, projectId: activeProject.id, mode, reenact, instruction: taskInstruction(mode), ...(mode === "session" ? { sessionIds: selectedSessions().map(item => item.id) } : {}),
         inputRevision: selection.inputRevision || 0, referenceJobId: modeJob(mode)?.id,
-        ...(generate ? { generation: { language: lang, aspectRatio: ratio } } : {}),
+        ...(generate ? { generation: { language: lang, ...(size ? magpie ? { imageSize: { ...size } } : { aspectRatio: { ...size } } : {}) } } : {}),
       });
       setReferences(items => ({ ...items, [value.job.id]: value.selection }));
       updateJob(value.job);
@@ -775,9 +819,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     : !taskInstruction(preferences.mode).trim() ? "填写任务指令后可生成提示词。"
     : "";
   const reverseDisabled = blocked || !!reverseHint || !!promptDraft;
-  const ratio = workspace ? chainRatio?.key === drawerKey ? chainRatio.ratio : undefined
-    : job?.generations?.length ? job.generations.at(-1)?.aspectRatio : job?.autoGeneration?.aspectRatio;
-  const chainDisabled = magpie || reverseDisabled || generationBlocked || (preferences.mode === "style" && !subjectImage("style")) || !validGenerationRatio(ratio);
+  const inheritedSize = inheritedGenerationSize(magpie, (targetGeneration?.jobId === job?.id ? job?.generations?.find(item => item.id === targetGeneration?.id) : undefined) || job?.generations?.at(-1) || job?.autoGeneration);
+  const targetSize = workspace && chainSize?.key === drawerKey && chainSize.pixelSize === magpie ? chainSize.size : inheritedSize;
+  const chainDisabled = reverseDisabled || generationBlocked || (preferences.mode === "style" && !subjectImage("style")) || !(magpie ? validImageSizeRequest(targetSize) : validGenerationRatio(targetSize));
   const reverse = (generate = false) => {
     if (generate ? chainDisabled : reverseDisabled) return;
     const mode = preferences.mode;
@@ -815,9 +859,12 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     if (!workspace || !narrow || !drawerOpen) return;
     if (editor.current?.contains(document.activeElement) || document.activeElement === document.body) resultReturn.current?.focus({ preventScroll: true });
   }, [workspace, narrow, drawerOpen, resultPane]);
-  const generationPanel = activeJob?.result ? <GenerationPanel gatewayDefaultSize={magpie} key={activeJob.id} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace} onAspectRatioChange={ratio => setChainRatio({ key: drawerKey, ratio })}
+  const generationModelBusy = serviceBusy || busy || Object.values(drawers).some(item => item.pending)
+    || !!project?.jobs.some(item => item.status === "running" || item.autoGeneration?.status === "pending" || item.generations?.some(generation => generation.status === "running"));
+  const generationModelControl = workspace && magpie ? <GenerationModelField model={generationModel} settingsRevision={imageSettingsRevision} disabled={!connected || generationSettingsPending || generationModelBusy} onSave={saveImageSettings} /> : undefined;
+  const generationPanel = activeJob?.result ? <GenerationPanel modelControl={generationModelControl} generationModel={generationModel} pixelSize={magpie} key={`${activeJob.id}:${magpie}`} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace} onAspectRatioChange={size => setChainSize({ key: drawerKey, pixelSize: false, size })} onImageSizeChange={size => setChainSize({ key: drawerKey, pixelSize: true, size })}
                   drawerOpen={drawerOpen} requestError={drawer.error} requestPending={drawer.pending}
-                  onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabledReason={magpie && activeJob.mode !== "recreate" ? magpieHint : workspace ? promptDraft ? "编辑未保存，请保存或取消提示词修改。" : needsPrompt ? reverseHint || genericHint || "输入已修改，请更新提示词。" : "" : ""} disabled={generationBlocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
+                  onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabledReason={workspace ? promptDraft ? "编辑未保存，请保存或取消提示词修改。" : needsPrompt ? reverseHint || genericHint || "输入已修改，请更新提示词。" : "" : ""} disabled={generationBlocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
                   subjectImage={(activeJob.mode === "recreate" || activeJob.mode === "session") ? undefined : subjectImage(activeJob.mode)}
                   inputPreview={multiPreview}
                   subjects={activeJob.mode === "multi-reenact" ? multiSubjects : undefined}
@@ -913,7 +960,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         onUndo={() => { if (visibilityNotice) void setProjectsHidden(visibilityNotice.ids, !visibilityNotice.hidden, true).catch(error => setVisibilityError(error.message)); }} />}
       {workspace && sessionPicker === drawerKey && preferences.mode === "session" && <SessionPicker value={selectedSessions()} onClose={() => setSessionPicker(undefined)} onConfirm={ids => saveInput("session", undefined, taskInstruction("session"), "", [], ids)} />}
       {workspace && newProjectOpen && <NewProject busy={busy} error={error} onClose={() => setNewProjectOpen(false)} onUpload={() => referenceInput.current?.click()} />}
-      {workspace && settings && <SettingsCenter section={settingsSection} onSectionChange={setSettingsSection} connected={connected} serviceBusy={serviceBusy} onClose={() => setSettings(false)} onConnected={() => setPreferences(value => ({ ...value, paired: true }))} />}
+      {workspace && settings && <SettingsCenter section={settingsSection} onSectionChange={setSettingsSection} connected={connected} serviceBusy={serviceBusy} onClose={() => setSettings(false)} onConnected={() => setPreferences(value => ({ ...value, paired: true }))} onSaveImageSettings={saveImageSettings} imageSettingsRevision={imageSettingsRevision} />}
       {tasksOpen && <TaskCenter workspace={workspace} visibilityError={visibilityError} unread={reminders.unread} onNoticeOpen={openNotice} showHidden={showHidden} hiddenProjectIds={hiddenProjectIds} busy={busy} onToggleHidden={() => void toggleHiddenProjects()} onClose={() => setTasksOpen(false)} onUpdate={updateJob} onOpen={async (_projectId, _mode, jobId, generationId) => {
         await noticeNavigation.current?.(new URLSearchParams({ task: jobId, ...(generationId ? { generation: generationId } : {}) }));
       }} />}
@@ -936,17 +983,18 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         }} /> : <div className={workspace ? "workspace-body" : undefined} data-results-open={drawerOpen} data-history={historyOpen}>
       <div ref={editor} className={workspace ? "workspace-editor" : undefined} inert={workspace && narrow && drawerOpen}>
       {!workspace && draftError && <p className="error" role="alert">{draftError}</p>}
+      {generationSettingsError && <p className="error" role="alert">{generationSettingsError}</p>}
       {magpieHint && !galleryOpen && <p className="hint" role="status">{magpieHint}</p>}
       <main className={workspace && !historyOpen && !galleryOpen && selection ? "canvas-main" : undefined}>
         {historyOpen ? (
-          <ProjectHistory hiddenProjectIds={hiddenProjectIds} batchDisabled={magpie || !connected || !selectedModel || !generationReady || modelBusy || cliBusy} onTasks={() => setTasksOpen(true)} searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
+          <ProjectHistory generationModel={generationModel} hiddenProjectIds={hiddenProjectIds} pixelSize={magpie} batchDisabled={!connected || !selectedModel || generationSettingsPending || !generationReady || modelBusy || cliBusy} onTasks={() => setTasksOpen(true)} searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
         ) : workspace && selection ? <CanvasWorkspace onPromptRevealed={() => setTargetPrompt(undefined)} revealPrompt={targetPrompt?.jobId === activeJob?.id ? targetPrompt?.request : undefined} contextKey={drawerKey} mode={preferences.mode}
           sessionTitle={selectedSessions().length === 1 ? selectedSessions()[0]!.title : selectedSessions().length ? `已选 ${selectedSessions().length} 个会话` : undefined} onSessions={() => setSessionPicker(drawerKey)}
           image={displayImage} subjectImage={subjectImage(preferences.mode)} subjects={multiSubjects}
           referenceIndex={contextFor(preferences.mode).referenceIndex} onImageOrder={changeImageOrder}
           selected={canvasSelections[subjectKey(preferences.mode)] || "reference"} onSelect={id => setCanvasSelections(items => ({ ...items, [subjectKey(preferences.mode)]: id }))}
           instruction={taskInstruction(preferences.mode)} onInstruction={value => changeInstruction(preferences.mode, value)}
-          disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy} reverseDisabled={reverseDisabled} running={!!running} continuous={!!job?.autoGeneration || job?.id === continuousJobId} submitting={busy && startPending.current} cancelling={cancelling}
+          disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy || !draftReady} reverseDisabled={reverseDisabled} running={!!running} continuous={!!job?.autoGeneration || job?.id === continuousJobId} submitting={busy && startPending.current} cancelling={cancelling}
           status={reverseStatus || (promptDraft ? "编辑未保存" : reverseHint || genericHint || (preferences.mode === "session" && job?.sessionContext?.attachmentCount ? `会话含 ${job.sessionContext.attachmentCount} 个附件，未读取附件内容` : "") || (job?.status === "cancelled" ? "已取消" : ""))}
           error={referenceError || subjectError || selection.error || job?.error || job?.autoGeneration?.error} errorTaskId={!referenceError && !subjectError && !selection.error && job?.status === "failed" ? job.id : undefined} stale={instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt}
           hasPrompt={!!result} promptEditing={!!promptDraft} reduced={reduced} versions={versionSelector} actionsTarget={reverseActions}
@@ -961,10 +1009,10 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           prompt={result && activeJob && <PromptEditor taskId={activeJob.id} sheet result={result} draft={promptDraft} lang={lang} copied={copied} saving={!!savingPrompt} disabled={!connected} versionSelector={null} onExport={exportResult}
             onLanguage={setLang} onCopy={copy} onEdit={() => setPromptDrafts(items => ({ ...items, [activeJob.id]: { promptZh: result.promptZh, promptEn: result.promptEn, negativePrompt: result.negativePrompt } }))}
             onDraft={draft => setPromptDrafts(items => ({ ...items, [activeJob.id]: draft }))} onSave={savePrompt} onCancel={() => discardPrompt(activeJob.id)} />}
-        /> : !workspace ? <QuickWorkspace gatewayDefaultSize={magpie} contextKey={drawerKey} revealPrompt={targetPrompt?.jobId === job?.id ? targetPrompt?.request : undefined} targetGeneration={targetGeneration?.jobId === job?.id ? targetGeneration?.id : undefined} selection={displaySelection} title={activeProject?.title} mode={preferences.mode}
+        /> : !workspace ? <QuickWorkspace pixelSize={magpie} contextKey={drawerKey} revealPrompt={targetPrompt?.jobId === job?.id ? targetPrompt?.request : undefined} targetGeneration={targetGeneration?.jobId === job?.id ? targetGeneration?.id : undefined} selection={displaySelection} title={activeProject?.title} mode={preferences.mode}
           referenceIndex={contextFor(preferences.mode).referenceIndex} onImageOrder={(index, onSaved) => changeImageOrder(index, undefined, onSaved)}
           subject={subjectImage(preferences.mode)} instruction={taskInstruction(preferences.mode)} job={job}
-          disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy} reverseDisabled={reverseDisabled}
+          disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy || !draftReady} reverseDisabled={reverseDisabled}
           status={reverseStatus || reverseHint} stale={instructionStale || (preferences.mode === "multi-reenact" && multiStale)} cancelling={cancelling} copied={copied} lang={lang} versions={versionSelector}
           onMode={mode => void saveMode(mode)} onSubject={changeSubject}
           onAvailability={available => setSubjectUnavailable(items => ({ ...items, [subjectKey(preferences.mode)]: !available }))}
@@ -972,7 +1020,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           onRotateReference={image => applyReferenceRotation(image, preferences.mode, taskInstruction(preferences.mode))}
           onSwap={() => { if (preferences.mode !== "recreate" && preferences.mode !== "session") void swapImages(preferences.mode, taskInstruction(preferences.mode)); }}
           onReverse={() => reverse()} onGenerate={() => reverse(true)} chainDisabled={chainDisabled} continuous={!!job?.autoGeneration || job?.id === continuousJobId} submitting={busy && startPending.current} onCancel={cancel} onCopy={copy} onLanguage={setLang} onWorkspace={() => void openWorkspace()} onUpdate={updateJob} onGenerationViewUpdate={revealGeneratedImage}
-          generationHint={magpie && preferences.mode !== "recreate" ? magpieHint : promptDraft ? "未保存的提示词请在工作台继续编辑" : instructionStale ? "输入已修改，请重新生成提示词" : reverseStatus || (!connected ? "请先连接服务" : !generationReady ? "请在工作台配置生图渠道" : "")}
+          generationHint={promptDraft ? "未保存的提示词请在工作台继续编辑" : instructionStale ? "输入已修改，请重新生成提示词" : reverseStatus || (!connected ? "请先连接服务" : !generationReady ? "请在工作台配置生图渠道" : "")}
           generationDisabled={generationBlocked || !!promptDraft || needsPrompt || !!subjectUnavailable[subjectKey(preferences.mode)]}
         /> : <section className="empty"><span className="empty-mark"><Icon name="image" /></span><h1>选择一张参考图</h1></section>}
 
@@ -984,7 +1032,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       {workspace && !historyOpen && !galleryOpen && selection && <div className="canvas-primary-actions" role="group" aria-label="生成操作">
         <div className="canvas-reverse-actions" ref={setReverseActions} />
         <div className="canvas-generation-actions" ref={setGenerationActions} role="group" aria-label="图片生成操作">
-          {!result && <button className="primary generate-button" disabled><Icon name="image" />生成图片</button>}
+          {!result && <><GenerationSizeFields modelControl={generationModelControl} generationModel={generationModel} key={`${drawerKey}:${magpie}`} pixelSize={magpie} workspace value={targetSize} onChange={size => setChainSize({ key: drawerKey, pixelSize: magpie, size })} disabled={blocked || !!running} /><button className="primary generate-button" disabled><Icon name="image" />生成图片</button></>}
         </div>
       </div>}
       </div>

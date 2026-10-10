@@ -72,6 +72,8 @@
 .canvas-generation-actions { display:contents; }
 .canvas-generation-actions .generation-ratio { grid-column:2;grid-row:1;justify-self:end;margin:0;min-width:0; }
 .canvas-generation-actions .generation-ratio-fields { gap:8px; }
+.canvas-generation-actions .generation-ratio:has(.generation-model-field) { width:100%;max-width:580px; }
+.canvas-generation-actions .generation-ratio-fields:has(.generation-model-field) { flex-wrap:wrap; }
 .canvas-generation-actions .generation-ratio .select-field { flex:0 0 104px;gap:3px;font-size:10px; }
 .canvas-generation-actions .generation-ratio .select-control select { height:34px;font-size:11px; }
 .canvas-generation-actions .custom-ratio { flex:1;max-width:200px;gap:4px; }
@@ -129,9 +131,14 @@
  .canvas-primary-actions { padding-inline:14px;gap:6px; }
  .canvas-generation-actions .generation-ratio .select-field { flex-basis:82px; }
  .workspace-app .canvas-primary-actions .canvas-generate,.workspace-app .canvas-generation-actions .generate-button { font-size:10px;padding-inline:8px;gap:5px; }
- .canvas-primary-actions:has(.custom-ratio) .generation-ratio { grid-column:1/-1;justify-self:stretch; }
+ .canvas-primary-actions:has(.custom-ratio,.generation-model-field) .generation-ratio { grid-column:1/-1;justify-self:stretch;max-width:none; }
  .canvas-primary-actions:has(.custom-ratio) .select-field { flex-basis:104px; }
- .canvas-primary-actions:has(.custom-ratio) .canvas-reverse-actions,.workspace-app .canvas-primary-actions:has(.custom-ratio) .generate-button { grid-row:2; }
+ .canvas-primary-actions:has(.custom-ratio,.generation-model-field) .canvas-reverse-actions,.workspace-app .canvas-primary-actions:has(.custom-ratio,.generation-model-field) .generate-button { grid-row:2; }
+ .canvas-generation-actions .generation-model-field { max-width:none;flex-basis:120px; }
+ .canvas-generation-actions .generation-ratio-fields:has(.generation-model-field) .custom-ratio { flex-basis:100%;max-width:none; }
 }
 
 .canvas-generate[aria-disabled="true"] { opacity:.35;cursor:default; }
+
+.canvas-generation-actions .generation-ratio[data-pixel-size] .select-field { flex-basis: 160px; }
+.canvas-generation-actions .generation-ratio[data-pixel-size]:has(.custom-ratio) .select-field { flex-basis: 104px; }

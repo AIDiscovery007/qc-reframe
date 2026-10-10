@@ -51,7 +51,7 @@ export type Result = {
 export type Job = {
   agent?: "codex" | "pi";
   provider?: string;
-  autoGeneration?: { language: "zh" | "en"; aspectRatio?: AspectRatio; status: "pending" | "started" | "failed" | "cancelled"; generationId?: string; error?: string };
+  autoGeneration?: { submittedImageSize?: ImageSize | null; sizeRule?: string; provider?: ImageProvider; language: "zh" | "en"; aspectRatio?: AspectRatio; imageSize?: ImageSize; status: "pending" | "started" | "failed" | "cancelled"; generationId?: string; error?: string };
   referenceIndex?: number;
   sessionContext?: SessionContext;
   id: string;
@@ -97,15 +97,22 @@ export type ImageThumbnail = {
 export type Project = ProjectSummary & { jobs: Job[] };
 export type ProjectPage = { items: ProjectSummary[]; total: number; page: number; pageSize: number; revision: string };
 export type AspectRatio = { width: number; height: number };
+export type ImageSize = { width: number; height: number };
 export type BatchProject = { projectId: string; inputRevision: number };
 export type BatchPreview = { model: string; items: (BatchProject & { title: string; eligible: boolean; error?: string })[] };
 export type Batch = {
-  id: string; createdAt: string; language: "zh" | "en"; aspectRatio?: AspectRatio; model: string;
+  submittedImageSize?: ImageSize | null;
+  sizeRule?: string;
+  id: string; createdAt: string; language: "zh" | "en"; aspectRatio?: AspectRatio; imageSize?: ImageSize; provider?: ImageProvider; model: string;
   items: { projectId: string; title: string; status: "queued" | "running" | "completed" | "failed" | "cancelled" | "rejected"; stage: string; error?: string; jobId?: string; generationId?: string }[];
 };
 export type MagpieModels = { version: string; models: { id: string; name: string; inputImages: boolean }[] };
 export type Generation = {
-  sizeMode?: "gateway-default";
+  submittedImageSize?: ImageSize | null;
+  sizeRule?: string;
+  sizeMode?: "gateway-default" | "explicit";
+  imageSize?: ImageSize;
+  resultSavePending?: boolean;
   gatewayReportedModel?: string;
   outputSize?: { width: number; height: number };
   provider?: ImageProvider;

@@ -14,6 +14,8 @@ export const rules = [
 ];
 
 export const components = [
+  { name: 'GenerationModelField', source: popup + 'GenerationModelField.tsx', use: 'Magpie 工作台目标尺寸旁的目录模型选择；保存全局设置并跟随健康快照，失败保留当前选择。' },
+  { name: 'GenerationSizeFields', source: popup + 'GenerationSizeFields.tsx', use: '原尺寸位置按生图模型展示预设；保留原始像素意图和历史提交快照，比例渠道独立。' },
   { name: 'ImageGenerationSettings', source: popup + 'ImageGenerationSettings.tsx', use: '设置中的生图渠道、私有凭据及保存反馈。' },
   { name: 'AgentCliSettings', source: popup + 'AgentCliSettings.tsx', use: '按管理目标读取CLI状态、安装与更新，不改变逆向Agent，迟到响应按目标隔离。' },
   { name: 'AgentSettings', source: popup + 'AgentSettings.tsx', use: '设置中的原生 Agent 单选卡片，独立模型、失败保留与旧服务回退。' },
@@ -28,6 +30,12 @@ export const components = [
 
 const wide = { width: 1440, height: 1000 };
 export const scenarios = [
+  ...['codex-to-magpie-manual', 'codex-to-magpie-continuous', 'codex-to-magpie-batch', 'magpie-to-codex-manual', 'magpie-to-codex-continuous', 'magpie-to-codex-batch', 'stale-health', 'rapid-switch', 'reopen-draft', 'snapshot'].map(flow => ({
+    id: `image-settings-sync-${flow}`, surface: 'workspace',
+    path: `/workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=${flow}&generationDelay=60000&reverseDelay=300`,
+    viewport: wide, regression: 'imageSettingsSyncRegression', rules: [],
+  })),
+  { id: 'generation-readiness-popup-ready-delayed', surface: 'popup', path: '/popup.html?state=alignment&mode=recreate&generationReadinessRegression=ready&quickDraftDelay=1000&generationDelay=60000', viewport: { width: 360, height: 740 }, regression: 'generationReadinessRegression', rules: [] },
   ...[360, 650, 651, 877, 1440].map(width => ({
     id: `batch-toolbar-${width}`, surface: 'workspace', path: '/workspace.html?state=library&count=24',
     viewport: { width, height: 1034 }, regression: 'batchToolbar', batchToolbar: true, rules: [],
@@ -91,6 +99,20 @@ export const scenarios = [
 ];
 
 export const exampleScenarios = [
+  ...['switch', 'empty', 'narrow', 'directory-failure', 'save-failure', 'stale-directory', 'stale-health', 'snapshot', 'reverse-busy', 'background-busy'].map(flow => ({
+    example: 'workspace-image-model', title: `工作台生图模型：${flow}`, states: [flow], components: ['GenerationModelField'],
+    steps: '合成消息自动运行模型切换、设置同步、尺寸草稿保留、失败重试与迟到响应反例；不调用真实模型。',
+    id: `workspace-image-model-${flow}`, surface: 'workspace',
+    path: `/workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=${flow}&generationDelay=60000&reverseDelay=60000`,
+    viewport: flow === 'narrow' ? { width: 360, height: 740 } : wide, regression: 'workspaceImageModelRegression', rules: [],
+  })),
+  ...['manual', 'custom', 'custom-invalid', 'continuous', 'batch', 'quick', 'history', 'save-retry', 'save-asset', 'gemini-ratios', 'unknown-auto', 'model-switch', 'batch-snapshot'].map(flow => ({
+    example: 'magpie-workflows', title: `Magpie 生图工作流：${flow}`, states: ['saved', 'failed', 'narrow'], components: ['GenerationSizeFields'],
+    steps: '合成消息自动运行尺寸选择、快照提交或保存恢复反例；不调用真实模型。',
+    id: `magpie-workflows-${flow}`, surface: flow === 'quick' ? 'popup' : 'workspace',
+    path: `/${flow === 'quick' ? 'popup' : 'workspace'}.html?state=${flow.startsWith('batch') ? 'library' : 'projects'}&count=4&mode=style&magpieWorkflowsRegression=${flow}${flow === 'gemini-ratios' ? '&imageModel=fixture/gemini-3-pro-image' : flow === 'unknown-auto' ? '&imageModel=fixture/unknown' : ''}&generationDelay=1000&reverseDelay=300`,
+    viewport: ['quick', 'custom', 'custom-invalid', 'gemini-ratios', 'unknown-auto', 'model-switch'].includes(flow) ? { width: 360, height: 740 } : wide, regression: 'magpieWorkflowsRegression', rules: [],
+  })),
   ...['wide', 'narrow', 'legacy'].map(variant => ({ id: `image-settings-${variant}`, surface: 'workspace', path: `/workspace.html?state=library&imageSettingsRegression=${variant}`, viewport: variant === 'narrow' ? { width: 360, height: 740 } : wide, regression: 'imageSettingsRegression', example: 'image-settings', title: '生图渠道设置', states: ['saved', 'failure', 'narrow'], components: ['ImageGenerationSettings'], steps: '打开设置保存直连API与Magpie，检查连接失败、旧目录迟到、保存恢复、重开与密钥不回显。', rules: [] })),
   { id: 'example-workspace-empty', title: '工作台新项目空态', surface: 'workspace', path: '/workspace.html?state=empty', viewport: wide, example: 'empty', states: ['empty'], components: ['CanvasWorkspace'], steps: '首次打开直接查看尚未选择参考图的工作台。' },
   { id: 'example-popup-empty', title: '轻量上传空态', surface: 'popup', path: '/popup.html?state=empty', viewport: { width: 400, height: 740 }, example: 'empty', states: ['empty'], components: ['QuickWorkspace'], steps: '查看上传入口；没有项目时不显示任务提交区。' },
