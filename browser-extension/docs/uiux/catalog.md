@@ -20,7 +20,8 @@
 
 | 组件 | 用法 | 源码 |
 | --- | --- | --- |
-| GenerationSizeFields | 原尺寸位置按生图模型展示预设与适配预览；保留原始像素意图和历史提交快照，比例渠道独立。 | [browser-extension/entrypoints/popup/GenerationSizeFields.tsx](../../../browser-extension/entrypoints/popup/GenerationSizeFields.tsx) |
+| GenerationModelField | Magpie 工作台目标尺寸旁的目录模型选择；保存全局设置并跟随健康快照，失败保留当前选择。 | [browser-extension/entrypoints/popup/GenerationModelField.tsx](../../../browser-extension/entrypoints/popup/GenerationModelField.tsx) |
+| GenerationSizeFields | 原尺寸位置按生图模型展示预设；保留原始像素意图和历史提交快照，比例渠道独立。 | [browser-extension/entrypoints/popup/GenerationSizeFields.tsx](../../../browser-extension/entrypoints/popup/GenerationSizeFields.tsx) |
 | ImageGenerationSettings | 设置中的生图渠道、私有凭据及保存反馈。 | [browser-extension/entrypoints/popup/ImageGenerationSettings.tsx](../../../browser-extension/entrypoints/popup/ImageGenerationSettings.tsx) |
 | AgentCliSettings | 按管理目标读取CLI状态、安装与更新，不改变逆向Agent，迟到响应按目标隔离。 | [browser-extension/entrypoints/popup/AgentCliSettings.tsx](../../../browser-extension/entrypoints/popup/AgentCliSettings.tsx) |
 | AgentSettings | 设置中的原生 Agent 单选卡片，独立模型、失败保留与旧服务回退。 | [browser-extension/entrypoints/popup/AgentSettings.tsx](../../../browser-extension/entrypoints/popup/AgentSettings.tsx) |
@@ -120,6 +121,14 @@
 | automatic-connection-popup | popup 320×740 | /popup.html?state=empty&connectionRegression=1 | connectionRegression |
 | settings-recovery-narrow | workspace 320×740 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
 | settings-recovery | workspace 1440×1000 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
+| workspace-image-model-switch | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=switch&generationDelay=60000 | workspaceImageModelRegression |
+| workspace-image-model-empty | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=empty&generationDelay=60000 | workspaceImageModelRegression |
+| workspace-image-model-narrow | workspace 360×740 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=narrow&generationDelay=60000 | workspaceImageModelRegression |
+| workspace-image-model-directory-failure | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=directory-failure&generationDelay=60000 | workspaceImageModelRegression |
+| workspace-image-model-save-failure | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=save-failure&generationDelay=60000 | workspaceImageModelRegression |
+| workspace-image-model-stale-directory | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=stale-directory&generationDelay=60000 | workspaceImageModelRegression |
+| workspace-image-model-stale-health | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=stale-health&generationDelay=60000 | workspaceImageModelRegression |
+| workspace-image-model-snapshot | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=snapshot&generationDelay=60000 | workspaceImageModelRegression |
 | magpie-workflows-manual | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=manual&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
 | magpie-workflows-custom | workspace 360×740 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=custom&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
 | magpie-workflows-custom-invalid | workspace 360×740 | /workspace.html?state=projects&count=4&mode=style&magpieWorkflowsRegression=custom-invalid&generationDelay=1000&reverseDelay=300 | magpieWorkflowsRegression |
@@ -186,7 +195,7 @@
 | --ease-out | cubic-bezier(.23, 1, .32, 1) | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):24 |
 | --font | "Space Grotesk", "Trebuchet MS", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):25 |
 | --select-inset | 12px | .select-control | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):143 |
-| --prompt-editor-height | max(240px,min(56dvh,calc(100dvh - 420px),600px)) | .workspace-app | [browser-extension/entrypoints/workspace/canvas-workspace.css](../../../browser-extension/entrypoints/workspace/canvas-workspace.css):110 |
+| --prompt-editor-height | max(240px,min(56dvh,calc(100dvh - 420px),600px)) | .workspace-app | [browser-extension/entrypoints/workspace/canvas-workspace.css](../../../browser-extension/entrypoints/workspace/canvas-workspace.css):112 |
 | --result-drawer-width | 50cqw | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |
 | --canvas-label-height | 26px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |
 | --canvas-strip-height | 56px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |

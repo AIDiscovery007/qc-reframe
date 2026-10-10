@@ -1,6 +1,8 @@
 .generation-ratio { margin: 12px 0; }
 .generation-ratio-fields { display: flex; align-items: end; gap: 12px; }
 .generation-ratio .select-field { flex: 1; margin: 0; }
+.generation-model-field { flex: 1 1 180px; min-width: 120px; max-width: 260px; }
+.generation-model-field .error { margin: 5px 0 0; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
 .custom-ratio { display: flex; align-items: end; gap: 6px; flex: 1; min-width: 0; }
 .custom-ratio label { display: grid; gap: 8px; min-width: 0; flex: 1; font-size: 11px; font-weight: 600; }
 .custom-ratio input { width: 100%; min-width: 0; height: 40px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font: inherit; }

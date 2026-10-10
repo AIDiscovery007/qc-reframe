@@ -89,3 +89,19 @@ test('user size profile follows only the accepted image-model health snapshot', 
   f.applyGenerationHealth({ ...health('magpie'), model: 'reverse-model' }, f.sync.current);
   assert.equal(f.state.generationModel, undefined);
 });
+
+test('user concurrent bottom and settings saves cannot overwrite each other in the same tick', async () => {
+  // Given a save has started, When another control saves before it commits, Then only the original write reaches the service.
+  const f = fixture('magpie'), first = f.saveImageSettings({ provider: 'magpie', model: 'old-to-new' });
+  const second = f.saveImageSettings({ provider: 'magpie', model: 'conflicting' });
+  const outcome = second.then(() => 'resolved', error => error.message);
+  await tick();
+  const writes = f.requests.length;
+  f.requests[0].resolve({ provider: 'magpie' }); await tick();
+  // Clean up both writes on the old implementation so the failure does not leave promises pending.
+  if (f.requests[1]) { f.requests[1].resolve({ provider: 'magpie' }); await tick(); }
+  for (const read of f.reads) read.resolve(health('magpie'));
+  await Promise.allSettled([first, second]);
+  assert.equal(writes, 1, 'a synchronous global saving guard must reject reentry');
+  assert.match(await outcome, /保存|稍候/);
+});

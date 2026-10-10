@@ -2,6 +2,7 @@ import type { ImageSettings } from "../../lib/types";
 import { requestedImageSize, validImageSizeRequest } from "../../lib/image-size.mjs";
 import { inheritedGenerationSize } from "../../lib/generation-size";
 import GenerationSizeFields from "./GenerationSizeFields";
+import GenerationModelField from "./GenerationModelField";
 import { validGenerationRatio } from "../../lib/generation-session";
 import { orderedImageIds } from "../../lib/image-order";
 import { creationContext, emptyCreationState, createInputWriter, resolveCreation, restoredQuickDraft } from "../../lib/creation-context";
@@ -148,6 +149,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     return true;
   };
   const saveImageSettings = async (settings: Record<string, unknown>) => {
+    if (generationSettingsSync.current.saving) throw new Error("生图设置正在保存，请稍候。");
     const saving = { saving: true };
     generationSettingsSync.current = saving;
     setGenerationSettingsPending(true); setGenerationReady(false); setGenerationSettingsError("");
@@ -856,7 +858,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     if (!workspace || !narrow || !drawerOpen) return;
     if (editor.current?.contains(document.activeElement) || document.activeElement === document.body) resultReturn.current?.focus({ preventScroll: true });
   }, [workspace, narrow, drawerOpen, resultPane]);
-  const generationPanel = activeJob?.result ? <GenerationPanel generationModel={generationModel} pixelSize={magpie} key={`${activeJob.id}:${magpie}`} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace} onAspectRatioChange={size => setChainSize({ key: drawerKey, pixelSize: false, size })} onImageSizeChange={size => setChainSize({ key: drawerKey, pixelSize: true, size })}
+  const generationModelControl = workspace && magpie ? <GenerationModelField model={generationModel} settingsRevision={imageSettingsRevision} disabled={!connected || generationSettingsPending} onSave={saveImageSettings} /> : undefined;
+  const generationPanel = activeJob?.result ? <GenerationPanel modelControl={generationModelControl} generationModel={generationModel} pixelSize={magpie} key={`${activeJob.id}:${magpie}`} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace} onAspectRatioChange={size => setChainSize({ key: drawerKey, pixelSize: false, size })} onImageSizeChange={size => setChainSize({ key: drawerKey, pixelSize: true, size })}
                   drawerOpen={drawerOpen} requestError={drawer.error} requestPending={drawer.pending}
                   onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabledReason={workspace ? promptDraft ? "编辑未保存，请保存或取消提示词修改。" : needsPrompt ? reverseHint || genericHint || "输入已修改，请更新提示词。" : "" : ""} disabled={generationBlocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
                   subjectImage={(activeJob.mode === "recreate" || activeJob.mode === "session") ? undefined : subjectImage(activeJob.mode)}
@@ -1003,7 +1006,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           prompt={result && activeJob && <PromptEditor taskId={activeJob.id} sheet result={result} draft={promptDraft} lang={lang} copied={copied} saving={!!savingPrompt} disabled={!connected} versionSelector={null} onExport={exportResult}
             onLanguage={setLang} onCopy={copy} onEdit={() => setPromptDrafts(items => ({ ...items, [activeJob.id]: { promptZh: result.promptZh, promptEn: result.promptEn, negativePrompt: result.negativePrompt } }))}
             onDraft={draft => setPromptDrafts(items => ({ ...items, [activeJob.id]: draft }))} onSave={savePrompt} onCancel={() => discardPrompt(activeJob.id)} />}
-        /> : !workspace ? <QuickWorkspace generationModel={generationModel} pixelSize={magpie} contextKey={drawerKey} revealPrompt={targetPrompt?.jobId === job?.id ? targetPrompt?.request : undefined} targetGeneration={targetGeneration?.jobId === job?.id ? targetGeneration?.id : undefined} selection={displaySelection} title={activeProject?.title} mode={preferences.mode}
+        /> : !workspace ? <QuickWorkspace pixelSize={magpie} contextKey={drawerKey} revealPrompt={targetPrompt?.jobId === job?.id ? targetPrompt?.request : undefined} targetGeneration={targetGeneration?.jobId === job?.id ? targetGeneration?.id : undefined} selection={displaySelection} title={activeProject?.title} mode={preferences.mode}
           referenceIndex={contextFor(preferences.mode).referenceIndex} onImageOrder={(index, onSaved) => changeImageOrder(index, undefined, onSaved)}
           subject={subjectImage(preferences.mode)} instruction={taskInstruction(preferences.mode)} job={job}
           disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy || !draftReady} reverseDisabled={reverseDisabled}
@@ -1026,7 +1029,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       {workspace && !historyOpen && !galleryOpen && selection && <div className="canvas-primary-actions" role="group" aria-label="生成操作">
         <div className="canvas-reverse-actions" ref={setReverseActions} />
         <div className="canvas-generation-actions" ref={setGenerationActions} role="group" aria-label="图片生成操作">
-          {!result && <><GenerationSizeFields generationModel={generationModel} key={`${drawerKey}:${magpie}`} pixelSize={magpie} workspace value={targetSize} onChange={size => setChainSize({ key: drawerKey, pixelSize: magpie, size })} disabled={blocked || !!running} /><button className="primary generate-button" disabled><Icon name="image" />生成图片</button></>}
+          {!result && <><GenerationSizeFields modelControl={generationModelControl} generationModel={generationModel} key={`${drawerKey}:${magpie}`} pixelSize={magpie} workspace value={targetSize} onChange={size => setChainSize({ key: drawerKey, pixelSize: magpie, size })} disabled={blocked || !!running} /><button className="primary generate-button" disabled><Icon name="image" />生成图片</button></>}
         </div>
       </div>}
       </div>

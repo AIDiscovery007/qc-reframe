@@ -49,11 +49,3 @@ test('user sees requested, normalized and output dimensions without reinterpreti
   assert.equal(generationSizeDescription({ provider: 'magpie', imageSize: { width: 20, height: 30 }, submittedImageSize: null, sizeRule: 'unknown-auto' }), '请求尺寸：20 × 30 px · 提交尺寸：自动（网关默认）');
   assert.equal(generationSizeDescription({ provider: 'magpie', model: 'gpt-image-2', imageSize: { width: 10000, height: 10000 } }), '请求尺寸：10000 × 10000 px');
 });
-
-
-test('user sees Gemini gateway parameters without an output resolution promise', () => {
-  // Given known Gemini and unknown image models, When their preview is shown, Then ratio adaptation and automatic fallback are explicit.
-  assert.match(generationSize.magpieSizePreview('gemini-3-pro-image', { width: 1536, height: 864 }), /按 16:9 提交，像素由网关决定（网关参数 1536 × 864）/);
-  assert.match(generationSize.magpieSizePreview('fixture/unknown', { width: 10000, height: 10000 }), /自动（网关默认）.*未确认模型尺寸规则/);
-  assert.match(generationSize.magpieSizePreview('gpt-image-2', { width: 10000, height: 10000 }), /2880 × 2880 px.*实验尺寸/);
-});

@@ -14,7 +14,8 @@ export const rules = [
 ];
 
 export const components = [
-  { name: 'GenerationSizeFields', source: popup + 'GenerationSizeFields.tsx', use: '原尺寸位置按生图模型展示预设与适配预览；保留原始像素意图和历史提交快照，比例渠道独立。' },
+  { name: 'GenerationModelField', source: popup + 'GenerationModelField.tsx', use: 'Magpie 工作台目标尺寸旁的目录模型选择；保存全局设置并跟随健康快照，失败保留当前选择。' },
+  { name: 'GenerationSizeFields', source: popup + 'GenerationSizeFields.tsx', use: '原尺寸位置按生图模型展示预设；保留原始像素意图和历史提交快照，比例渠道独立。' },
   { name: 'ImageGenerationSettings', source: popup + 'ImageGenerationSettings.tsx', use: '设置中的生图渠道、私有凭据及保存反馈。' },
   { name: 'AgentCliSettings', source: popup + 'AgentCliSettings.tsx', use: '按管理目标读取CLI状态、安装与更新，不改变逆向Agent，迟到响应按目标隔离。' },
   { name: 'AgentSettings', source: popup + 'AgentSettings.tsx', use: '设置中的原生 Agent 单选卡片，独立模型、失败保留与旧服务回退。' },
@@ -98,6 +99,13 @@ export const scenarios = [
 ];
 
 export const exampleScenarios = [
+  ...['switch', 'empty', 'narrow', 'directory-failure', 'save-failure', 'stale-directory', 'stale-health', 'snapshot'].map(flow => ({
+    example: 'workspace-image-model', title: `工作台生图模型：${flow}`, states: [flow], components: ['GenerationModelField'],
+    steps: '合成消息自动运行模型切换、设置同步、尺寸草稿保留、失败重试与迟到响应反例；不调用真实模型。',
+    id: `workspace-image-model-${flow}`, surface: 'workspace',
+    path: `/workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=${flow}&generationDelay=60000`,
+    viewport: flow === 'narrow' ? { width: 360, height: 740 } : wide, regression: 'workspaceImageModelRegression', rules: [],
+  })),
   ...['manual', 'custom', 'custom-invalid', 'continuous', 'batch', 'quick', 'history', 'save-retry', 'save-asset', 'gemini-ratios', 'unknown-auto', 'model-switch', 'batch-snapshot'].map(flow => ({
     example: 'magpie-workflows', title: `Magpie 生图工作流：${flow}`, states: ['saved', 'failed', 'narrow'], components: ['GenerationSizeFields'],
     steps: '合成消息自动运行尺寸选择、快照提交或保存恢复反例；不调用真实模型。',

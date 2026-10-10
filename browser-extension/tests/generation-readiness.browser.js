@@ -1,5 +1,7 @@
 // Production App with synthetic health and task messages; never calls a real model.
 const scenario = new URLSearchParams(location.search).get('generationReadinessRegression');
+const requests = [], send = chrome.runtime.sendMessage;
+chrome.runtime.sendMessage = message => { requests.push(structuredClone(message)); return send(message); };
 const wait = async predicate => {
   const deadline = Date.now() + 6000;
   while (!predicate()) {
@@ -30,13 +32,17 @@ try {
       assert(reverse?.disabled, '无文字模型时逆向仍受保护');
     }
     if (scenario === 'magpie') {
-      assert(document.body.textContent.includes('网关默认'), 'Magpie 必须说明使用默认尺寸');
+      assert(!document.body.textContent.includes('提交预览'), 'Magpie 不应显示已删除的提交预览');
       assert(button('逆向并生图') && !button('逆向并生图').disabled, 'Magpie 连续入口应可用');
       const sizes = document.querySelector('.generation-ratio select');
-      if (sizes) assert([...sizes.options].some(option => option.value === '1536:1024') && ![...sizes.options].some(option => option.value === '3:2'), 'Magpie 应显示像素预设，不将比例作为像素');
+      if (sizes) assert(sizes.value === 'auto' && [...sizes.options].some(option => option.value === '1536:1024') && ![...sizes.options].some(option => option.value === '3:2'), 'Magpie 应默认自动尺寸并显示像素预设，不将比例作为像素');
     }
     generate().click();
     await wait(() => cancel());
+    if (scenario === 'magpie') {
+      const submitted = requests.find(message => message.type === 'alchemy:generate');
+      assert(submitted && !submitted.imageSize && !submitted.aspectRatio, 'Magpie 默认请求必须省略像素与旧比例');
+    }
     cancel().click();
     await wait(() => generate() && !generate().disabled);
   }

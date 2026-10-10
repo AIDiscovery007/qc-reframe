@@ -1,4 +1,4 @@
-import { magpieSizeProfile, normalizeMagpieSize, requestedImageSize } from "./image-size.mjs";
+import { requestedImageSize } from "./image-size.mjs";
 import type { AspectRatio, Generation, ImageSize, ImageProvider } from "./types";
 
 type SizeSource = { provider?: ImageProvider; aspectRatio?: AspectRatio; imageSize?: ImageSize };
@@ -17,13 +17,6 @@ export function parseImageDimensions(width: string, height: string): ImageSize {
 
 export function parsePixelDimensions(width: string, height: string): ImageSize | undefined {
   return requestedImageSize({ width: Number(width), height: Number(height) });
-}
-
-export function magpieSizePreview(model: string | undefined, size?: ImageSize) {
-  const normalized = normalizeMagpieSize(model, size);
-  const submitted = normalized.submittedImageSize;
-  if (submitted && normalized.aspectRatio) return `提交预览：按 ${normalized.aspectRatio} 提交，像素由网关决定（网关参数 ${submitted.width} × ${submitted.height}）；实际图片以返回结果为准。`;
-  return `${submitted ? `提交预览：${submitted.width} × ${submitted.height} px` : "提交预览：自动（网关默认）"}${magpieSizeProfile(model) === "unknown" ? " · 未确认模型尺寸规则" : normalized.experimental ? " · 实验尺寸" : ""}；实际图片以返回结果为准。`;
 }
 
 export function generationSizeDescription(generation: Generation) {
