@@ -14,7 +14,7 @@ async function setup(t, immediate = false) {
   const reverse = [], generation = [];
   const hold = calls => args => new Promise((resolve, reject) => { calls.push({ args, resolve, reject }); args.signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true }); });
   const models = { busy: false, selectedModel: 'test', selection: () => ({ model: 'test', reasoningEffort: 'low' }), invalidate: async () => {}, close() {} };
-  const options = { dataDir: dir, skillPath, generationSkillPath: skillPath, agent: immediate ? async () => { reverse.push({}); return result; } : hold(reverse), generator: immediate ? async () => { generation.push({}); return decodeImage(image); } : hold(generation), models, compatibility: { getCompatibility: async () => ({}), snapshot: () => ({}) } };
+  const options = { dataDir: dir, skillPath, generationContext: async () => ({ model: 'test', provider: 'fixture', reasoningEffort: 'low', codexGeneration: true }), generationSkillPath: skillPath, agent: immediate ? async () => { reverse.push({}); return result; } : hold(reverse), generator: immediate ? async () => { generation.push({}); return decodeImage(image); } : hold(generation), models, compatibility: { getCompatibility: async () => ({}), snapshot: () => ({}) } };
   let app = await createBridge(options);
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening');
   const request = async (path, body) => { const res = await fetch(`http://127.0.0.1:${app.server.address().port}${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${app.token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); return { status: res.status, body: await res.json() }; };

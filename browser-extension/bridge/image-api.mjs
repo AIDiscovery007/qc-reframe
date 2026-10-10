@@ -1,3 +1,4 @@
+import { magpieBaseUrl, magpieHeaders } from './magpie.mjs';
 import { readFile, stat } from 'node:fs/promises';
 import sharp from 'sharp';
 import { orderedImages } from './image-order.mjs';
@@ -19,10 +20,10 @@ async function imageResult(bytes) {
   if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) throw failure('生图图片为空或超过 20 MB');
   try {
     const image = sharp(bytes, { limitInputPixels: 40_000_000, failOn: 'warning' });
-    const { format, pages } = await image.metadata();
+    const { format, pages, width, height } = await image.metadata();
     if (!['png', 'jpeg', 'webp'].includes(format) || (pages || 1) > 1) throw new Error();
     await image.stats();
-    return { bytes, extension: format };
+    return { bytes, extension: format, outputSize: { width, height } };
   } catch { throw failure('生图图片无效，仅支持可解码的 PNG、JPEG 或 WebP 静态图片'); }
 }
 
@@ -62,9 +63,12 @@ export async function runImageApi({ settings, mode, imagePath, subjectImagePath,
     if (signal?.aborted) cancel();
     controller.signal.throwIfAborted();
     const { provider, baseUrl, apiKey, model } = { ...settings };
-    if (!['openai', 'gemini'].includes(provider) || typeof apiKey !== 'string' || !apiKey.trim() || typeof model !== 'string' || !model.trim())
+    const magpie = provider === 'magpie', imagesApi = provider !== 'gemini';
+    if (!['openai', 'gemini', 'magpie'].includes(provider) || (!magpie && (typeof apiKey !== 'string' || !apiKey.trim())) || typeof model !== 'string' || !model.trim())
       throw failure('请先在设置中完整配置生图 API');
-    const base = endpoint(baseUrl);
+    const base = magpie ? magpieBaseUrl(baseUrl) : endpoint(baseUrl);
+    if (magpie && mode !== 'recreate') throw failure('Magpie 当前仅支持完整复刻的纯文生图，附图能力尚未开放');
+    if (magpie && aspectRatio !== undefined) throw failure('Magpie 当前使用网关默认尺寸，不支持指定比例');
     if (typeof prompt !== 'string' || !prompt.trim() || /\[SUBJECT\]/i.test(prompt)) throw failure('请先补充主体并重新逆向，再生成图片');
     if (aspectRatio && (!Number.isInteger(aspectRatio.width) || !Number.isInteger(aspectRatio.height) || aspectRatio.width < 1 || aspectRatio.height < 1 || aspectRatio.width > 10000 || aspectRatio.height > 10000))
       throw failure('生图宽高比例无效');
@@ -94,16 +98,16 @@ export async function runImageApi({ settings, mode, imagePath, subjectImagePath,
     }
     controller.signal.throwIfAborted();
     let url, body, headers;
-    if (provider === 'openai') {
+    if (imagesApi) {
       url = `${base}/images/${images.length ? 'edits' : 'generations'}`;
-      headers = { Authorization: `Bearer ${apiKey}` };
+      headers = magpie ? { ...magpieHeaders } : { Authorization: `Bearer ${apiKey}` };
       if (images.length) {
         body = new FormData();
         body.set('model', model); body.set('prompt', text); body.set('n', '1'); body.set('size', size);
         images.forEach(({ bytes, extension }, index) => body.append('image[]', new Blob([bytes], { type: `image/${extension}` }), `image-${index + 1}.${extension}`));
       } else {
         headers['Content-Type'] = 'application/json';
-        body = JSON.stringify({ model, prompt: text, n: 1, size });
+        body = JSON.stringify({ model, prompt: text, n: 1, ...(magpie ? {} : { size }) });
       }
     } else {
       url = `${base}/models/${encodeURIComponent(model.replace(/^models\//, ''))}:generateContent`;
@@ -118,24 +122,25 @@ export async function runImageApi({ settings, mode, imagePath, subjectImagePath,
     try { data = JSON.parse((await responseBytes(response, MAX_RESPONSE_BYTES)).toString('utf8')); }
     catch (error) { if (error.imageApiSafe) throw error; throw failure('生图 API 返回的响应不是有效 JSON'); }
     controller.signal.throwIfAborted();
-    const item = provider === 'openai' ? data?.data?.[0] : data?.candidates?.[0]?.content?.parts?.find(part => part.inlineData && !part.thought)?.inlineData;
+    const item = imagesApi ? data?.data?.[0] : data?.candidates?.[0]?.content?.parts?.find(part => part.inlineData && !part.thought)?.inlineData;
     if (!item) throw failure('生图 API 未返回图片，请检查模型是否支持生图或调整触发安全限制的提示词');
     let bytes;
-    if (provider === 'openai' && !item.b64_json && item.url) {
+    if (imagesApi && !item.b64_json && item.url) {
       let download;
       try { download = new URL(item.url); } catch { throw failure('生图 API 返回的图片地址无效'); }
       if (download.protocol !== 'https:' || download.username || download.password) throw failure('生图 API 图片地址须使用无凭据 HTTPS');
       onProgress?.({ stage: '正在下载生成图片…' });
       controller.signal.throwIfAborted();
       bytes = await responseBytes(await fetchImpl(download.href, { redirect: 'error', signal: controller.signal }), MAX_IMAGE_BYTES);
-    } else bytes = decodeImage(provider === 'openai' ? item.b64_json : item.data);
+    } else bytes = decodeImage(imagesApi ? item.b64_json : item.data);
     const output = await imageResult(bytes);
     controller.signal.throwIfAborted();
-    return { ...output, revisedPrompt: typeof item?.revised_prompt === 'string' ? item.revised_prompt.replaceAll(apiKey, '[已隐藏]').slice(0, 100_000) : undefined };
+    return { ...output, ...(magpie && typeof data.model === 'string' ? { gatewayReportedModel: data.model.replace(/[\p{Cc}\u2028\u2029]/gu, '').slice(0, 256) } : {}),
+      revisedPrompt: typeof item?.revised_prompt === 'string' ? (apiKey ? item.revised_prompt.replaceAll(apiKey, '[已隐藏]') : item.revised_prompt).slice(0, 100_000) : undefined };
   } catch (error) {
     if (signal?.aborted) throw Object.assign(new Error('生图已取消'), { name: 'AbortError' });
     if (controller.signal.aborted) throw failure('生图 API 请求超时，请稍后重试');
-    if (error.imageApiSafe) throw error;
+    if (error.imageApiSafe || error.magpieSafe) throw error;
     throw failure('生图 API 连接失败，请检查地址和网络后重试');
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }
 }

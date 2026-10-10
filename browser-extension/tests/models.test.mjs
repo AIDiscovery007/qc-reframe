@@ -81,14 +81,15 @@ test('account changes, disappearing models and real inference denials invalidate
   assert.throws(() => restored.selection(), /选择模型/);
 });
 
-test('model routes are authenticated, verification blocks inference and shutdown, and selection reaches both pipelines', async t => {
+test('user verifies the reverse model while image execution retains its independent CLI context', async t => {
+  // Given separate reverse and image contexts, When verification completes, Then reverse uses its selection and generation uses the CLI snapshot.
   const dataDir = await directory(t);
   let release;
   const models = await createModelStore({ dataDir, readCatalog: async () => catalog, verify: () => new Promise(r => { release = r; }) });
   const seen = [];
   const skillPath = join(dataDir, 'SKILL.md');
   await writeFile(skillPath, '---\nname: alchemy\n---');
-  const app = await createBridge({ dataDir, models, skillPath, generationSkillPath: skillPath, allowShutdown: true,
+  const app = await createBridge({ dataDir, models, skillPath, generationContext: async () => ({ model: 'cli-image-controller', provider: 'openai', reasoningEffort: 'low', codexGeneration: true }), generationSkillPath: skillPath, allowShutdown: true,
     agent: async (args) => { seen.push(args.modelSettings); return { title: 'test', promptZh: 'subject', promptEn: 'subject', negativePrompt: '', observations: [], uncertainties: [] }; },
     generator: async (args) => { seen.push(args.modelSettings); return { bytes: Buffer.from('image'), extension: 'png' }; },
   });
@@ -114,12 +115,13 @@ test('model routes are authenticated, verification blocks inference and shutdown
   assert.equal((await post(`/jobs/${job.id}/generations`, { language: 'zh' })).status, 202);
   for (let i = 0; i < 100 && (await (await get('/health')).json()).active; i++) await new Promise(r => setTimeout(r, 10));
   assert.equal(seen.length, 2);
-  assert.ok(seen.every(s => s.model === 'model-a' && s.reasoningEffort === 'high'));
+  assert.equal(seen[0].model, 'model-a'); assert.equal(seen[0].reasoningEffort, 'high');
+  assert.equal(seen[1].model, 'cli-image-controller'); assert.equal(seen[1].reasoningEffort, 'low');
   const saved = await (await get(`/jobs/${job.id}`)).json();
   assert.equal(saved.model, 'model-a');
   assert.equal(saved.reasoningEffort, 'high');
-  assert.equal(saved.generations[0].model, 'model-a');
-  assert.equal(saved.generations[0].reasoningEffort, 'high');
+  assert.equal(saved.generations[0].model, 'cli-image-controller');
+  assert.equal(saved.generations[0].reasoningEffort, 'low');
 });
 
 test('real RPC transport paginates, filters vision models, overrides model/effort, uses ephemeral probes and rejects changed accounts', async t => {

@@ -57,7 +57,7 @@
 
 逆向 Agent 设置：`node agent-tool/ui.mjs verify --scenarios agent-settings-wide agent-settings-narrow agent-settings-legacy`。覆盖 Codex/Pi 卡片、独立模型目录、保存失败、重开与旧服务兼容，使用合成消息，不调用真实 CLI 或模型。
 
-生图 API 设置：`node agent-tool/ui.mjs verify --scenarios image-settings-wide image-settings-narrow image-settings-legacy`。复用生产设置组件，覆盖两种 API、保存失败、重开、密钥不回显、清除和窄屏；仅合成消息，不访问真实凭据、供应商或项目。桥接与协议反例：`node --test browser-extension/tests/image-api-bridge.test.mjs browser-extension/tests/image-api.test.mjs browser-extension/tests/image-settings.test.mjs`，使用临时配置、合成图片与 stub，不调用真实模型。
+生图 API 设置：`node agent-tool/ui.mjs verify --scenarios image-settings-wide image-settings-narrow image-settings-legacy`。复用生产设置组件，覆盖两种直连 API 与 Magpie、进入/重开自动加载、空目录/失败邻近提示、失效模型保留并禁止保存、地址/渠道/卸载迟到目录、保存失败、密钥不回显、清除和窄屏；仅合成消息，不访问真实凭据、供应商或项目。桥接与协议反例：`node --test browser-extension/tests/image-api-bridge.test.mjs browser-extension/tests/image-api.test.mjs browser-extension/tests/image-settings.test.mjs browser-extension/tests/magpie.test.mjs`，使用临时配置、合成图片与 stub，不调用真实模型。
 
 先运行 `npm --prefix browser-extension run build`，再运行 `npm --prefix browser-extension run preview`。原来的 `cd browser-extension && npm run preview` 入口保留。仅监听 `127.0.0.1`，按 Ctrl+C 停止自己的预览进程。
 
@@ -162,3 +162,9 @@ npm --prefix browser-extension test
 新增或迁移工具须同步本索引、调用入口与必要行为验证，记录依赖、输入输出、副作用和适用边界。安装/服务管理 `browser-extension/scripts/manage.mjs` 与构建图标 `browser-extension/scripts/icons.mjs` 属于产品运行/构建链，保留原位。
 
 coverage报告复核须显式沿用模式：`REFRAME_TEST_COVERAGE=1 node agent-tool/ui.mjs evidence --report /absolute/gate.json --sha256 TRUSTED_DIGEST`。普通命令按normal模式检查，不会自动信任报告切换模式；模式不符应失败。
+
+### 设置页 Agent 联动与生图独立就绪
+
+`agent-settings-wide/narrow/legacy` 覆盖卡片保存失败、模型/强度验证成功与失效、同配置失败、请求失败、CLI互斥及旧恢复入口；CLI仅跟随顶部卡片。`agent-settings-layout-wide/narrow/360/956` 提供宽屏、320/360/956px分段截图，另有 loading/missing/failed/custom/updating/installing 状态；复用原 `settings-overflow` / `settings-focus` 故障注入。
+
+`generation-readiness-workspace-ready`、`generation-readiness-popup-ready` 使用合成 health 验证无文字模型仍可提交和取消内置生图；workspace-blocked 验证显式未就绪优先，workspace-legacy / workspace-legacy-empty 覆盖旧字段兼容与无配置保护。使用统一 `ui.mjs verify --scenarios ID …`；fixture、来源指纹、截图与失败 trace 沿用原报告。只启动隔离预览，不安装/更新真实CLI、不读取凭据、不调用模型或改真实项目。

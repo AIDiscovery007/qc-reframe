@@ -191,3 +191,24 @@ test('user: Given a vendor revised_prompt containing the API key, When receiving
   assert.doesNotMatch(output.revisedPrompt, /private-key/);
   assert.match(output.revisedPrompt, /Authorization/);
 });
+
+test('user generates via Magpie without a supplier key or implicit size conversion', async () => {
+  // Given a text task, When sent, Then n=1, app identity, default size and reported model survive decoding.
+  const output = await runImageApi(options({ settings: { provider: 'magpie', baseUrl: 'http://localhost:3425', model: 'source/image-model' }, fetchImpl: async (url, init) => {
+    assert.equal(url, 'http://localhost:3425/v1/images/generations');
+    assert.equal(init.headers.Authorization, 'Bearer magpie-reframe');
+    assert.deepEqual(JSON.parse(init.body), { model: 'source/image-model', prompt: 'a cat\n\n排除项 / Negative prompt:\nwatermark', n: 1 });
+    return json({ model: 'source/reported', data: [{ b64_json: png.toString('base64'), revised_prompt: 'revised' }] });
+  } }));
+  assert.equal(output.gatewayReportedModel, 'source/reported');
+  assert.deepEqual(output.outputSize, { width: 2, height: 3 }); assert.deepEqual(output.bytes, png);
+});
+
+test('user cannot start unsupported Magpie references or explicit ratios', async () => {
+  // Given unverified capabilities, When input or ratio is requested, Then reject before file/network access.
+  for (const patch of [{ mode: 'style', imagePath: '/must-not-read' }, { aspectRatio: { width: 1, height: 1 } }]) {
+    await assert.rejects(runImageApi(options({ settings: { provider: 'magpie', baseUrl: 'http://localhost:3425', model: 'source/image-model' }, ...patch,
+      fetchImpl: async () => { assert.fail('unsupported request reached gateway'); },
+    })), /Magpie.*(完整复刻|默认尺寸)/);
+  }
+});

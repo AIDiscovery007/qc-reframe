@@ -18,6 +18,7 @@ export type CliStatus = {
 
 // Historical task errors are persisted as text; recovery must also work after reload.
 export function recoverySection(message = ""): RecoverySection | undefined {
+  if (/Codex 内置生图/.test(message)) return "cli";
   if (/生图 API|API Key|生图渠道|Gemini/.test(message)) return "generation";
   if (/Pi.*(?:CLI|安装|版本|升级|更新|无法运行|无法启动|路径)/i.test(message)) return "pi-cli";
   if (/Pi|逆向 Agent/.test(message)) return "models";

@@ -127,7 +127,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const [serviceBusy, setServiceBusy] = useState(false);
   const [reverseAgent, setReverseAgent] = useState("codex");
   const [modelBusy, setModelBusy] = useState(false);
-  const [generationModel, setGenerationModel] = useState<string | null>(null);
+  const [magpie, setMagpie] = useState(false);
+  const magpieHint = magpie ? "Magpie 当前仅支持完整复刻的手动生图，尺寸使用网关默认；附图、连续和批量暂不可用。" : "";
+  const [generationReady, setGenerationReady] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -176,7 +178,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const inputConflict = !!selection?.inputs && (activeProject?.inputRevision || 0) > (selection.inputRevision || 0);
   const inputBlocked = inputConflict || !draftReady || !connected || busy || savingMode || modelBusy || cliBusy || !!running || loadingProject || restoring;
   const blocked = inputBlocked || !selectedModel;
-  const generationBlocked = inputBlocked || !generationModel;
+  const generationBlocked = inputBlocked || !generationReady || (magpie && preferences.mode !== "recreate");
 
   useEffect(() => {
     setCopied(false);
@@ -377,7 +379,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       const revision = projectRevision.current;
       let delay = 10_000;
       try {
-        const health = await query<{ generationModel?: string; agent?: string; ready: boolean; serviceReady?: boolean; skill: string; active: number; visibleActive?: number; hiddenProjectIds?: string[]; projectsRevision?: string; modelBusy?: boolean; cliBusy?: boolean; model?: string; cli?: CliStatus | null }>("/health");
+        const health = await query<{ generationProvider?: string; generationReady?: boolean; generationModel?: string | null; agent?: string; ready: boolean; serviceReady?: boolean; skill: string; active: number; visibleActive?: number; hiddenProjectIds?: string[]; projectsRevision?: string; modelBusy?: boolean; cliBusy?: boolean; model?: string; cli?: CliStatus | null }>("/health");
         if (cancelled) return delay;
         setConnected(health.serviceReady ?? true);
         setServiceBusy(health.active > 0);
@@ -390,7 +392,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         setModelBusy(!!health.modelBusy);
         setReverseAgent(health.agent || "codex");
         setSelectedModel(health.model || null);
-        setGenerationModel(health.generationModel === undefined ? health.model || null : health.generationModel || null);
+        setMagpie(health.generationProvider === "magpie");
+        setGenerationReady(health.generationReady ?? !!(health.generationModel === undefined ? health.model : health.generationModel));
         setConnectionText(health.ready ? `已连接 · ${health.skill}` : "未找到图片逆向技能");
         delay = health.active || health.modelBusy || health.cliBusy ? 2000 : 10_000;
         // An older bridge must report an upgrade need instead of silently showing an empty library.
@@ -792,7 +795,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const reverseDisabled = blocked || !!reverseHint || !!promptDraft;
   const ratio = workspace ? chainRatio?.key === drawerKey ? chainRatio.ratio : undefined
     : job?.generations?.length ? job.generations.at(-1)?.aspectRatio : job?.autoGeneration?.aspectRatio;
-  const chainDisabled = reverseDisabled || (preferences.mode === "style" && !subjectImage("style")) || !validGenerationRatio(ratio);
+  const chainDisabled = magpie || reverseDisabled || (preferences.mode === "style" && !subjectImage("style")) || !validGenerationRatio(ratio);
   const reverse = (generate = false) => {
     if (generate ? chainDisabled : reverseDisabled) return;
     const mode = preferences.mode;
@@ -830,9 +833,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     if (!workspace || !narrow || !drawerOpen) return;
     if (editor.current?.contains(document.activeElement) || document.activeElement === document.body) resultReturn.current?.focus({ preventScroll: true });
   }, [workspace, narrow, drawerOpen, resultPane]);
-  const generationPanel = activeJob?.result ? <GenerationPanel key={activeJob.id} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace} onAspectRatioChange={ratio => setChainRatio({ key: drawerKey, ratio })}
+  const generationPanel = activeJob?.result ? <GenerationPanel gatewayDefaultSize={magpie} key={activeJob.id} onTargetSelected={() => setTargetGeneration(undefined)} targetGeneration={targetGeneration?.jobId === activeJob.id ? targetGeneration.id : undefined} job={activeJob} lang={lang} workspace={workspace} onAspectRatioChange={ratio => setChainRatio({ key: drawerKey, ratio })}
                   drawerOpen={drawerOpen} requestError={drawer.error} requestPending={drawer.pending}
-                  onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabledReason={workspace ? promptDraft ? "编辑未保存，请保存或取消提示词修改。" : needsPrompt ? reverseHint || genericHint || "输入已修改，请更新提示词。" : "" : ""} disabled={generationBlocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
+                  onRequestState={(pending, error) => dispatchDrawer({ type: pending ? "request" : "settled", key: drawerKey, error })} versionNumber={modeJobs(preferences.mode).length - modeJobs(preferences.mode).findIndex(item => item.id === activeJob.id)} actionsTarget={generationActions} disabledReason={magpie && activeJob.mode !== "recreate" ? magpieHint : workspace ? promptDraft ? "编辑未保存，请保存或取消提示词修改。" : needsPrompt ? reverseHint || genericHint || "输入已修改，请更新提示词。" : "" : ""} disabled={generationBlocked || !!subjectUnavailable[subjectKey(preferences.mode)] || !!promptDraft || (workspace && needsPrompt) || (activeJob.mode === "multi-reenact" && multiStale)}
                   subjectImage={(activeJob.mode === "recreate" || activeJob.mode === "session") ? undefined : subjectImage(activeJob.mode)}
                   inputPreview={multiPreview}
                   subjects={activeJob.mode === "multi-reenact" ? multiSubjects : undefined}
@@ -972,9 +975,10 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         }} /> : <div className={workspace ? "workspace-body" : undefined} data-results-open={drawerOpen} data-history={historyOpen}>
       <div ref={editor} className={workspace ? "workspace-editor" : undefined} inert={workspace && narrow && drawerOpen}>
       {!workspace && draftError && <p className="error" role="alert">{draftError}</p>}
+      {magpieHint && !galleryOpen && <p className="hint" role="status">{magpieHint}</p>}
       <main className={workspace && !historyOpen && !galleryOpen && selection ? "canvas-main" : undefined}>
         {historyOpen ? (
-          <ProjectHistory hiddenProjectIds={hiddenProjectIds} batchDisabled={!connected || !selectedModel || modelBusy || cliBusy} onTasks={() => setTasksOpen(true)} searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
+          <ProjectHistory hiddenProjectIds={hiddenProjectIds} batchDisabled={magpie || !connected || !selectedModel || modelBusy || cliBusy} onTasks={() => setTasksOpen(true)} searchTarget={projectSearchTarget} workspace={workspace} projects={library.data.items.filter(visibleProject)} page={library.page} total={library.data.total} pageSize={library.data.pageSize} search={library.search} status={library.status} onStatus={library.setStatus} loading={library.loading} loadError={library.error} onPage={library.setPage} onSearch={library.setSearch} onRetry={library.refresh} busy={busy} onOpen={openProject} onDelete={deleteProjects} showHidden={showHidden} onSetHidden={setProjectsHidden} onToggleHidden={() => void toggleHiddenProjects()} />
         ) : workspace && selection ? <CanvasWorkspace onPromptRevealed={() => setTargetPrompt(undefined)} revealPrompt={targetPrompt?.jobId === activeJob?.id ? targetPrompt?.request : undefined} contextKey={drawerKey} mode={preferences.mode}
           sessionTitle={selectedSessions().length === 1 ? selectedSessions()[0]!.title : selectedSessions().length ? `已选 ${selectedSessions().length} 个会话` : undefined} onSessions={() => setSessionPicker(drawerKey)}
           image={displayImage} subjectImage={subjectImage(preferences.mode)} subjects={multiSubjects}
@@ -996,7 +1000,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           prompt={result && activeJob && <PromptEditor taskId={activeJob.id} sheet result={result} draft={promptDraft} lang={lang} copied={copied} saving={!!savingPrompt} disabled={!connected} versionSelector={null} onExport={exportResult}
             onLanguage={setLang} onCopy={copy} onEdit={() => setPromptDrafts(items => ({ ...items, [activeJob.id]: { promptZh: result.promptZh, promptEn: result.promptEn, negativePrompt: result.negativePrompt } }))}
             onDraft={draft => setPromptDrafts(items => ({ ...items, [activeJob.id]: draft }))} onSave={savePrompt} onCancel={() => discardPrompt(activeJob.id)} />}
-        /> : !workspace ? <QuickWorkspace contextKey={drawerKey} revealPrompt={targetPrompt?.jobId === job?.id ? targetPrompt?.request : undefined} targetGeneration={targetGeneration?.jobId === job?.id ? targetGeneration?.id : undefined} selection={displaySelection} title={activeProject?.title} mode={preferences.mode}
+        /> : !workspace ? <QuickWorkspace gatewayDefaultSize={magpie} contextKey={drawerKey} revealPrompt={targetPrompt?.jobId === job?.id ? targetPrompt?.request : undefined} targetGeneration={targetGeneration?.jobId === job?.id ? targetGeneration?.id : undefined} selection={displaySelection} title={activeProject?.title} mode={preferences.mode}
           referenceIndex={contextFor(preferences.mode).referenceIndex} onImageOrder={(index, onSaved) => changeImageOrder(index, undefined, onSaved)}
           subject={subjectImage(preferences.mode)} instruction={taskInstruction(preferences.mode)} job={job}
           disabled={blocked || !!promptDraft} modeDisabled={savingMode || busy} reverseDisabled={reverseDisabled}
@@ -1007,7 +1011,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
           onRotateReference={image => applyReferenceRotation(image, preferences.mode, taskInstruction(preferences.mode))}
           onSwap={() => { if (preferences.mode !== "recreate" && preferences.mode !== "session") void swapImages(preferences.mode, taskInstruction(preferences.mode)); }}
           onReverse={() => reverse()} onGenerate={() => reverse(true)} chainDisabled={chainDisabled} continuous={!!job?.autoGeneration || job?.id === continuousJobId} submitting={busy && startPending.current} onCancel={cancel} onCopy={copy} onLanguage={setLang} onWorkspace={() => void openWorkspace()} onUpdate={updateJob} onGenerationViewUpdate={revealGeneratedImage}
-          generationHint={promptDraft ? "未保存的提示词请在工作台继续编辑" : instructionStale ? "输入已修改，请重新生成提示词" : reverseStatus || (!connected ? "请先连接服务" : !generationModel ? "请在工作台配置生图渠道" : "")}
+          generationHint={magpie && preferences.mode !== "recreate" ? magpieHint : promptDraft ? "未保存的提示词请在工作台继续编辑" : instructionStale ? "输入已修改，请重新生成提示词" : reverseStatus || (!connected ? "请先连接服务" : !generationReady ? "请在工作台配置生图渠道" : "")}
           generationDisabled={generationBlocked || !!promptDraft || needsPrompt || !!subjectUnavailable[subjectKey(preferences.mode)]}
         /> : <section className="empty"><span className="empty-mark"><Icon name="image" /></span><h1>选择一张参考图</h1></section>}
 

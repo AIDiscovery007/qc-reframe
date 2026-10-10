@@ -14,12 +14,12 @@ try {
   await waitFor(() => document.querySelector('.connection-state')?.textContent.includes('已连接'));
   await handoff('cli');
   await waitFor(() => active() === '插件模型');
-  await waitFor(() => document.querySelector('.agent-management-target select')?.value === 'codex' && document.querySelector('.agent-cli-settings h3')?.textContent === 'Codex CLI');
+  await waitFor(() => document.querySelector('input[name="reverse-agent"][value="codex"]')?.checked && document.querySelector('.agent-cli-settings h3')?.textContent === 'Codex CLI');
   const dialog = document.querySelector('.settings-center');
   for (const [section, label] of [['models', '插件模型'], ['connection', '本机连接'], ['cli', '插件模型']]) {
     await handoff(section);
     await waitFor(() => active() === label);
-    if (section === 'cli') await waitFor(() => document.querySelector('.agent-management-target select')?.value === 'codex' && document.querySelector('.agent-cli-settings h3')?.textContent === 'Codex CLI');
+    if (section === 'cli') await waitFor(() => document.querySelector('input[name="reverse-agent"][value="codex"]')?.checked && document.querySelector('.agent-cli-settings h3')?.textContent === 'Codex CLI');
     assert(dialog === document.querySelector('.settings-center'), '恢复导航不应重挂载设置弹窗');
   }
   // Navigate to a different section: CLI recovery now shares the models page.
@@ -27,7 +27,7 @@ try {
   await waitFor(() => active() === '本机连接');
   await handoff('cli');
   await waitFor(() => active() === '插件模型');
-  await waitFor(() => document.querySelector('.agent-management-target select')?.value === 'codex' && document.querySelector('.agent-cli-settings h3')?.textContent === 'Codex CLI');
+  await waitFor(() => document.querySelector('input[name="reverse-agent"][value="codex"]')?.checked && document.querySelector('.agent-cli-settings h3')?.textContent === 'Codex CLI');
   assert(dialog === document.querySelector('.settings-center'), '重复目标仍应复用弹窗');
   dialog.querySelector('[aria-label="关闭设置"]').click();
   await waitFor(() => !document.querySelector('.settings-center'));

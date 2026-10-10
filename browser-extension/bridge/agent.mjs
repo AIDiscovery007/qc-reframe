@@ -1,6 +1,6 @@
 import { runPi } from "./pi-agent.mjs";
 import { withCodex } from "./codex-rpc.mjs";
-import { assertModelContext, modelError } from "./model-context.mjs";
+import { assertModelContext, modelError, generationContextError } from "./model-context.mjs";
 import { readFile } from "node:fs/promises";
 import { orderedImages } from "./image-order.mjs";
 import { createImageInspection } from "./inspection.mjs";
@@ -181,7 +181,7 @@ export async function runCodex({ input, schema, cwd, signal, onProgress = () => 
       await assertModelContext(request, cwd, modelSettings);
       if (generation) {
         const capabilities = await request("modelProvider/capabilities/read", {});
-        if (!capabilities.imageGeneration) throw Object.assign(new Error("当前账号或模型提供方未开放内置生图，请在连接设置中检查登录与模型提供方。"), { recovery: "models" });
+        if (!capabilities.imageGeneration) throw new Error("当前账号或模型提供方未开放内置生图，请检查 Codex 登录与提供方。");
       }
       const started = await request("thread/start", {
         cwd, sandbox: "read-only", approvalPolicy: "never",
@@ -193,7 +193,7 @@ export async function runCodex({ input, schema, cwd, signal, onProgress = () => 
         ephemeral: probe || process.env.ALCHEMY_PERSIST_CODEX_SESSIONS !== "1",
       });
       if (started.model !== modelSettings.model || started.modelProvider !== modelSettings.provider)
-        throw new Error("Codex 未采用所选模型或提供方，请刷新模型列表后重试。");
+        throw new Error(generation ? "Codex 未采用本次生图的执行模型或提供方，请检查 CLI 配置后重新提交。" : "Codex 未采用所选模型或提供方，请刷新模型列表后重试。");
       threadId = started.thread.id;
       onProgress({ threadId, model: started.model, stage: generation ? "Codex 正在准备生图…" : "Codex 正在观察图片…" });
       await request("turn/start", {
@@ -204,6 +204,7 @@ export async function runCodex({ input, schema, cwd, signal, onProgress = () => 
       return { text: finalText, images };
     });
   } catch (error) {
-    throw modelError(error, modelSettings?.model);
+    const failure = modelError(error, modelSettings?.model);
+    throw generation ? generationContextError(failure) : failure;
   }
 }

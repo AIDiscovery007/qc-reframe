@@ -11,8 +11,9 @@ import { readFile, writeFile, lstat } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAgent } from "./agent.mjs";
-import { runGeneration, imagegenSkillPath } from "./generation.mjs";
+import { runGeneration, imagegenSkillPath, readGenerationSettings } from "./generation.mjs";
 import { createProjectStore, projectIdFor, recoverProjectDeletion } from "./projects.mjs";
+import { inspectMagpie } from "./magpie.mjs";
 import { createImageSettingsStore } from "./image-settings.mjs";
 import { runImageApi } from "./image-api.mjs";
 import { createModelStore } from "./models.mjs";
@@ -122,7 +123,8 @@ export async function createBridge({
   ),
   agent = runAgent,
   generator = runGeneration,
-  apiGenerator = runImageApi,
+  generationContext = readGenerationSettings,
+  apiGenerator = runImageApi, magpieInspector = inspectMagpie,
   generationSkillPath = imagegenSkillPath(),
   allowShutdown = false,
   restart,
@@ -148,12 +150,21 @@ export async function createBridge({
     } });
   const agents = await createAgentStore({ dataDir: paths.config, models, piModels });
   const imageSettings = await createImageSettingsStore({ dataDir: paths.config });
-  const generationSelection = () => {
+  const generationSelection = async signal => {
     const selected = imageSettings.selection();
-    return selected.provider === "codex" ? models.selection() : { ...selected, imageProvider: selected.provider };
+    const settings = selected.provider === "codex" ? await generationContext({ cwd: root, signal }) : { ...selected, imageProvider: selected.provider };
+    signal?.throwIfAborted();
+    if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
+    if (agents.busy) throw bad("正在验证模型，请稍候", 409);
+    return settings;
   };
   const batchGenerationSettings = new Map(); // Secrets live only until the accepted batch settles.
-  const checkGeneration = async settings => {
+  const checkGeneration = async (settings, signal) => {
+    if (settings.imageProvider === "magpie") {
+      const catalog = await magpieInspector({ baseUrl: settings.baseUrl, signal });
+      signal?.throwIfAborted();
+      if (!catalog.models.some(item => item.id === settings.model)) throw bad("Magpie 生图模型已不可用，请在生图设置刷新目录并重新选择。", 409);
+    }
     if (settings.imageProvider) return;
     await requireFeature("generation");
     try { await readFile(generationSkillPath); } catch { throw bad("找不到 imagegen 技能，请设置 IMAGEGEN_SKILL_PATH", 503); }
@@ -224,7 +235,7 @@ export async function createBridge({
   for (const job of jobs.values()) taskFeed.update(job);
   const gallery = createGalleryStore({ projects, images });
   const runtime = createTaskRuntime({ save, onProgress: job => projects.updateJob(job),
-    onIdle: async () => { kickBatches(); await collectIdleImages(); }, onFailure: (settings, error) => settings?.imageProvider ? Promise.resolve() : agents.modelStore(settings?.agent || "codex").invalidate(settings, error) });
+    onIdle: async () => { kickBatches(); await collectIdleImages(); }, onFailure: (settings, error) => settings?.imageProvider || settings?.codexGeneration ? Promise.resolve() : agents.modelStore(settings?.agent || "codex").invalidate(settings, error) });
   const codexBusy = () => runtime.busy || !!batches?.active.length || agents.busy || sessions.busy;
   let mutationTail = Promise.resolve();
   let collectionPending = false;
@@ -244,7 +255,7 @@ export async function createBridge({
     catch (error) { console.error("回收图片失败:", error.message); }
     finally { release(); }
   };
-  const startGeneration = async (job, body, { modelSettings = generationSelection(), promptResult = job.result, automatic = false, signal } = {}) => {
+  const startGeneration = async (job, body, { modelSettings, promptResult = job.result, automatic = false, signal } = {}) => {
     if (job.status !== "completed" || !job.result) throw bad("请先完成提示词逆向", 409);
     if (job.mode === "style" && !job.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
     if (!automatic && job.autoGeneration?.status === "pending") throw bad("这条提示词正在准备自动生图，请等待完成或取消", 409);
@@ -266,6 +277,9 @@ export async function createBridge({
     if (aspectRatio) prompt += body.language === "zh"
       ? `\n\n用户指定的输出画面宽高比例：${aspectRatio.width}:${aspectRatio.height}（宽:高）。此比例要求优先于原提示词及参考图中的画幅要求。请调整构图和背景以适应该比例，保持主体自然比例，不拉伸或压缩主体。`
       : `\n\nUser-requested output aspect ratio: ${aspectRatio.width}:${aspectRatio.height} (width:height). This ratio takes priority over framing requirements in the original prompt and reference images. Adapt the composition and background to this ratio while preserving natural subject proportions; do not stretch or compress the subject.`;
+    modelSettings ||= await generationSelection(signal);
+    if (modelSettings.imageProvider === "magpie" && (job.mode !== "recreate" || automatic || aspectRatio !== undefined))
+      throw bad("Magpie 当前仅支持完整复刻的手动文生图，尺寸使用网关默认；附图、连续生图和指定比例暂不可用。");
     const imagePath = job.mode === "recreate" ? undefined : await storedImage(job, false, true);
     const multi = job.mode === "multi-reenact";
     const decodedSubjects = multi ? decodeSubjects(body.subjects !== undefined ? body.subjects : await restoreSubjects(job.reenact?.subjects), (await images.read(job.imageAsset)).length) : undefined;
@@ -274,7 +288,7 @@ export async function createBridge({
     const subject = !multi && job.mode !== "recreate" && job.reenact
       ? decodeImage(body.subjectImage !== undefined ? body.subjectImage : await storedImage(job, true)) : undefined;
     if (subject?.bytes.length > 2 * 1024 * 1024) throw bad("主体图最多 2 MB，请压缩后重试");
-    await checkGeneration(modelSettings);
+    await checkGeneration(modelSettings, signal);
     const id = randomUUID();
     const subjectAsset = subject ? await images.put(subject) : undefined;
     const subjectImagePath = subjectAsset ? images.path(subjectAsset) : undefined;
@@ -283,7 +297,7 @@ export async function createBridge({
     referencePosition(referenceIndex, subjects?.length ?? (subject ? 1 : 0));
     signal?.throwIfAborted();
     const controller = runtime.reserve(id, job.projectId);
-    const next = { id, referenceIndex, provider: modelSettings.imageProvider || "codex", ...(modelSettings.imageProvider ? { baseUrl: modelSettings.baseUrl } : {}), model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: modelSettings.imageProvider ? "正在连接生图 API…" : "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
+    const next = { id, referenceIndex, ...(modelSettings.imageProvider === "magpie" ? { sizeMode: "gateway-default" } : {}), provider: modelSettings.imageProvider || "codex", ...(modelSettings.imageProvider ? { baseUrl: modelSettings.baseUrl } : {}), model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: modelSettings.imageProvider ? "正在连接生图 API…" : "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
     job.generations ||= [];
     job.generations.push(next);
     if (automatic) Object.assign(job.autoGeneration, { status: "started", generationId: id });
@@ -303,20 +317,22 @@ export async function createBridge({
         signal.throwIfAborted();
         if (!["png", "jpeg", "webp"].includes(output.extension)) throw new Error("生图返回了不支持的文件格式");
         const imageAsset = await images.put(output);
-        return { extension: output.extension, imageAsset, revisedPrompt: output.revisedPrompt };
+        return { extension: output.extension, imageAsset, revisedPrompt: output.revisedPrompt, ...(modelSettings.imageProvider === "magpie" ? { gatewayReportedModel: output.gatewayReportedModel, outputSize: output.outputSize } : {}) };
       },
     });
     return job;
   };
-  const startJob = async (body, { readSessions, assertSessionRequestActive, frozen } = {}) => {
-    const generationModelSettings = body.generation ? frozen?.generationModelSettings || generationSelection() : undefined;
+  const startJob = async (body, { readSessions, assertSessionRequestActive, frozen, signal } = {}) => {
+    let generationModelSettings;
     if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
     if (agents.busy) throw bad("正在验证模型，请稍候", 409);
     if (body.generation !== undefined) {
       if (!body.generation || typeof body.generation !== "object" || Array.isArray(body.generation) || Object.keys(body.generation).some(key => !["language", "aspectRatio"].includes(key))) throw bad("无效自动生图参数");
+      if ((frozen?.generationModelSettings ? frozen.generationModelSettings.imageProvider || "codex" : imageSettings.view().provider) === "magpie") throw bad("Magpie 暂不支持连续生图，请先逆向，再手动生图。");
       validateGenerationOptions(body.generation);
       if (body.mode === "style" && !body.reenact) throw bad("通用风格需要先补充主体图并重新逆向，才能生成图片");
-      await checkGeneration(generationModelSettings);
+      generationModelSettings = frozen?.generationModelSettings || await generationSelection(signal);
+      await checkGeneration(generationModelSettings, signal);
     }
     if (!["style", "recreate", "reenact", "multi-reenact", "session"].includes(body.mode)) throw bad("无效逆向模式");
     const submittedInstruction = body.instruction ?? body.reenact?.basePrompt;
@@ -375,6 +391,7 @@ export async function createBridge({
       throw bad("找不到 Alchemy 技能，请设置 ALCHEMY_SKILL_PATH", 503);
     }
     const modelSettings = frozen?.modelSettings || agents.selection();
+    signal?.throwIfAborted();
     const sourceUrl = sourceUrlFor(body.sourceUrl);
     if (selectedSessions) assertSessionRequestActive();
     project ||= await projects.register({ bytes, extension }, { sourceUrl, capture: body.capture });
@@ -384,6 +401,7 @@ export async function createBridge({
     const subjectAsset = subject ? await images.put(subject) : undefined;
     if (multi) reenact.subjects = await saveSubjects(decodedSubjects);
     if (selectedSessions) assertSessionRequestActive();
+    signal?.throwIfAborted();
     const id = frozen?.jobId || randomUUID();
     runtime.reserve(id, project.id);
     const imagePath = images.path(imageAsset);
@@ -564,6 +582,9 @@ export async function createBridge({
   await thumbnails.collect();
 
   const server = createServer(async (req, res) => {
+    const submission = new AbortController();
+    const abortSubmission = () => submission.abort(bad("请求已取消", 499));
+    res.once("close", abortSubmission);
     let releaseMutation, sessionReadController, sessionReadTimer;
     const abortSessionRead = () => sessionReadController?.abort(bad("会话请求已取消", 499));
     const assertSessionRequestActive = () => {
@@ -706,7 +727,8 @@ export async function createBridge({
           modelBusy: agents.busy,
           agent: agents.selected,
           model: agents.modelStore().selectedModel,
-          generationModel: imageSettings.view().provider === "codex" ? models.selectedModel : (imageSettings.view().configs[imageSettings.view().provider].hasApiKey ? imageSettings.view().configs[imageSettings.view().provider].model : null),
+          generationReady: imageSettings.ready(),
+          generationModel: imageSettings.view().provider === "codex" ? null : (imageSettings.ready() ? imageSettings.view().configs[imageSettings.view().provider].model : null),
           generationProvider: imageSettings.view().provider,
         });
         return;
@@ -724,6 +746,13 @@ export async function createBridge({
         if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => key !== "action") || !["refresh", "clear", "status"].includes(body.action)) throw bad("无效的索引操作");
         try { json(200, await readSessions(() => sessions.index(body.action), body.action === "refresh")); }
         catch (error) { throw error.status ? error : bad("无法访问本地会话索引，请重试", 503); }
+        return;
+      }
+      if (req.method === "POST" && path === "/image-models") {
+        validateQuery([]);
+        const body = await readBody(req);
+        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => key !== "baseUrl") || typeof body.baseUrl !== "string") throw bad("无效 Magpie 连接参数");
+        json(200, await magpieInspector({ baseUrl: body.baseUrl, signal: submission.signal }));
         return;
       }
       if (path === "/image-settings" && (req.method === "GET" || req.method === "POST")) {
@@ -878,8 +907,9 @@ export async function createBridge({
         }
         if (cliBusy()) throw bad('Agent CLI 正在安装或更新，请等待完成。', 409);
         if (agents.busy) throw bad('正在验证模型，请稍候', 409);
-        const modelSettings = agents.selection(), generationModelSettings = generationSelection();
-        await Promise.all([...(agents.selected === "codex" ? [requireFeature('reverse')] : []), checkGeneration(generationModelSettings), readFile(skillPath)]);
+        if (imageSettings.view().provider === "magpie") throw bad("Magpie 暂不支持批量生图，请逐项手动生图。");
+        const modelSettings = agents.selection(), generationModelSettings = await generationSelection(submission.signal);
+        await Promise.all([...(agents.selected === "codex" ? [requireFeature('reverse')] : []), checkGeneration(generationModelSettings, submission.signal), readFile(skillPath)]);
         const items = [];
         for (const selectedItem of selected) {
           const title = projects.summary(selectedItem.projectId)?.title || '项目不存在';
@@ -888,6 +918,7 @@ export async function createBridge({
             items.push({ ...selectedItem, title, eligible: true, snapshot });
           } catch (error) { items.push({ ...selectedItem, title, eligible: false, error: error.message }); }
         }
+        submission.signal.throwIfAborted();
         if (path.endsWith('/preview')) { json(200, { model: modelSettings.model, items: items.map(({ snapshot, ...item }) => item) }); return; }
         const batch = { id: randomUUID(), requestId: body.requestId, requestHash, createdAt: new Date().toISOString(), modelSettings, generationModelSettings: Object.fromEntries(Object.entries(generationModelSettings).filter(([key]) => key !== "apiKey")),
           language: body.language, ...(body.aspectRatio ? { aspectRatio: body.aspectRatio } : {}),
@@ -1109,7 +1140,7 @@ export async function createBridge({
           return;
         }
         if (req.method !== "POST" || generationMatch[2]) throw bad("Not found", 404);
-        await startGeneration(job, await readBody(req));
+        await startGeneration(job, await readBody(req), { signal: submission.signal });
         json(202, job);
         return;
       }
@@ -1162,7 +1193,7 @@ export async function createBridge({
       }
       if (req.method !== "POST" || path !== "/jobs")
         throw bad("Not found", 404);
-      json(202, await startJob(submittedJob, { readSessions, assertSessionRequestActive }));
+      json(202, await startJob(submittedJob, { readSessions, assertSessionRequestActive, signal: submission.signal }));
     } catch (error) {
       if (!res.headersSent && !res.destroyed)
         json(error.status || 500, {
@@ -1173,6 +1204,7 @@ export async function createBridge({
     } finally {
       clearTimeout(sessionReadTimer);
       res.off("close", abortSessionRead);
+      res.off("close", abortSubmission);
       releaseMutation?.();
       kickBatches();
     }

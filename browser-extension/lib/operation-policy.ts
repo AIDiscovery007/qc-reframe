@@ -27,6 +27,7 @@ export const uiOperations: Readonly<Record<string, Operation>> = {
   "alchemy:cli-check": ui,
   "alchemy:cli-update": ui,
   "alchemy:cli-install": ui,
+  "alchemy:image-models": { source: "extension", transport: "message" },
   "alchemy:image-settings": { source: "extension", transport: "message" },
   "alchemy:image-settings-save": { source: "extension", transport: "message" },
   "alchemy:agent-select": { source: "extension", transport: "message" },

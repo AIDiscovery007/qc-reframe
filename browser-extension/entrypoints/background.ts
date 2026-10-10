@@ -441,6 +441,9 @@ export default defineBackground(() => {
       case "alchemy:project-thumbnail":
         if (typeof message.id !== "string" || !/^[\da-f]{64}$/.test(message.id) || (message.reference !== undefined && typeof message.reference !== "boolean")) throw new Error("无效项目");
         return bridge(`/projects/${message.id}/thumbnail${message.reference ? "?reference=1" : ""}`, token);
+      case "alchemy:image-models":
+        if (typeof message.baseUrl !== "string" || message.baseUrl.length > 2048) throw new Error("无效 Magpie 地址");
+        return bridge("/image-models", token, { baseUrl: message.baseUrl });
       case "alchemy:image-settings":
         return bridge("/image-settings", token);
       case "alchemy:image-settings-save":

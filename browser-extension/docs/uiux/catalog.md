@@ -56,6 +56,13 @@
 | popup | popup 400×740 | /popup.html?state=alignment | UI-LAYOUT-QUICK, UI-IMAGE-PREVIEW |
 | popup-narrow | popup 320×740 | /popup.html?state=alignment | UI-LAYOUT-QUICK, UI-IMAGE-PREVIEW |
 | popup-image-failed | popup 400×740 | /popup.html?state=alignment / image-failed | UI-LAYOUT-QUICK, UI-IMAGE-PREVIEW |
+| generation-readiness-workspace-magpie | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationReadinessRegression=magpie&generationDelay=60000 | generationReadinessRegression |
+| generation-readiness-popup-magpie | popup 360×740 | /popup.html?state=alignment&mode=recreate&generationReadinessRegression=magpie&generationDelay=60000 | generationReadinessRegression |
+| generation-readiness-workspace-ready | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationReadinessRegression=ready&generationDelay=60000 | generationReadinessRegression |
+| generation-readiness-popup-ready | popup 360×740 | /popup.html?state=alignment&mode=recreate&generationReadinessRegression=ready&generationDelay=60000 | generationReadinessRegression |
+| generation-readiness-workspace-blocked | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationReadinessRegression=blocked&generationDelay=60000 | generationReadinessRegression |
+| generation-readiness-workspace-legacy | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationReadinessRegression=legacy&generationDelay=60000 | generationReadinessRegression |
+| generation-readiness-workspace-legacy-empty | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationReadinessRegression=legacy-empty&generationDelay=60000 | generationReadinessRegression |
 | generation-actions | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200 | generationActionsRegression |
 | end-to-end-keyboard-workspace-cancel | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000 | endToEndKeyboard |
 | end-to-end-keyboard-workspace-legacy | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&endToEndKeyboard=1&startDelay=4000&reverseDelay=60000&start=legacy | endToEndKeyboard |
@@ -116,6 +123,8 @@
 | example-native-controls | workspace 1440×1000 | /workspace.html?state=alignment | UI-EXAMPLE-KEYBOARD |
 | agent-settings-layout-wide | workspace 1440×1000 | /workspace.html?state=library&settingsUi=wide&cli=wide | UI-EXAMPLE-STATE |
 | agent-settings-layout-narrow | workspace 320×740 | /workspace.html?state=library&settingsUi=narrow&cli=narrow | UI-EXAMPLE-STATE |
+| agent-settings-layout-360 | workspace 360×740 | /workspace.html?state=library&settingsUi=360&cli=360 | UI-EXAMPLE-STATE |
+| agent-settings-layout-956 | workspace 956×1034 | /workspace.html?state=library&settingsUi=956&cli=956 | UI-EXAMPLE-STATE |
 | agent-settings-layout-loading | workspace 320×740 | /workspace.html?state=library&settingsUi=loading&cli=loading | UI-EXAMPLE-STATE |
 | agent-settings-layout-missing | workspace 320×740 | /workspace.html?state=library&settingsUi=missing&cli=missing | UI-EXAMPLE-STATE |
 | agent-settings-layout-failed | workspace 320×740 | /workspace.html?state=library&settingsUi=failed&cli=failed | UI-EXAMPLE-STATE |

@@ -55,7 +55,7 @@ export default function AgentCliSettings({ agent, serviceBusy, onBusyChange, onU
     } catch (e) { if (mounted.current) setError((e as Error).message); }
     finally { acting.current = false; revision.current++; if (mounted.current) setPending(null); }
   };
-  const compatibility = cli?.installed ? compatibilityMessage(cli.compatibility) : "";
+  const compatibility = cli?.installed ? cli.compatibility?.error || (Object.values(cli.compatibility?.features || {}).some(feature => feature.status !== "supported") ? compatibilityMessage(cli.compatibility) : "") : "";
   const unsupported = Object.values(cli?.compatibility?.features || {}).some(feature => feature.status === "unsupported");
   return <section className="agent-cli-settings" aria-label={`${label} 管理`} aria-busy={!!pending || updating}>
     <div className="settings-cli-heading"><h3>{label} CLI</h3><span className="settings-chip">{cli ? sources[cli.source] : loadError ? "检测失败" : "检测中"}</span></div>

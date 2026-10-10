@@ -50,7 +50,7 @@ const job = {
 };
 
 // Receipts travel over the parent IPC channel, never through page-controlled state.
-const regressions = Object.fromEntries(['image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
+const regressions = Object.fromEntries(['generation-readiness', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
   .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
 const previewSources = ['agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs', 'browser-extension/lib/operation-policy.ts', 'browser-extension/bridge/image-order.mjs'];
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -261,7 +261,7 @@ const server = createServer(async (req, res) => {
           projects[0].inputVersions[mode]='new';projects[0].inputRevision=1;data.selection=selection(projects[0]);
         }
         const findJob=(id)=>projects.flatMap(p=>p.jobs).find(j=>j.id===id);
-        const models={accountLabel:'ChatGPT · 预览',selected:state==='models-new'?null:'preview-vision',reasoningEffort:state==='models-new'?undefined:'medium',models:[{model:'preview-vision',label:'Vision Model',isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:['low','medium','high','xhigh'].map(reasoningEffort=>({reasoningEffort})),status:state==='models-new'?'unverified':'verified'},{model:'preview-unavailable',label:'Unavailable Model',defaultReasoningEffort:'low',supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],status:'unverified'}]};
+        const models={verifiedAt:state==='models-new'?undefined:'2026-10-01T00:00:00.000Z',accountLabel:'ChatGPT · 预览',selected:state==='models-new'?null:'preview-vision',reasoningEffort:state==='models-new'?undefined:'medium',models:[{model:'preview-vision',label:'Vision Model',isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:['low','medium','high','xhigh'].map(reasoningEffort=>({reasoningEffort})),status:state==='models-new'?'unverified':'verified'},{model:'preview-unavailable',label:'Unavailable Model',defaultReasoningEffort:'low',supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],status:'unverified'}]};
         // Both standalone and chained fixtures use this same synthetic generation lifecycle.
         const startGeneration=async(saved,message,chained=false)=>{
           await new Promise(resolve=>setTimeout(resolve,Math.min(60000,Math.max(0,Number(previewOptions.get('generationStartDelay'))||0))));
@@ -285,10 +285,14 @@ const server = createServer(async (req, res) => {
         const batchItems=request=>request.projects.map(item=>({projectId:item.projectId,inputRevision:item.inputRevision,title:projects.find(p=>p.id===item.projectId)?.title||'已删除项目',eligible:batchAllAccepted||item.projectId!==projects[3]?.id,...(!batchAllAccepted&&item.projectId===projects[3]?.id?{error:'参考图缺失'}:{})}));
         const service={service:'qc-alchemy',version:'0.3.2',managed:previewOptions.get('restart')!=='manual',canRestart:!['old','manual'].includes(previewOptions.get('restart')),instanceId:'preview-first'};
         let restartingUntil=0;
-      let imageSaveFailed=false;
-      const imageSettings={provider:'codex',configs:{openai:{baseUrl:'https://api.openai.com/v1',model:'',hasApiKey:false},gemini:{baseUrl:'https://generativelanguage.googleapis.com/v1beta',model:'',hasApiKey:false}}};
+      let imageSaveFailed=false, magpieSaveFailed=false, magpieChangingDirectoryReads=0;
+      const imageSettings={provider:'codex',configs:{magpie:{baseUrl:'http://127.0.0.1:3425',model:''},openai:{baseUrl:'https://api.openai.com/v1',model:'',hasApiKey:false},gemini:{baseUrl:'https://generativelanguage.googleapis.com/v1beta',model:'',hasApiKey:false}}};
+        const generationReadiness=previewOptions.get('generationReadinessRegression');
+        if(['ready','legacy-empty'].includes(generationReadiness)){models.selected=null;models.verifiedAt=undefined;}
+        const generationHealth=generationReadiness==='magpie'?{generationReady:true,generationModel:'fixture/image',generationProvider:'magpie'}:generationReadiness==='ready'?{generationReady:true,generationModel:null}:generationReadiness==='blocked'?{generationReady:false,generationModel:'preview-image'}:generationReadiness==='legacy'?{generationModel:'preview-image'}:{};
         const agents={selected:'codex',agents:[{id:'codex',label:'Codex',model:'preview-vision'},{id:'pi',label:'Pi',model:'preview/pi-model'}]};
-        const piModels={selected:'preview/pi-model',accountLabel:'Pi · 预览',models:[{model:'preview/pi-model',label:'Pi Model',isDefault:true,status:'verified',supportedReasoningEfforts:[]},{model:'preview/pi-draft',label:'Pi Draft Model',status:'unverified',supportedReasoningEfforts:[]}]};
+        let piVerificationCount=0, piContextChanged=false;
+        const piModels={verifiedAt:'2026-10-01T00:00:00.000Z',selected:'preview/pi-model',accountLabel:'Pi · 预览',models:[{model:'preview/pi-model',label:'Pi Model',isDefault:true,status:'verified',supportedReasoningEfforts:[]},{model:'preview/pi-draft',label:'Pi Draft Model',status:'unverified',supportedReasoningEfforts:[]}]};
         let agentSelectFailed=false;
         const cli={detectedAt:new Date().toISOString(),checkedAt:new Date().toISOString(),installed:true,version:'0.100.0',latestVersion:'0.101.0',executable:'/example/bin/codex',source:'npm',canUpdate:true,updateAvailable:true,command:'npm install -g @openai/codex@latest',instructions:{message:'升级后确认 Reframe 使用的 CLI 路径。',loginCommand:"'/example/bin/codex' login"},compatibility:{features:Object.fromEntries(['models','reverse','generation','sessions'].map(key=>[key,{status:'supported'}]))}};
         const piCli={agent:'pi',installed:false,version:null,latestVersion:'0.60.0',executable:null,source:'missing',canInstall:true,canUpdate:false,updateAvailable:false,instructions:{message:'安装 Pi 后重新检测。'}};
@@ -458,10 +462,20 @@ const server = createServer(async (req, res) => {
           if(message.type==='alchemy:save-project-view'){const views=JSON.parse(localStorage.getItem('preview-project-views')||'{}');views[message.projectId]=message.view;localStorage.setItem('preview-project-views',JSON.stringify(views));return {ok:true};}
           if(message.type==='alchemy:state')return {ok:true,value:structuredClone({preferences:{paired:!!data.preferences.token,mode:data.preferences.mode,showHiddenProjects},selection:!showHiddenProjects&&projects.find(p=>p.id===data.selection?.projectId)?.hidden?undefined:data.selection})};
           if(message.type==='alchemy:image-settings')return previewOptions.get('imageSettingsRegression')==='legacy'?{error:'Not found'}:{ok:true,value:structuredClone(imageSettings)};
+          if(message.type==='alchemy:image-models') {
+            const stale=message.baseUrl.endsWith(':3426');
+            await new Promise(resolve=>setTimeout(resolve,stale?600:30));
+            if(message.baseUrl.endsWith(':3427'))return {error:'Magpie 连接失败（预览）'};
+            if(message.baseUrl.endsWith(':3428'))return {ok:true,value:{version:'fixture',models:[]}};
+            if(message.baseUrl.endsWith(':3430'))return {error:'Not found'};
+            const removed=message.baseUrl.endsWith(':3429')&&++magpieChangingDirectoryReads>2;
+            return {ok:true,value:{version:'fixture',models:[{id:stale?'old/image':removed?'fixture/replacement':'fixture/image',name:stale?'旧目录':'Fixture Image',inputImages:false}]}};
+          }
           if(message.type==='alchemy:image-settings-save') {
             if(!imageSaveFailed){imageSaveFailed=true;return {error:'生图设置保存失败（预览）'};}
-            const value=message.settings;imageSettings.provider=value.provider;
-            if(value.provider!=='codex')imageSettings.configs[value.provider]={baseUrl:value.baseUrl,model:value.model,hasApiKey:value.clearApiKey?false:!!value.apiKey||imageSettings.configs[value.provider].hasApiKey};
+            const value=message.settings;if(value.provider==='magpie'&&!magpieSaveFailed){magpieSaveFailed=true;return {error:'Magpie 保存失败（预览）'};}imageSettings.provider=value.provider;
+            if(value.provider==='magpie')imageSettings.configs.magpie={baseUrl:value.baseUrl,model:value.model};
+            else if(value.provider!=='codex')imageSettings.configs[value.provider]={baseUrl:value.baseUrl,model:value.model,hasApiKey:value.clearApiKey?false:!!value.apiKey||imageSettings.configs[value.provider].hasApiKey};
             return {ok:true,value:structuredClone(imageSettings)};
           }
           if(message.type==='alchemy:query'&&message.path==='/agents')return previewOptions.get('agentSettingsRegression')==='legacy'?{error:'Not found'}:{ok:true,value:structuredClone(agents)};
@@ -470,19 +484,28 @@ const server = createServer(async (req, res) => {
             if(previewOptions.has('agentSettingsRegression')&&!agentSelectFailed){agentSelectFailed=true;return {error:'Agent 设置保存失败（预览）'};}
             agents.selected=message.agent;return {ok:true,value:structuredClone(agents)};
           }
-          if((message.type==='alchemy:query'&&message.path==='/models?agent=pi')||(message.type==='alchemy:models-refresh'&&message.agent==='pi'))return {ok:true,value:structuredClone(piModels)};
+          if((message.type==='alchemy:query'&&message.path==='/models?agent=pi')||(message.type==='alchemy:models-refresh'&&message.agent==='pi')){
+            if(message.type==='alchemy:models-refresh'&&piVerificationCount===5&&!piContextChanged){piContextChanged=true;piModels.selected=null;piModels.verifiedAt=undefined;piModels.verification=undefined;piModels.models.forEach(model=>model.status='unverified');}
+            return {ok:true,value:structuredClone(piModels)};
+          }
           if((message.type==='alchemy:models-refresh'||(message.type==='alchemy:query'&&message.path==='/models'))&&cliScenario==='missing')return {error:'未找到 Codex CLI，请先安装后重新检测。'};
           if(message.type==='alchemy:models-refresh'||(message.type==='alchemy:query'&&message.path==='/models'))return {ok:true,value:structuredClone(models)};
           if(message.type==='alchemy:model-verify'&&message.agent==='pi'){
-            piModels.verification={model:message.model,status:'running'};
-            setTimeout(()=>{piModels.verification={model:message.model,status:'completed'};},500);
+            if(previewOptions.has('agentSettingsRegression'))piVerificationCount++;
+            if(piVerificationCount===4)return {error:'Pi 验证请求失败（预览），请重试。'};
+            const failed=piVerificationCount===2;
+            piModels.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:'running'};
+            setTimeout(()=>{
+              piModels.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:failed?'failed':'completed',...(failed?{error:'Pi 模型验证失败（预览），原配置保留。'}:{})};
+              if(!failed){piModels.selected=message.model;piModels.reasoningEffort=message.reasoningEffort;piModels.verifiedAt=new Date().toISOString();piModels.models.forEach(model=>model.status=model.model===message.model?'verified':'unverified');}
+            },500);
             return {ok:true,value:structuredClone(piModels)};
           }
           if(message.type==='alchemy:model-verify'){
             models.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:'running'};
             setTimeout(()=>{
               if(message.model==='preview-unavailable'){models.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:'failed',error:'该模型当前无法调用，请选择其他模型并验证。'};models.models[1].status='unavailable';}
-              else {models.selected=message.model;models.reasoningEffort=message.reasoningEffort;models.models[0].status='verified';models.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:'completed'};}
+              else {models.verifiedAt=new Date().toISOString();models.selected=message.model;models.reasoningEffort=message.reasoningEffort;models.models[0].status='verified';models.verification={model:message.model,reasoningEffort:message.reasoningEffort,status:'completed'};}
             },1800);
             return {ok:true,value:structuredClone(models)};
           }
@@ -511,7 +534,7 @@ const server = createServer(async (req, res) => {
           }
           ${galleryMessages}
           if(message.type==='alchemy:generation-thumbnail')return {ok:true,value:{image:state==='alignment'?alignment[1].image:state==='gallery'?gallery.result:template,source:{kind:'generation',jobId:message.id,generationId:message.generationId}}};
-          if(message.type==='alchemy:query')return {ok:true,value:structuredClone(message.path==='/health'?{...service,ready:true,serviceReady:true,skillReady:true,cli,hiddenProjectIds:projects.filter(p=>p.hidden).map(p=>p.id),visibleActive:visibleProjects().flatMap(p=>p.jobs).reduce((n,j)=>n+Number(j.status==='running')+(j.generations||[]).filter(g=>g.status==='running').length,0),projectsRevision:'preview-'+projectsRevision,skill:'alchemy · 预览',model:models.selected,modelBusy:models.verification?.status==='running',active:models.verification?.status==='running'?1:projects.some(p=>p.jobs.some(j=>j.status==='running'||j.generations?.some(g=>g.status==='running')))?1:0}:message.path==='/jobs'?visibleProjects().flatMap(p=>p.jobs):message.path==='/projects'?visibleProjects().map(summary):message.path.startsWith('/projects/')?structuredClone({...summary(projects.find(p=>p.id===message.path.split('/')[2])),jobs:projects.find(p=>p.id===message.path.split('/')[2]).jobs}):findJob(message.path.split('/')[2]))};
+          if(message.type==='alchemy:query')return {ok:true,value:structuredClone(message.path==='/health'?{...service,...generationHealth,ready:true,serviceReady:true,skillReady:true,cli,hiddenProjectIds:projects.filter(p=>p.hidden).map(p=>p.id),visibleActive:visibleProjects().flatMap(p=>p.jobs).reduce((n,j)=>n+Number(j.status==='running')+(j.generations||[]).filter(g=>g.status==='running').length,0),projectsRevision:'preview-'+projectsRevision,skill:'alchemy · 预览',model:models.selected,modelBusy:models.verification?.status==='running',active:models.verification?.status==='running'?1:projects.some(p=>p.jobs.some(j=>j.status==='running'||j.generations?.some(g=>g.status==='running')))?1:0}:message.path==='/jobs'?visibleProjects().flatMap(p=>p.jobs):message.path==='/projects'?visibleProjects().map(summary):message.path.startsWith('/projects/')?structuredClone({...summary(projects.find(p=>p.id===message.path.split('/')[2])),jobs:projects.find(p=>p.id===message.path.split('/')[2]).jobs}):findJob(message.path.split('/')[2]))};
           if(message.type==='alchemy:delete-projects') {
             if(state==='delete-failed')return {error:'本机服务暂时不可用，请重试'};
             if(projects.some(p=>message.ids.includes(p.id)&&summary(p).busy))return {error:'所选项目仍在逆向或生图'};
@@ -632,6 +655,8 @@ const server = createServer(async (req, res) => {
             '<body><div id="preview-notice">界面预览 · 示例数据 · 不执行逆向</div>',
           ),
       );
+    if (['/workspace.html','/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('generationReadinessRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/generation-readiness-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('imageSettingsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/image-settings-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('agentSettingsRegression'))

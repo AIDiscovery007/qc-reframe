@@ -22,7 +22,7 @@ async function setup(t, options = {}) {
     return { data: [{ id: "t1", itemsView: "full", items: [{ type: "userMessage", id: "u1", content: [{ type: "text", text: "PRIVATE_STORY_BODY" }] }] }], nextCursor: null };
   }) });
   async function start() {
-    app = await createBridge({ dataDir: dir, skillPath, generationSkillPath: skillPath, sessions, sessionReadTimeoutMs: options.sessionReadTimeoutMs,
+    app = await createBridge({ dataDir: dir, skillPath, generationContext: async () => ({ model: 'mock', provider: 'fixture', reasoningEffort: 'low', codexGeneration: true }), generationSkillPath: skillPath, sessions, sessionReadTimeoutMs: options.sessionReadTimeoutMs,
       models: { busy: false, selection: () => ({ model: "mock", provider: "mock" }), invalidate: async () => {}, close() {} },
       cli: { busy: false, close() {}, status: async () => ({}), check: options.cliCheck },
       agent: async args => { calls.push(args); return options.agent ? options.agent(args) : result; },

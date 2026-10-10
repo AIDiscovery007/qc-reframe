@@ -30,3 +30,9 @@ test("Given a historical Pi CLI failure, recovery opens Pi management without ch
   assert.equal(recoverySection("Pi 无法启动，请检查路径"), "pi-cli");
   assert.equal(recoverySection("Pi 模型当前不可用"), "models");
 });
+
+test("Given built-in generation errors, recovery targets Codex CLI before text-model keywords", () => {
+  for (const message of ["Codex 内置生图：请先登录", "Codex 内置生图：执行模型缺失，请检查配置", "Codex 内置生图：账号已变化，请重新验证", "Codex 内置生图：IMAGEGEN_SKILL_PATH 不可用"])
+    assert.equal(recoverySection(message), "cli");
+  assert.equal(recoverySection("生图 API Key 尚未配置"), "generation");
+});

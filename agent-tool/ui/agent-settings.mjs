@@ -22,6 +22,8 @@ export async function checkAgentSettings(page, scenario, capture) {
     await page.waitForFunction(() => document.querySelector('.model-settings')?.getAttribute('aria-busy') === 'false');
     await page.waitForFunction(() => document.querySelector('.agent-cli-settings .settings-chip')?.textContent !== '检测中');
   }
+  record(await page.locator('.agent-management-target h3').count() === 1, 'single CLI heading', 'one CLI heading without a duplicate management title', await page.locator('.agent-management-target h3').allTextContents());
+  record(!(await page.locator('.agent-cli-settings').innerText()).includes('功能接口检查通过'), 'quiet compatibility success', 'normal compatibility success text omitted', await page.locator('.agent-cli-settings > p').allTextContents());
   await geometry('.agent-settings > .model-settings');
   await capture('model');
   await page.locator('.settings-model-fields').scrollIntoViewIfNeeded();
@@ -38,13 +40,17 @@ export async function checkAgentSettings(page, scenario, capture) {
     await page.waitForFunction(() => document.querySelector('.model-settings .primary')?.textContent.includes('正在验证'));
     record(await primary.evaluate(node => document.activeElement === node && node.getAttribute('aria-disabled') === 'true'), 'verification focus', 'busy primary keeps keyboard focus and blocks duplicates', await primary.innerText());
     await page.waitForFunction(() => document.querySelector('.model-settings .primary')?.getAttribute('aria-disabled') === 'false');
-    await page.locator('.model-manage-link').focus(); await page.keyboard.press('Enter');
-    record(await page.locator('.agent-management-target h3').first().evaluate(node => document.activeElement === node), 'management jump', 'keyboard focus follows management link', await page.locator('.agent-management-target select').inputValue());
+    record((await primary.innerText()).includes('已验证'), 'verified configuration', 'successful Pi configuration shows a checkmark and 已验证', await primary.innerText());
+    await page.evaluate(() => chrome.runtime.sendMessage({ type: 'alchemy:open-workspace', view: 'settings', section: 'cli', context: { mode: 'recreate' } }));
+    const management = page.locator('.agent-management-target');
+    await page.waitForFunction(() => document.activeElement === document.querySelector('.agent-management-target'));
+    record(await management.evaluate(node => document.activeElement === node && node.tabIndex === -1 && node.getAttribute('role') === 'group'), 'management recovery focus', 'legacy CLI recovery focuses named current management group', await management.getAttribute('aria-label'));
+    record(await radio.isChecked() && (await page.locator('.agent-cli-settings h3').innerText()) === 'Pi CLI', 'management follows Agent', 'Codex recovery preserves selected Pi and points to Codex card', await page.locator('.agent-management-target').innerText());
     await page.keyboard.press('Tab');
-    record(await page.locator('.agent-management-target select').evaluate(node => document.activeElement === node), 'management tab order', 'Tab enters management target', await page.locator('.agent-management-target select').inputValue());
-    await page.locator('.agent-management-target select').selectOption('codex');
-    await page.locator('.agent-cli-settings h3').filter({ hasText: 'Codex CLI' }).waitFor();
-    record(await radio.isChecked(), 'independent management', 'managing Codex preserves Pi reverse selection', await radio.isChecked());
+    record(await page.locator('.agent-cli-settings .primary').evaluate(node => document.activeElement === node), 'management tab order', 'Tab reaches current Agent install action', await page.locator('.agent-cli-settings .primary').innerText());
+    await page.locator('input[name="reverse-agent"][value="codex"]').focus(); await page.keyboard.press('Space');
+    await page.waitForFunction(() => document.querySelector('.agent-cli-settings h3')?.textContent === 'Codex CLI');
+    record((await management.getAttribute('aria-label')) === 'Codex CLI 管理' && await management.locator('h3').count() === 1, 'management heading', 'card selection updates single CLI heading and accessible group name', await management.locator('h3').innerText());
   }
   await page.locator('.agent-management-target').scrollIntoViewIfNeeded();
   await geometry('.agent-management-target');

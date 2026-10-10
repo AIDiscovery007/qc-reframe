@@ -9,19 +9,19 @@ const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 const result = { title: 'test', promptZh: '一只猫', promptEn: 'A cat', negativePrompt: 'blur', observations: [], uncertainties: [] };
 const settings = { provider: 'openai', baseUrl: 'https://images.example/v1', model: 'image-model', apiKey: 'private-fixture-key' };
 const wait = async fn => { for (let i = 0; i < 300; i++) { const value = await fn(); if (value) return value; await new Promise(r => setTimeout(r, 10)); } assert.fail('timeout'); };
-async function setup(t) {
+async function setup(t, magpieInspector = async () => ({ version: "test", models: [{ id: "fixture/image" }] })) {
   const dir = await mkdtemp(join(tmpdir(), 'reframe-image-bridge-'));
   const skillPath = join(dir, 'SKILL.md'); await writeFile(skillPath, 'name: alchemy');
   const reverse = [], generation = [], codex = [], invalidated = [];
   const store = { busy: false, selectedModel: 'text-model', selection: () => ({ model: 'text-model' }), invalidate: async (...args) => invalidated.push(args), close() {} };
-  const app = await createBridge({ dataDir: dir, skillPath, generationSkillPath: join(dir, 'absent.md'), models: store, piModels: store,
+  const app = await createBridge({ magpieInspector, dataDir: dir, skillPath, generationSkillPath: join(dir, 'absent.md'), models: store, piModels: store,
     cli: { busy: false, status: async () => ({}), close() {} },
     compatibility: { snapshot: () => ({}), getCompatibility: async () => ({ features: { generation: { status: 'unsupported', message: 'Codex unavailable' } } }) },
     agent: args => new Promise((resolve, reject) => { reverse.push({ args, resolve, reject }); args.signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true }); }),
     apiGenerator: args => new Promise((resolve, reject) => { generation.push({ args, resolve, reject }); args.signal.addEventListener('abort', () => reject(new Error('API 已取消')), { once: true }); }),
     generator: async args => { codex.push(args); return decodeImage(image); } });
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening');
-  const request = async (path, body) => { const response = await fetch(`http://127.0.0.1:${app.server.address().port}${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${app.token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); return { status: response.status, body: await response.json() }; };
+  const request = async (path, body, signal) => { const response = await fetch(`http://127.0.0.1:${app.server.address().port}${path}`, { signal, method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${app.token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); return { status: response.status, body: await response.json() }; };
   t.after(async () => { for (const item of reverse) item.reject(new Error('cleanup')); for (const item of generation) item.reject(new Error('cleanup')); await wait(async () => !(await request('/health')).body.active); app.server.closeAllConnections(); await new Promise(r => app.server.close(r)); await rm(dir, { recursive: true, force: true }); });
   return { dir, reverse, generation, codex, invalidated, request };
 }
@@ -129,4 +129,88 @@ test('user cancels queued API batch items and a later batch uses the newly saved
   assert.equal(s.generation[2].args.settings.imageProvider, 'gemini');
   assert.equal(s.generation[2].args.settings.apiKey, 'new-fixture-key');
   s.generation[2].resolve(decodeImage(image));
+});
+
+const magpie = { provider: 'magpie', baseUrl: 'http://127.0.0.1:3425', model: 'fixture/image' };
+test('user using Magpie needs no provider key and freezes a manual request with default size and output metadata', async t => {
+  // Given a keyless Magpie source, When a manual request finishes after settings change, Then its original source and output metadata remain.
+  const s = await setup(t);
+  assert.equal((await s.request('/image-models', { baseUrl: magpie.baseUrl })).body.models[0].id, magpie.model);
+  assert.equal((await s.request('/image-settings', magpie)).status, 200);
+  assert.equal((await s.request('/health')).body.generationReady, true);
+  const task = await s.request('/jobs', { image, mode: 'recreate' });
+  await wait(() => s.reverse.length); s.reverse[0].resolve(result);
+  await wait(async () => !(await s.request('/health')).body.active);
+  assert.equal((await s.request(`/jobs/${task.body.id}/generations`, { language: 'en' })).status, 202);
+  await wait(() => s.generation.length);
+  await s.request('/image-settings', settings);
+  assert.equal(s.generation[0].args.settings.provider, 'magpie');
+  assert.equal(s.generation[0].args.settings.apiKey, undefined);
+  assert.equal(s.generation[0].args.aspectRatio, undefined);
+  s.generation[0].resolve({ ...decodeImage(image), gatewayReportedModel: 'resolved/image', outputSize: { width: 1, height: 1 } });
+  await wait(async () => !(await s.request('/health')).body.active);
+  const saved = (await s.request(`/jobs/${task.body.id}`)).body.generations[0];
+  assert.equal(saved.status, 'completed'); assert.equal(saved.provider, 'magpie');
+  assert.equal(saved.model, magpie.model); assert.equal(saved.sizeMode, 'gateway-default');
+  assert.equal(saved.gatewayReportedModel, 'resolved/image'); assert.deepEqual(saved.outputSize, { width: 1, height: 1 });
+  assert.equal(s.codex.length, 0);
+});
+test('user using Magpie rejects unverified workflows and explicit ratios before any model call', async t => {
+  // Given unsupported Magpie options and an offline gateway, When submitted, Then neither the gateway nor a model is called.
+  let inspected = 0;
+  const s = await setup(t, async () => { inspected++; throw new Error('offline gateway'); }); await s.request('/image-settings', magpie);
+  const project = (await s.request('/projects', { image })).body;
+  assert.equal((await s.request('/jobs', { image, mode: 'recreate', generation: { language: 'en' } })).status, 400);
+  assert.equal((await s.request('/batches/preview', { projects: [{ projectId: project.id, inputRevision: project.inputRevision }] })).status, 400);
+  assert.equal((await s.request('/batches', { requestId: 'magpie-unsupported', language: 'en', projects: [{ projectId: project.id, inputRevision: project.inputRevision }] })).status, 400);
+  assert.equal(inspected, 0); assert.equal(s.reverse.length, 0);
+  for (const mode of ['recreate', 'reenact']) {
+    const task = await s.request('/jobs', { image, mode, ...(mode === 'reenact' ? { reenact: { subjectImage: image, basePrompt: 'cat' } } : {}) });
+    await wait(() => s.reverse.length > (mode === 'recreate' ? 0 : 1)); s.reverse.at(-1).resolve(result);
+    await wait(async () => !(await s.request('/health')).body.active);
+    const rejected = await s.request(`/jobs/${task.body.id}/generations`, { language: 'en', ...(mode === 'recreate' ? { aspectRatio: { width: 1, height: 1 } } : {}) });
+    assert.equal(rejected.status, 400); assert.match(rejected.body.error, /Magpie/); assert.equal(inspected, 0);
+  }
+  assert.equal(s.generation.length, 0); assert.equal(s.codex.length, 0);
+});
+test('user using Magpie refuses models absent from the image catalog without fallback', async t => {
+  // Given a removed model, When generation is requested, Then the user receives a recoverable refusal without fallback.
+  const s = await setup(t, async () => ({ version: 'test', models: [] })); await s.request('/image-settings', magpie);
+  const task = await s.request('/jobs', { image, mode: 'recreate' });
+  await wait(() => s.reverse.length); s.reverse[0].resolve(result); await wait(async () => !(await s.request('/health')).body.active);
+  assert.equal((await s.request(`/jobs/${task.body.id}/generations`, { language: 'en' })).status, 409);
+  assert.equal(s.generation.length, 0); assert.equal(s.codex.length, 0);
+});
+
+test('user disconnects while Magpie catalog is pending without starting generation', async t => {
+  // Given a pending catalog check, When the submission disconnects, Then its cancellation prevents generation.
+  let inspecting;
+  const s = await setup(t, ({ signal }) => new Promise((resolve, reject) => {
+    inspecting = { signal, resolve }; signal.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { status: 499 })), { once: true });
+  }));
+  await s.request('/image-settings', magpie);
+  const task = await s.request('/jobs', { image, mode: 'recreate' });
+  await wait(() => s.reverse.length); s.reverse[0].resolve(result); await wait(async () => !(await s.request('/health')).body.active);
+  const controller = new AbortController();
+  const submission = s.request(`/jobs/${task.body.id}/generations`, { language: 'en' }, controller.signal).catch(error => error);
+  await wait(() => inspecting); controller.abort(); await submission;
+  await wait(() => inspecting.signal.aborted);
+  assert.equal(s.generation.length, 0); assert.equal(s.codex.length, 0);
+  assert.equal((await s.request(`/jobs/${task.body.id}`)).body.generations?.length || 0, 0);
+});
+test('user cancels Magpie or receives a provider failure without losing the prompt or retrying elsewhere', async t => {
+  // Given a completed prompt, When generation is cancelled or fails, Then terminal state persists and another model is never started.
+  const s = await setup(t); await s.request('/image-settings', magpie);
+  const task = await s.request('/jobs', { image, mode: 'recreate' });
+  await wait(() => s.reverse.length); s.reverse[0].resolve(result); await wait(async () => !(await s.request('/health')).body.active);
+  const started = await s.request(`/jobs/${task.body.id}/generations`, { language: 'en' }); await wait(() => s.generation.length);
+  const id = started.body.generations[0].id;
+  await s.request(`/jobs/${task.body.id}/generations/${id}/cancel`, {}); await wait(async () => !(await s.request('/health')).body.active);
+  assert.equal(s.generation[0].args.signal.aborted, true);
+  assert.equal((await s.request(`/jobs/${task.body.id}`)).body.generations[0].status, 'cancelled');
+  await s.request(`/jobs/${task.body.id}/generations`, { language: 'en' }); await wait(() => s.generation.length === 2);
+  s.generation[1].reject(new Error('gateway failed')); await wait(async () => !(await s.request('/health')).body.active);
+  const job = (await s.request(`/jobs/${task.body.id}`)).body;
+  assert.equal(job.status, 'completed'); assert.deepEqual(job.result, result); assert.equal(job.generations[1].status, 'failed');
+  assert.equal(s.generation.length, 2); assert.equal(s.codex.length, 0);
 });

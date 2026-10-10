@@ -3,6 +3,14 @@ import { homedir } from "node:os";
 import { join, relative, isAbsolute } from "node:path";
 import { orderedImages } from "./image-order.mjs";
 import { runCodex } from "./agent.mjs";
+import { withCodex } from "./codex-rpc.mjs";
+import { readGenerationContext, generationContextError } from "./model-context.mjs";
+
+export async function readGenerationSettings({ cwd, signal }) {
+  try {
+    return await withCodex({ cwd, signal, timeoutMs: 45_000 }, request => readGenerationContext(request, cwd));
+  } catch (error) { throw generationContextError(error); }
+}
 
 export const imagegenSkillPath = () => process.env.IMAGEGEN_SKILL_PATH ||
   join(process.env.CODEX_HOME || join(homedir(), ".codex"), "skills/.system/imagegen/SKILL.md");

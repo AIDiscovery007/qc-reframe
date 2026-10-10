@@ -216,7 +216,7 @@ async function setup(t, options = {}, prepare) {
   if (prepare) await prepare(dir);
   let app;
   async function start() {
-    app = await createBridge({ dataDir: dir, skillPath, generationSkillPath: skillPath, agent: async () => result, generator: async () => ({ ...decodeImage(image) }), ...options });
+    app = await createBridge({ dataDir: dir, skillPath, generationContext: async () => ({ model: 'test-model', provider: 'fixture', reasoningEffort: 'low', codexGeneration: true }), generationSkillPath: skillPath, agent: async () => result, generator: async () => ({ ...decodeImage(image) }), ...options });
     app.server.listen(0, "127.0.0.1");
     await once(app.server, "listening");
   }

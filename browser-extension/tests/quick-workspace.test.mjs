@@ -433,8 +433,8 @@ function callbackProps(source, component, names) {
 }
 
 function quickGenerationCallbacks(globals, job) {
-  const names = ['onUpdate', 'onGenerationViewUpdate'];
-  const workspace = evaluate(`${extract(app, ['generationView', 'revealGeneratedImage'])}\nconst props = ${callbackProps(app, 'QuickWorkspace', names)};`, globals, ['props']).props;
+  const names = ['gatewayDefaultSize', 'onUpdate', 'onGenerationViewUpdate'];
+  const workspace = evaluate(`${extract(app, ['generationView', 'revealGeneratedImage'])}\nconst props = ${callbackProps(app, 'QuickWorkspace', names)};`, { magpie: false, ...globals }, ['props']).props;
   const result = evaluate(`const props = ${callbackProps(quick, 'QuickResult', names)};`, workspace, ['props']).props;
   const ast = ts.createSourceFile('QuickWorkspace.tsx', quick, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let options;
@@ -446,6 +446,19 @@ function quickGenerationCallbacks(globals, job) {
   assert.ok(options, 'QuickResult must use the shared generation session');
   return evaluate(`const options = ${options};`, { ...result, job, lang: 'zh', subject: '', disabled: false, generation: job.generations?.at(-1) }, ['options']).options;
 }
+
+test('quick Magpie submission omits historical ratios without changing history', () => {
+  for (const history of ['manual', 'automatic']) {
+    const aspectRatio = { width: 3, height: 2 };
+    const job = { id: 'job-A', mode: 'recreate', result: { promptZh: '完整提示词' },
+      ...(history === 'manual' ? { generations: [{ id: 'old', aspectRatio }] } : { autoGeneration: { aspectRatio } }) };
+    const before = JSON.stringify(job);
+    const globals = { referenceContext: { current: {} }, selectionRevision: { current: 0 }, updateJob() {} };
+    assert.equal(quickGenerationCallbacks(globals, job).aspectRatio, aspectRatio);
+    assert.equal(quickGenerationCallbacks({ ...globals, magpie: true }, job).aspectRatio, undefined);
+    assert.equal(JSON.stringify(job), before);
+  }
+});
 
 for (const cancel of [false, true]) for (const navigation of ['unchanged', 'A-to-B', 'A-to-B-to-A', 'same-job-new-navigation', 'changed-context']) {
   test(`quick ${cancel ? 'cancellation' : 'submission'} keeps durable updates separate from view delivery: ${navigation}`, async () => {

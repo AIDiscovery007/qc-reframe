@@ -18,7 +18,7 @@ async function setup(t, status = "supported", probe, overrides = {}) {
   const report = { checkedAt: "2026-10-05T00:00:00.000Z", features: Object.fromEntries(["models", "reverse", "generation", "sessions"].map(key => [key, { status }])) };
   const calls = [], probes = [];
   const cliState = { installed: true, version: "0.1.0", updateAvailable: true };
-  const app = await createBridge({ dataDir: dir, skillPath, generationSkillPath: skillPath,
+  const app = await createBridge({ dataDir: dir, skillPath, generationContext: async () => ({ model: 'mock', provider: 'fixture', reasoningEffort: 'low', codexGeneration: true }), generationSkillPath: skillPath,
     compatibility: { snapshot: () => structuredClone(report), getCompatibility: async options => { probes.push(options); return probe ? probe() : structuredClone(report); } },
     cli: { busy: false, close() {}, peek: () => cliState, status: async () => cliState, check: async () => { calls.push("cli-check"); return cliState; } },
     models: { busy: false, selectedModel: "mock", close() {}, selection: () => ({ model: "mock", provider: "mock" }), invalidate: async () => {},

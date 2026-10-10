@@ -17,6 +17,7 @@ test('user defaults to Codex and sees no API credentials with legacy settings', 
   const store = await createImageSettingsStore(options);
   assert.deepEqual(store.selection(), { provider: 'codex' });
   assert.deepEqual(store.view(), { provider: 'codex', configs: {
+    magpie: { baseUrl: 'http://127.0.0.1:3425/v1', model: '' },
     openai: { baseUrl: 'https://api.openai.com/v1', model: '', hasApiKey: false },
     gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: '', hasApiKey: false },
   } });
@@ -126,6 +127,7 @@ test('user retains previous settings after a failed write and can retry saving',
   await rename(options.path, options.path + '.backup');
   await mkdir(options.path);
   await assert.rejects(store.save({ provider: 'gemini', model: 'should-not-save', apiKey: 'synthetic-other-key' }));
+  await assert.rejects(store.save({ provider: 'magpie', model: 'fixture/image' }));
   assert.equal(store.selection().model, 'original');
   assert.equal(await readFile(options.path + '.backup', 'utf8'), oldBytes);
   assert.deepEqual((await readdir(options.dataDir)).sort(), ['image-settings.json', 'image-settings.json.backup']);
@@ -144,4 +146,21 @@ test('user receives a safe error for corrupt settings while the original file is
     await assert.rejects(createImageSettingsStore(options), error => /原文件已保留/.test(error.message) && !error.message.includes('synthetic-secret'));
     assert.equal(await readFile(options.path, 'utf8'), bytes);
   }
+});
+
+test('user saves Magpie without a supplier key while old settings and readiness remain consistent', async t => {
+  // Given direct settings, When switching and reopening, Then no key is moved and incomplete models remain blocked.
+  const options = await setup(t), store = await createImageSettingsStore(options);
+  await store.save({ provider: 'openai', model: 'legacy-model', apiKey: 'legacy-private-key' });
+  await store.save({ provider: 'magpie', baseUrl: 'http://127.0.0.1:3425', model: '' });
+  assert.equal(store.ready(), false); assert.throws(() => store.selection(), { status: 409 });
+  await store.save({ provider: 'magpie', model: 'source/image-model' });
+  assert.equal(store.ready(), true);
+  assert.deepEqual(store.selection(), { provider: 'magpie', baseUrl: 'http://127.0.0.1:3425/v1', model: 'source/image-model' });
+  assert.equal(store.view().configs.magpie.hasApiKey, undefined);
+  const reloaded = await createImageSettingsStore(options);
+  assert.deepEqual(reloaded.selection(), store.selection());
+  await reloaded.save({ provider: 'openai' }); assert.equal(reloaded.selection().apiKey, 'legacy-private-key');
+  for (const patch of [{ apiKey: 'fake-key' }, { clearApiKey: true }, { model: 'bare-model' }, { baseUrl: 'https://remote.example/v1' }])
+    await assert.rejects(store.save({ provider: 'magpie', ...patch }), { status: 400 });
 });

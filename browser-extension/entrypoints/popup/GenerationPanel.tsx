@@ -18,7 +18,8 @@ const ratios = ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"];
 
 export const GenerationEffectContext = createContext<ComponentType<{ running: boolean; image: string; failed: boolean }> | null>(null);
 
-export default function GenerationPanel({ onAspectRatioChange, targetGeneration, onTargetSelected, job, lang, disabled, disabledReason = "", subjectImage, subjects, inputPreview, onUpdate, workspace = false, actionsTarget, hideActions = false, versionNumber = 1, drawerOpen = true, onRequestState, requestError = "", requestPending = false }: {
+export default function GenerationPanel({ gatewayDefaultSize = false, onAspectRatioChange, targetGeneration, onTargetSelected, job, lang, disabled, disabledReason = "", subjectImage, subjects, inputPreview, onUpdate, workspace = false, actionsTarget, hideActions = false, versionNumber = 1, drawerOpen = true, onRequestState, requestError = "", requestPending = false }: {
+  gatewayDefaultSize?: boolean;
   onAspectRatioChange?(ratio?: AspectRatio): void;
   targetGeneration?: string; onTargetSelected?(): void; requestPending?: boolean; requestError?: string; drawerOpen?: boolean; onRequestState?(pending: boolean, error?: string): void;
   inputPreview?: ReactNode; workspace?: boolean; hideActions?: boolean; actionsTarget?: HTMLElement | null; versionNumber?: number;
@@ -37,7 +38,7 @@ export default function GenerationPanel({ onAspectRatioChange, targetGeneration,
   const [ratioHeight, setRatioHeight] = useState(String(previousRatio?.height || 1));
   const ratioHintId = useId();
   const [width = NaN, height = NaN] = ratio === "custom" ? [Number(ratioWidth), Number(ratioHeight)] : ratio.split(":").map(Number);
-  useEffect(() => { onAspectRatioChange?.(ratio === "auto" ? undefined : { width, height }); }, [ratio, width, height]);
+  useEffect(() => { onAspectRatioChange?.(gatewayDefaultSize || ratio === "auto" ? undefined : { width, height }); }, [gatewayDefaultSize, ratio, width, height]);
   const [copied, setCopied] = useState("");
   const [copyError, setCopyError] = useState("");
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -45,7 +46,7 @@ export default function GenerationPanel({ onAspectRatioChange, targetGeneration,
   const generations = job.generations || [];
   const generation = generations.find((item) => item.id === selected) || generations.at(-1);
   const controls = useGeneration({ job, lang, disabled, subjectImage, subjects, generation, compare, requestPending,
-    aspectRatio: ratio === "auto" ? undefined : { width, height }, onUpdate, onRequestState });
+    aspectRatio: gatewayDefaultSize || ratio === "auto" ? undefined : { width, height }, onUpdate, onRequestState });
   const { asset, original, comparisonError, imageError, running, multi, inputsReady, generic, incomplete, validRatio } = controls;
   const busy = controls.busy || requestPending;
   const submitting = controls.submitting || requestPending;
@@ -83,7 +84,7 @@ export default function GenerationPanel({ onAspectRatioChange, targetGeneration,
     }
   };
 
-  const ratioControls = <div className="generation-ratio">
+  const ratioControls = gatewayDefaultSize ? <p className="hint">尺寸：Magpie 网关默认（暂不支持指定比例）</p> : <div className="generation-ratio">
     <div className="generation-ratio-fields">
       <SelectField label={workspace ? "目标尺寸" : "图片比例"} title="按宽高比例生成，实际像素以结果为准" value={ratio} disabled={disabled || busy || !!running} aria-describedby={validRatio ? undefined : ratioHintId} onChange={event => setRatio(event.target.value)}>
         <option value="auto">自动</option>
@@ -152,6 +153,7 @@ export default function GenerationPanel({ onAspectRatioChange, targetGeneration,
       onCancel={event => { event.preventDefault(); setModal(undefined); }} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); event.preventDefault(); setModal(undefined); } }}>
       <div className="modal-head"><img src={logo} alt="" /><h2>本次生成信息</h2><button className="close-btn" aria-label="关闭窗口" onClick={() => setModal(undefined)}>×</button></div>
       <div className="generation-details">
+        {modal.provider === "magpie" && <p className="hint">Magpie · 网关默认尺寸{modal.outputSize ? ` · ${modal.outputSize.width} × ${modal.outputSize.height} px` : ""}{modal.gatewayReportedModel ? ` · 网关返回模型：${modal.gatewayReportedModel}` : ""}</p>}
         <p className="hint">模型：{modal.model || job.model || "未记录"} · 语言：{modal.language === "zh" ? "中文" : "英文"}</p>
         <p className="hint">输入：{job.mode === "recreate" ? "纯文字，不附参考图" : job.mode === "session" ? "风格参考图 + 会话专属提示词" : multi ? `${modal.subjects?.length || 0} 张主体图 + 参考模板` : "生成时的主体图 + 参考图"}</p>
         <div className="prompt-box"><div className="prompt-text">{modal.prompt || "此记录未保存提示词快照。"}</div><div className="negative"><p>排除项：{modal.negativePrompt || "无"}</p></div></div>

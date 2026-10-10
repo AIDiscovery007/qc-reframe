@@ -11,7 +11,8 @@ import Icon from "./Icon";
 
 const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
 
-export default function QuickWorkspace({ revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, referenceIndex, onImageOrder, instruction, job, disabled, modeDisabled, reverseDisabled, continuous, submitting, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onGenerate, chainDisabled, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, onGenerationViewUpdate, generationDisabled, generationHint }: {
+export default function QuickWorkspace({ gatewayDefaultSize = false, revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, referenceIndex, onImageOrder, instruction, job, disabled, modeDisabled, reverseDisabled, continuous, submitting, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onGenerate, chainDisabled, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, onGenerationViewUpdate, generationDisabled, generationHint }: {
+  gatewayDefaultSize?: boolean;
   revealPrompt?: number; targetGeneration?: string; contextKey: string; selection?: Selection; title?: string; mode: Mode; subject: string; instruction: string; job?: Job;
   referenceIndex: number; onImageOrder(referenceIndex: number, onSaved: () => void): Promise<void>;
   generationHint?: string; generationDisabled: boolean; disabled: boolean; modeDisabled: boolean; reverseDisabled: boolean; continuous: boolean; submitting: boolean; status?: string; stale: boolean; cancelling: boolean; copied: boolean; lang: "zh" | "en"; versions: ReactNode;
@@ -131,15 +132,15 @@ export default function QuickWorkspace({ revealPrompt, targetGeneration, context
       <p className="quick-prompt-text" data-reminder-task={job.id}>{lang === "zh" ? job.result.promptZh : job.result.promptEn}</p>
       <button className="text-button" onClick={onWorkspace}>完整编辑<Icon name="arrow" /></button>
     </section>}
-    {job && <QuickResult key={job.id} targetGeneration={targetGeneration} job={job} lang={lang} subject={subject} disabled={generationDisabled || uploading} hint={generationHint} onSubject={() => subjectFile.current?.click()} onReverse={onReverse} onUpdate={onUpdate} onGenerationViewUpdate={onGenerationViewUpdate} onWorkspace={onWorkspace} />}
+    {job && <QuickResult gatewayDefaultSize={gatewayDefaultSize} key={job.id} targetGeneration={targetGeneration} job={job} lang={lang} subject={subject} disabled={generationDisabled || uploading} hint={generationHint} onSubject={() => subjectFile.current?.click()} onReverse={onReverse} onUpdate={onUpdate} onGenerationViewUpdate={onGenerationViewUpdate} onWorkspace={onWorkspace} />}
   </section>;
 }
 
-function QuickResult({ targetGeneration, job, lang, subject, disabled, hint, onSubject, onReverse, onUpdate, onGenerationViewUpdate, onWorkspace }: { targetGeneration?: string; hint?: string; onSubject(): void; onReverse(): void; job: Job; lang: "zh" | "en"; subject: string; disabled: boolean; onUpdate(job: Job): void; onGenerationViewUpdate(): void; onWorkspace(): void }) {
+function QuickResult({ gatewayDefaultSize, targetGeneration, job, lang, subject, disabled, hint, onSubject, onReverse, onUpdate, onGenerationViewUpdate, onWorkspace }: { gatewayDefaultSize: boolean; targetGeneration?: string; hint?: string; onSubject(): void; onReverse(): void; job: Job; lang: "zh" | "en"; subject: string; disabled: boolean; onUpdate(job: Job): void; onGenerationViewUpdate(): void; onWorkspace(): void }) {
   const running = job.generations?.find(item => item.status === "running");
   const generation = job.generations?.find(item => item.id === targetGeneration) || running || job.generations?.at(-1);
   const controls = useGeneration({ job, lang, disabled, subjectImage: subject, generation, allowMulti: false,
-    aspectRatio: generation ? generation.aspectRatio : job.autoGeneration?.aspectRatio, onUpdate, onViewUpdate: onGenerationViewUpdate });
+    aspectRatio: gatewayDefaultSize ? undefined : generation ? generation.aspectRatio : job.autoGeneration?.aspectRatio, onUpdate, onViewUpdate: onGenerationViewUpdate });
   const { generic, incomplete, inputsReady, asset, busy: cancelling } = controls;
   const error = controls.error || controls.imageError;
   const key = `${job.id}:${generation?.id}`;

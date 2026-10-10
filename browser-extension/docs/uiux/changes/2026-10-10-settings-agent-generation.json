@@ -1,0 +1,199 @@
+{
+  "schemaVersion": 1,
+  "intent": "按人类九项批注精简设置页，CLI跟随Agent卡片，验证成功绑定当前配置，内置生图独立于文字模型",
+  "createdAt": "2026-10-10T03:04:29.397Z",
+  "reviewStatus": "proposed",
+  "files": [
+    {
+      "path": "browser-extension/entrypoints/popup/AgentSettings.tsx",
+      "sha256": "9a697a29ebff9eecc6900a784c0419939b00400f975aac25e53a8bd88e60faeb"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/ModelSettings.tsx",
+      "sha256": "c45d8454a0bff6b7ecd8205fe1cba86098f3bfa7dc0d5cc7b32147c8973f114c"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/ImageGenerationSettings.tsx",
+      "sha256": "af77e3c9c7478aefc6d22c40b917f056f4de6c6c8e3eee45c62baba21e33e34f"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/SettingsCenter.tsx",
+      "sha256": "c82046ecd819d51d6ca33938d5973571578d9d426bcb013ca2c3d002c8b1cf24"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/App.tsx",
+      "sha256": "10327d8af9213b703342431d0bf92c75bc11f99b66b512ae9c4a371e4c600302"
+    },
+    {
+      "path": "browser-extension/entrypoints/popup/settings-center.css",
+      "sha256": "97c6a18efe6fb934532949ce08f9f8be4f4b4cefb4114b49658524a0f9aece10"
+    },
+    {
+      "path": "browser-extension/lib/codex-status.ts",
+      "sha256": "34708b7ba221a65a5225ab58db9cc14cc78e5d9d7533b29151758c3a2b954de9"
+    },
+    {
+      "path": "agent-tool/preview.mjs",
+      "sha256": "f3cfd4e049360b07a6ee153691cbf2719d05eadd4848e4936ff6ac5d06b70fef"
+    },
+    {
+      "path": "agent-tool/ui/agent-settings.mjs",
+      "sha256": "599af49568aebbf4902f7ed0cdd1fdf19d205604944f77147b8d32dd7f039494"
+    },
+    {
+      "path": "agent-tool/ui/catalog.mjs",
+      "sha256": "ae277c2065d237f5ba3d1efd8a1127b9b0dd94e71239fc8239ac0e6dbea3fcf9"
+    },
+    {
+      "path": "browser-extension/tests/agent-settings.browser.js",
+      "sha256": "da82de4cab2dadc0d7038e1905ecf179fd2be53ba54836084b27d7f557d1eecb"
+    },
+    {
+      "path": "browser-extension/tests/settings-recovery.browser.js",
+      "sha256": "0d5afc3bc868e665485cbf1f893500e3e5f07b154e562270e99bee3c52c3853c"
+    },
+    {
+      "path": "browser-extension/tests/image-settings.browser.js",
+      "sha256": "eb4371f8ed66ebaf03ec73a82ce2e63b9bacbfe6c03ce23527655939eecc7ad4"
+    },
+    {
+      "path": "browser-extension/tests/generation-readiness.browser.js",
+      "sha256": "35e014d35582d7affc57aec9ef383661b146edd61fba6cb05f99c79ff27836b9"
+    }
+  ],
+  "rules": [
+    "UI-CSS-IMPORT",
+    "UI-TOKEN-DEFINED",
+    "UI-TOKEN-COLOR",
+    "UI-LAYOUT-CANVAS",
+    "UI-LAYOUT-QUICK",
+    "UI-IMAGE-PREVIEW",
+    "UI-IMAGE-VIEWPORT",
+    "UI-EXAMPLE-STATE",
+    "UI-EXAMPLE-KEYBOARD"
+  ],
+  "scenarios": [
+    "batch-toolbar-360",
+    "batch-toolbar-650",
+    "batch-toolbar-651",
+    "batch-toolbar-877",
+    "batch-toolbar-1440",
+    "batch-recreate-mixed",
+    "batch-recreate-retry",
+    "batch-recreate-late",
+    "batch-recreate-narrow",
+    "batch-recreate-keyboard",
+    "batch-recreate-history",
+    "batch-recreate-hidden",
+    "batch-recreate-all-accepted",
+    "batch-recreate-preflight-hidden",
+    "batch-recreate-retry-hidden",
+    "workspace-wide",
+    "workspace-prompt",
+    "workspace-narrow",
+    "popup",
+    "popup-narrow",
+    "popup-image-failed",
+    "generation-readiness-workspace-ready",
+    "generation-readiness-popup-ready",
+    "generation-readiness-workspace-blocked",
+    "generation-readiness-workspace-legacy",
+    "generation-readiness-workspace-legacy-empty",
+    "generation-actions",
+    "end-to-end-keyboard-workspace-cancel",
+    "end-to-end-keyboard-workspace-legacy",
+    "end-to-end-keyboard-workspace-failure",
+    "end-to-end-keyboard-workspace-tab",
+    "end-to-end-keyboard-workspace-tab-failure",
+    "end-to-end-keyboard-workspace-project",
+    "end-to-end-keyboard-workspace-project-failure",
+    "end-to-end-keyboard-popup-cancel",
+    "end-to-end-keyboard-popup-legacy",
+    "end-to-end-keyboard-popup-failure",
+    "end-to-end-keyboard-popup-tab",
+    "end-to-end-keyboard-popup-tab-failure",
+    "end-to-end-keyboard-popup-project",
+    "end-to-end-keyboard-popup-project-failure",
+    "end-to-end-popup-start-failed",
+    "end-to-end-workspace",
+    "end-to-end-popup",
+    "end-to-end-cancel",
+    "end-to-end-phase-cancel",
+    "end-to-end-context",
+    "end-to-end-reverse-failed",
+    "end-to-end-generation-failed",
+    "image-order-paired",
+    "image-order-multi",
+    "image-order-legacy",
+    "image-order-failed",
+    "image-order-popup",
+    "image-instruction-default-paired",
+    "image-instruction-legacy-paired",
+    "image-instruction-default-multi",
+    "image-order-keyboard-new",
+    "image-order-keyboard-history",
+    "image-order-keyboard-failure",
+    "image-order-keyboard-late",
+    "auto-style",
+    "creation-context",
+    "settings-recovery-narrow",
+    "settings-recovery",
+    "image-settings-wide",
+    "image-settings-narrow",
+    "image-settings-legacy",
+    "example-workspace-empty",
+    "example-popup-empty",
+    "example-input-loading",
+    "example-reverse-busy",
+    "example-reverse-failed",
+    "example-no-model",
+    "example-long-instruction",
+    "example-narrow-input",
+    "example-narrow-result",
+    "example-image-viewer",
+    "example-image-viewer-portrait",
+    "example-image-viewer-narrow",
+    "example-image-viewer-short",
+    "example-image-viewer-result-short",
+    "example-image-viewer-result-popup",
+    "example-native-controls",
+    "agent-settings-layout-wide",
+    "agent-settings-layout-narrow",
+    "agent-settings-layout-360",
+    "agent-settings-layout-956",
+    "agent-settings-layout-loading",
+    "agent-settings-layout-missing",
+    "agent-settings-layout-failed",
+    "agent-settings-layout-custom",
+    "agent-settings-layout-updating",
+    "agent-settings-layout-installing",
+    "agent-settings-wide",
+    "agent-settings-narrow",
+    "agent-settings-legacy"
+  ],
+  "scopeReason": "共享/未知依赖没有完整影响图，回退全部登记场景，不静默跳过。",
+  "evidence": [
+    {
+      "kind": "full-regression",
+      "status": "passed",
+      "reportPath": "/tmp/reframe-settings-nine-full-20261010/report.json",
+      "sha256": "611c3452ca6ec005e49ccfcda5e1d7efb6758730bf16731b6c8e0fb4ebae9d8c",
+      "nodeTests": 967,
+      "scenarios": 97,
+      "extensionChecks": 16,
+      "durationMs": 507869,
+      "note": "覆盖率构建+隔离合成消息，保留原3项浏览器能力例外；不连接真实模型/CLI账户，不接受视觉基线。"
+    },
+    {
+      "kind": "fault-injection",
+      "status": "passed",
+      "note": "settings-focus仅Agent focus失败；settings-overflow模型/管理横溢出失败，均exit1；无注入宽窄场景恢复passed，证据见本机会话日志。"
+    }
+  ],
+  "reviewChecklist": [
+    "确认设计意图及合法变体",
+    "复核组件复用与所有受影响表面",
+    "附上静态/交互/截图证据",
+    "设计变化时单独审阅指定视觉基线"
+  ]
+}

@@ -44,6 +44,11 @@ export const scenarios = [
   { id: 'popup', surface: 'popup', path: '/popup.html?state=alignment', viewport: { width: 400, height: 740 }, rules: ['UI-LAYOUT-QUICK', 'UI-IMAGE-PREVIEW'] },
   { id: 'popup-narrow', surface: 'popup', path: '/popup.html?state=alignment', viewport: { width: 320, height: 740 }, rules: ['UI-LAYOUT-QUICK', 'UI-IMAGE-PREVIEW'] },
   { id: 'popup-image-failed', surface: 'popup', path: '/popup.html?state=alignment', viewport: { width: 400, height: 740 }, prepare: 'image-failed', rules: ['UI-LAYOUT-QUICK', 'UI-IMAGE-PREVIEW'] },
+  ...[['workspace', 'magpie'], ['popup', 'magpie'], ['workspace', 'ready'], ['popup', 'ready'], ['workspace', 'blocked'], ['workspace', 'legacy'], ['workspace', 'legacy-empty']].map(([surface, state]) => ({
+    id: `generation-readiness-${surface}-${state}`, surface,
+    path: `/${surface}.html?state=alignment&mode=recreate&generationReadinessRegression=${state}&generationDelay=60000`,
+    viewport: surface === 'popup' ? { width: 360, height: 740 } : wide, regression: 'generationReadinessRegression', rules: [],
+  })),
   { id: 'generation-actions', surface: 'workspace', path: '/workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200', viewport: wide, regression: 'generationActionsRegression', rules: [] },
   ...['workspace', 'popup'].flatMap(surface => ['cancel', 'legacy', 'failure', 'tab', 'tab-failure', 'project', 'project-failure'].map(flowKeyboardCase => ({
     id: `end-to-end-keyboard-${surface}-${flowKeyboardCase}`, surface,
@@ -76,7 +81,7 @@ export const scenarios = [
 ];
 
 export const exampleScenarios = [
-  ...['wide', 'narrow', 'legacy'].map(variant => ({ id: `image-settings-${variant}`, surface: 'workspace', path: `/workspace.html?state=library&imageSettingsRegression=${variant}`, viewport: variant === 'narrow' ? { width: 360, height: 740 } : wide, regression: 'imageSettingsRegression', example: 'image-settings', title: '生图渠道设置', states: ['saved', 'failure', 'narrow'], components: ['ImageGenerationSettings'], steps: '打开设置并保存两种API，检查失败恢复、重开与密钥不回显。', rules: [] })),
+  ...['wide', 'narrow', 'legacy'].map(variant => ({ id: `image-settings-${variant}`, surface: 'workspace', path: `/workspace.html?state=library&imageSettingsRegression=${variant}`, viewport: variant === 'narrow' ? { width: 360, height: 740 } : wide, regression: 'imageSettingsRegression', example: 'image-settings', title: '生图渠道设置', states: ['saved', 'failure', 'narrow'], components: ['ImageGenerationSettings'], steps: '打开设置保存直连API与Magpie，检查连接失败、旧目录迟到、保存恢复、重开与密钥不回显。', rules: [] })),
   { id: 'example-workspace-empty', title: '工作台新项目空态', surface: 'workspace', path: '/workspace.html?state=empty', viewport: wide, example: 'empty', states: ['empty'], components: ['CanvasWorkspace'], steps: '关闭首次连接设置，查看尚未选择参考图的工作台。' },
   { id: 'example-popup-empty', title: '轻量上传空态', surface: 'popup', path: '/popup.html?state=empty', viewport: { width: 400, height: 740 }, example: 'empty', states: ['empty'], components: ['QuickWorkspace'], steps: '查看上传入口；没有项目时不显示任务提交区。' },
   { id: 'example-input-loading', title: '参考图读取中', surface: 'workspace', path: '/workspace.html?state=alignment&reference=pending&referenceDelay=60000', viewport: wide, example: 'loading', states: ['loading', 'disabled'], components: ['CanvasWorkspace'], steps: '读取延迟60秒，检查原画布等待反馈与提交保护。' },
@@ -95,12 +100,12 @@ export const exampleScenarios = [
     ['result-popup', '轻量窗口只读结果预览', 'popup', { width: 400, height: 740 }, 'result'],
   ].map(([suffix, title, surface, viewport, imageTarget]) => ({ id: `example-image-viewer-${suffix}`, title, surface, path: `/${surface}.html?state=alignment`, viewport, imageTarget, ...(suffix === 'result-short' ? { imageOpenViewport: { width: 640, height: 740 } } : {}), example: 'image', states: ['keyboard', 'dialog', 'focus', 'geometry', 'zoom', ...(imageTarget === 'input' ? ['rotation'] : ['read-only'])], components: ['ImagePreview / ImageViewer', 'motion-dialog'], steps: `${suffix === 'result-short' ? '先在640×740打开，缩小到640×360验证弹窗，恢复原尺寸再检查焦点返回；' : ''}打开图片预览，检查适配/放大/拖拽与控制栏不交叠；输入图旋转后重新适配，Escape返回入口。` })),
   { id: 'example-native-controls', title: '原生下拉、帮助与设置弹窗', surface: 'workspace', path: '/workspace.html?state=alignment', viewport: wide, example: 'controls', states: ['keyboard', 'dialog', 'focus'], components: ['SelectField', 'InlineHelp', 'motion-dialog'], steps: '打开设置→界面与动效；键盘改变原生下拉、Escape收起选项、Enter/Space展开帮助，最后Escape关闭设置。' },
-  ...['wide', 'narrow', 'loading', 'missing', 'failed', 'custom', 'updating', 'installing'].map(state => ({
+  ...['wide', 'narrow', '360', '956', 'loading', 'missing', 'failed', 'custom', 'updating', 'installing'].map(state => ({
     id: `agent-settings-layout-${state}`, title: `模型表单与本机管理 · ${state}`,
     surface: 'workspace', path: `/workspace.html?state=library&settingsUi=${state}&cli=${state}`,
-    viewport: state === 'wide' ? wide : { width: 320, height: 740 }, example: 'agent-settings-layout', settingsUi: state,
+    viewport: state === 'wide' ? wide : { width: state === '956' ? 956 : state === '360' ? 360 : 320, height: state === '956' ? 1034 : 740 }, example: 'agent-settings-layout', settingsUi: state,
     states: [state, 'geometry', ...(['wide', 'narrow'].includes(state) ? ['keyboard', 'focus'] : [])],
-    components: ['AgentSettings', 'AgentCliSettings', 'SelectField'], steps: '检查生产模型表单与CLI管理区的实际尺寸、可读反馈与长路径，分别留存截图；宽窄常态使用真实Space/Enter/Tab，验证卡片、模型提交和管理跳转焦点。仅合成消息。',
+    components: ['AgentSettings', 'AgentCliSettings', 'SelectField'], steps: '检查生产模型表单与CLI管理区的实际尺寸、可读反馈与长路径，分别留存截图；宽窄常态使用真实Space/Enter/Tab，验证卡片、模型验证成功和旧恢复入口焦点。仅合成消息。',
   })),
   ...['wide', 'narrow', 'legacy'].map(variant => ({
     id: `agent-settings-${variant}`, title: `逆向 Agent 设置 · ${variant === 'narrow' ? '窄屏' : variant === 'legacy' ? '旧服务' : '宽屏'}`,

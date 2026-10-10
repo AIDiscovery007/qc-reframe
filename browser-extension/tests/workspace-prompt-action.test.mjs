@@ -20,7 +20,7 @@ const compiled = ts.transpileModule(names.map(name => `const ${name} = ${declara
 function fixture(mode, overrides = {}) {
   const calls = [], drafts = {}, exports = {};
   runInNewContext(compiled, {
-    exports, workspace: true, chainRatio: undefined, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, promptDraft: undefined,
+    exports, workspace: true, magpie: false, chainRatio: undefined, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, promptDraft: undefined,
     selection: { image: 'reference' }, referenceError: undefined, displayImage: 'reference', subjectDraftKey: mode => `project:${mode}:new`, subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
     taskInstruction: () => 'instruction', defaultInstructions: { [mode]: 'instruction' }, subjectImage: () => 'subject',
     multiSubjects: [{ id: 'one', subjectImage: 'one' }, { id: 'two', subjectImage: 'two' }], multiPrompt: 'instruction', multiStale: false,
@@ -178,4 +178,16 @@ test('continuous action uses a new reverse submission and blocks incomplete inpu
   const ui = fixture('style', { subjectImage: () => '' });
   ui.reverse();
   assert.equal(ui.calls.length, 1, 'reference-only style still supports reverse only');
+});
+
+test('Magpie blocks continuous generation while preserving reverse-only actions', () => {
+  for (const mode of ['style', 'recreate', 'reenact', 'multi-reenact']) {
+    const ui = fixture(mode, { magpie: true });
+    assert.equal(ui.chainDisabled, true);
+    ui.reverse(true);
+    assert.equal(ui.calls.length, 0);
+    ui.reverse();
+    assert.equal(ui.calls.length, 1);
+    assert.equal(ui.calls[0].generate, false);
+  }
 });

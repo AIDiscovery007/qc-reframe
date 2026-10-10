@@ -5,8 +5,8 @@ export type SessionSearchResult = SessionSummary & { match?: "title" | "content"
 export type SessionPage = { data: SessionSearchResult[]; nextCursor: string | null; index?: SessionIndexStatus };
 export type SessionContext = { sources: SessionSummary[]; snapshotId?: string; hash?: string; capturedAt?: string; messageCount?: number; attachmentCount?: number };
 
-export type ImageProvider = "codex" | "openai" | "gemini";
-export type ImageSettings = { provider: ImageProvider; configs: Record<"openai" | "gemini", { baseUrl: string; model: string; hasApiKey: boolean }> };
+export type ImageProvider = "codex" | "openai" | "gemini" | "magpie";
+export type ImageSettings = { provider: ImageProvider; configs: Record<"openai" | "gemini", { baseUrl: string; model: string; hasApiKey: boolean }> & { magpie?: { baseUrl: string; model: string } } };
 
 export type Mode = "style" | "recreate" | "reenact" | "multi-reenact" | "session";
 export type MultiSubject = { id: string; subjectImage: string; role: string; detail: string };
@@ -103,7 +103,11 @@ export type Batch = {
   id: string; createdAt: string; language: "zh" | "en"; aspectRatio?: AspectRatio; model: string;
   items: { projectId: string; title: string; status: "queued" | "running" | "completed" | "failed" | "cancelled" | "rejected"; stage: string; error?: string; jobId?: string; generationId?: string }[];
 };
+export type MagpieModels = { version: string; models: { id: string; name: string; inputImages: boolean }[] };
 export type Generation = {
+  sizeMode?: "gateway-default";
+  gatewayReportedModel?: string;
+  outputSize?: { width: number; height: number };
   provider?: ImageProvider;
   baseUrl?: string;
   referenceIndex?: number;
