@@ -29,10 +29,10 @@ export function withConservativeDependencies(item, sources = reliableSources, br
 // Reviewed preview never starts the production bridge. Bind this exclusion to the
 // exact execution domain: any frontend/fixture/tool/dependency drift disables it.
 export function browserDomain(files) {
-  const selected = Object.entries(files).filter(([file]) => /^browser-extension\/(entrypoints|lib|assets|public|docs\/gallery)\//.test(file)
+  const selected = Object.entries(files).filter(([file]) => /^browser-extension\/(entrypoints|lib|assets|public|scripts|docs\/gallery)\//.test(file)
     || (file.startsWith('agent-tool/') && file.endsWith('.mjs') && !file.endsWith('.test.mjs') && file !== 'agent-tool/test-policy.mjs')
     || /^browser-extension\/tests\/.*\.browser\.js$/.test(file)
-    || ['agent-tool/preview.mjs','agent-tool/gallery-preview.mjs','browser-extension/bridge/image-order.mjs','browser-extension/package.json','browser-extension/package-lock.json','browser-extension/wxt.config.ts'].includes(file));
+    || ['agent-tool/preview.mjs','agent-tool/gallery-preview.mjs','browser-extension/bridge/image-order.mjs','browser-extension/package.json','browser-extension/package-lock.json','browser-extension/wxt.config.ts','browser-extension/tsconfig.json'].includes(file));
   return createHash('sha256').update(JSON.stringify(selected.sort(([a],[b])=>a.localeCompare(b,'en')))).digest('hex');
 }
-export const reviewedBrowserDomain = "c804740776e971df4c1f5c02473a1cbb15211c57d0ce5fdde756e123776aa91f";
+export const reviewedBrowserDomain = "43d8e4558b562a2254a11d0848eaf42deef8aa3285f1e14ac38c1709a28a0fc9";
