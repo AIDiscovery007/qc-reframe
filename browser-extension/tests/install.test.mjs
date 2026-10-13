@@ -101,11 +101,11 @@ test("user registers and removes only their own Codex launcher without touching 
   await f.run("native-uninstall", "codex");
 });
 
-test("user cannot overwrite or uninstall another installation's native host", { skip: process.platform === "win32" }, async t => {
+for (const registration of ["foreign", "empty", "invalid"]) test(`user cannot overwrite or uninstall an unowned ${registration} native host registration`, { skip: process.platform === "win32" }, async t => {
   const f = await installation(t, true);
   await mkdir(f.env.ALCHEMY_NATIVE_HOST_DIR, { recursive: true });
   const path = join(f.env.ALCHEMY_NATIVE_HOST_DIR, `${nativeHostName}.json`);
-  const foreign = JSON.stringify({ name: nativeHostName, type: "stdio", path: "/another-install/launcher", allowed_origins: [] });
+  const foreign = registration === "empty" ? "" : registration === "invalid" ? "{" : JSON.stringify({ name: nativeHostName, type: "stdio", path: "/another-install/launcher", allowed_origins: [] });
   await writeFile(path, foreign);
   for (const command of ["native-install", "native-uninstall"]) {
     await assert.rejects(f.run(command, "codex"), error => /其他|另一|属于|冲突/.test(error.stderr));
