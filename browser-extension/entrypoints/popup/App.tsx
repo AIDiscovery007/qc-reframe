@@ -1,3 +1,5 @@
+import { createEntryReader } from "../../lib/creation-entry";
+import { deriveReverseAction } from "../../lib/reverse-action";
 import type { ImageSettings } from "../../lib/types";
 import { requestedImageSize, validImageSizeRequest } from "../../lib/image-size.mjs";
 import { inheritedGenerationSize } from "../../lib/generation-size";
@@ -236,6 +238,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     let lastGlobalSelection: string | null | undefined;
     let quickRestored = workspace;
     let savedQuick: WorkspaceHandoff | undefined;
+    const entryReader = createEntryReader({ request, query, revision: () => selectionRevision.current });
     const restoreDraft = (draft?: WorkspaceDraft, merge = false) => {
       if (!draft) return;
       dispatchCreation({ type: "restore", draft, merge });
@@ -289,10 +292,10 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       const taskId = params.get("task");
       if (!taskId || !/^[\da-f-]{36}$/.test(taskId)) return;
       ownContext = true;
-      try {
-        const target = await query<Job>(`/jobs/${taskId}`);
-        const reference = await request<Selection>({ type: "alchemy:project-reference", id: target.projectId });
-        if (cancelled || revision !== selectionRevision.current) return;
+      await entryReader.read({ task: taskId }, event => {
+        if (event.kind === "error") { setError(event.message); return; }
+        if (event.kind !== "reminder") return;
+        const { job: target, selection: reference } = event;
         previous = reference; setSelection(reference);
         dispatchCreation({ type: "revision", projectId: reference.projectId!, revision: reference.inputRevision || 0 });
         setHistoryOpen(false); setGalleryOpen(false); setTasksOpen(false); setError("");
@@ -303,50 +306,43 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         setTargetGeneration(image ? { jobId: target.id, id: generationId! } : undefined);
         setTargetPrompt(image ? undefined : { jobId: target.id, request: revision });
         dispatchDrawer({ type: "toggle", key: `${target.projectId}:${target.mode}:${target.id}`, open: image, seen: "" });
-      } catch (error) { if (!cancelled && revision === selectionRevision.current) setError((error as Error).message); }
+      });
     };
     const navigateHandoff = async (params: URLSearchParams, merge = true) => {
       const id = params.get("handoff");
-      const revision = ++selectionRevision.current;
+      selectionRevision.current++;
       ownContext = true;
-      try {
-        const handoff = await request<WorkspaceHandoff | undefined>({ type: "alchemy:workspace-handoff", id });
-        if (cancelled || revision !== selectionRevision.current) return;
-        if (!handoff) throw new Error("接续草稿已失效，请从快捷面板重新打开工作台");
-
-        setSettings(false); setNewProjectOpen(false); setHistoryOpen(false); setGalleryOpen(false); setTasksOpen(false); setError("");
-        setProjectMode(handoff.selection?.projectId, handoff.mode);
-        if (handoff.selection) {
-          const source = handoff.selection;
-          previous = source;
-          setSelection(source);
-          if (source.projectId) {
-            try {
-              const reference = await request<Selection>({ type: "alchemy:project-reference", id: source.projectId });
-              if (cancelled || revision !== selectionRevision.current) return;
-              const stale = (source.inputRevision || 0) !== (reference.inputRevision || 0);
-              if (!stale) {
-                restoreDraft(handoff.draft, merge);
-                dispatchCreation({ type: "revision", projectId: source.projectId!, revision: reference.inputRevision || 0 });
-              } else {
-                dispatchCreation({ type: "revision", projectId: source.projectId!, revision: -1 });
-                setError("项目输入已更新，已打开最新输入；旧窗口草稿未覆盖当前项目。");
-              }
-              previous = { ...reference, inputs: stale ? undefined : reference.inputs };
-              setSelection(previous);
-            } catch (error) {
-              if (cancelled || revision !== selectionRevision.current) return;
-              setSelection({ ...source, error: (error as Error).message });
-            }
-          } else setSelection({ ...source, error: "参考图尚未保存，请重新上传" });
-        } else { previous = undefined; setSelection(undefined); setProject(undefined); }
+      if (id === null) return;
+      await entryReader.read({ handoff: id }, event => {
+        if (event.kind === "error") { setError(event.message); return; }
+        if (event.kind === "handoff-source") {
+          const { handoff } = event;
+          setSettings(false); setNewProjectOpen(false); setHistoryOpen(false); setGalleryOpen(false); setTasksOpen(false); setError("");
+          setProjectMode(handoff.selection?.projectId, handoff.mode);
+          previous = handoff.selection || undefined;
+          setSelection(previous);
+          if (!previous) setProject(undefined);
+          return;
+        }
+        if (event.kind !== "handoff") return;
+        const { handoff, selection: reference, freshness } = event;
+        const projectId = handoff.selection?.projectId;
+        if (freshness === "fresh" && projectId && reference) {
+          restoreDraft(handoff.draft, merge);
+          dispatchCreation({ type: "revision", projectId, revision: reference.inputRevision || 0 });
+        } else if (freshness === "stale" && projectId) {
+          dispatchCreation({ type: "revision", projectId, revision: -1 });
+          setError("项目输入已更新，已打开最新输入；旧窗口草稿未覆盖当前项目。");
+        }
+        if (freshness !== "unavailable") previous = reference;
+        setSelection(reference);
         if (params.get("view") === "settings") {
           const section = params.get("section");
           setSettingsSection(section === "models" || section === "generation" || section === "connection" || section === "pi-cli" ? section : "cli");
           setSettings(true);
         }
         if (params.get("view") === "tasks") setTasksOpen(true);
-      } catch (e) { if (!cancelled && revision === selectionRevision.current) setError((e as Error).message); }
+      });
     };
     const onReminderNavigation = () => {
       if (!workspace || !/^#(?:reminder|workspace)=/.test(location.hash)) return;
@@ -398,7 +394,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       }
     };
     void initialize();
-    return () => { cancelled = true; noticeNavigation.current = undefined; stopPolling(); window.removeEventListener("hashchange", onReminderNavigation); };
+    return () => { cancelled = true; entryReader.dispose(); noticeNavigation.current = undefined; stopPolling(); window.removeEventListener("hashchange", onReminderNavigation); };
   }, []);
 
   // Older extension selections join the same durable template project on first open.
@@ -805,28 +801,16 @@ export default function App({ embedded = false, workspace = false }: { embedded?
     : restoring ? "正在恢复原图…" : loadingProject ? "正在读取模板项目…" : cliBusy ? "Agent CLI 正在安装或更新…"
     : modelBusy ? "正在验证模型…" : busy ? "正在提交…" : undefined;
 
-  const instructionStale = contextFor(preferences.mode).instructionStale || contextFor(preferences.mode).orderStale;
-  const genericPrompt = !!result && preferences.mode === "style" && !job?.reenact;
-  const needsPrompt = !result || instructionStale || (preferences.mode === "multi-reenact" && multiStale) || genericPrompt;
-  const subjectError = contextFor(preferences.mode).subjectError;
-  const genericHint = preferences.mode === "style" && !subjectImage("style") ? "添加主体图后可逆向并生图；也可仅逆向通用风格" : "";
-  const reverseHint = !selection ? "先选择一张参考图。" : referenceError ? "历史参考图不可用，请重新上传参考图。" : !displayImage ? "等待参考图读取完成。"
-    : subjectError ? subjectError
-    : subjectUnavailable[subjectKey(preferences.mode)] ? "主体图尚未就绪，请完成上传。"
-    : preferences.mode === "reenact" && !subjectImage("reenact") ? "先上传主体图。"
-    : preferences.mode === "multi-reenact" && (multiSubjects.length < 2 || multiSubjects.some(item => !item.subjectImage)) ? "请添加至少 2 张可用的主体图。"
-    : preferences.mode === "session" && !selectedSessions().length ? "先选择对话会话。"
-    : !taskInstruction(preferences.mode).trim() ? "填写任务指令后可生成提示词。"
-    : "";
-  const reverseDisabled = blocked || !!reverseHint || !!promptDraft;
   const inheritedSize = inheritedGenerationSize(magpie, (targetGeneration?.jobId === job?.id ? job?.generations?.find(item => item.id === targetGeneration?.id) : undefined) || job?.generations?.at(-1) || job?.autoGeneration);
   const targetSize = workspace && chainSize?.key === drawerKey && chainSize.pixelSize === magpie ? chainSize.size : inheritedSize;
-  const chainDisabled = reverseDisabled || generationBlocked || (preferences.mode === "style" && !subjectImage("style")) || !(magpie ? validImageSizeRequest(targetSize) : validGenerationRatio(targetSize));
+  const reverseAction = deriveReverseAction({ mode: preferences.mode, context: contextFor(preferences.mode),
+    hasSelection: !!selection, referenceError, subjectUnavailable: !!subjectUnavailable[subjectKey(preferences.mode)],
+    blocked, generationBlocked, promptEditing: !!promptDraft,
+    sizeValid: magpie ? validImageSizeRequest(targetSize) : validGenerationRatio(targetSize) });
+  const { instructionStale, genericPrompt, needsPrompt, subjectError, genericHint, reverseHint, reverseDisabled, chainDisabled } = reverseAction;
   const reverse = (generate = false) => {
     if (generate ? chainDisabled : reverseDisabled) return;
-    const mode = preferences.mode;
-    void start(mode, mode === "multi-reenact" ? { subjects: multiSubjects, basePrompt: multiPrompt }
-      : mode !== "recreate" && mode !== "session" && subjectImage(mode) ? { subjectImage: subjectImage(mode), basePrompt: taskInstruction(mode) } : undefined, generate);
+    void start(preferences.mode, reverseAction.reenact, generate);
   };
 
   const versionSelector = modeJobs(preferences.mode).length > 0 && <SelectField className="version-select" label="" aria-label="提示词版本" value={job?.id || "new"} disabled={busy}

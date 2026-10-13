@@ -5,11 +5,14 @@ Reframe 保持扩展 UI、扩展后台、本机 bridge 三个执行环境。共�
 ```mermaid
 flowchart TD
   App[工作台 App] --> Context[Creation Context]
+  App --> Entry[Creation Entry Reader]
+  App --> Reverse[Reverse Action]
   App --> Writer[Input Writer]
   Workspace[GenerationPanel] --> Hook[useGeneration]
   Quick[QuickResult] --> Hook
   Hook --> Generation[Generation Session]
   Writer --> Client[扩展 client]
+  Entry --> Client
   Generation --> Client
   Client --> Background[扩展 background]
   Policy[Operation Policy] -.-> Client
@@ -36,7 +39,11 @@ flowchart TD
 - `createInputWriter` 同步防重入，发送输入 revision，并在响应到达时核对上下文对象身份和导航 revision。检查通过与 commit 回调在同一段同步执行中完成，不能在两者间再插入 `await`。
 - writer 丢弃旧响应只影响界面接收。服务端可能已经成功保存；后续重新读取项目按服务端 revision 恢复，不伪造撤销。
 
-App 仍拥有页面导航、提醒、弹层、轮询和效果，不把所有 UI 状态塞入领域 reducer。QuickWorkspace 沿用自己的初始化与交接编排，输入草稿过滤复用同一规则。
+App 仍拥有页面导航、提醒、弹层、轮询和效果，不把所有 UI 状态塞入领域 reducer。工作台与快捷端的初始化、交接和轮询由 App 编排，快捷草稿过滤复用同一规则。启动顺序保持为项目视图、初始 query 入口或快捷已保存草稿、提醒导航与轮询建立、最后消费最新 hash；Quick 的 ownContext 与全局选择变化仍由 App 协调。
+
+`lib/creation-entry.ts` 的 `createEntryReader({ request, query, revision })` 只读取 handoff 或提醒任务。`read(entry, accept)` 捕获 App 的 selectionRevision，在每次异步返回、继续读取和同步交付前检查归属；App 每次导航（含 unread 与无效 ID）递增 revision，effect 清理调用 `dispose()`，使在途及后续读取失效。handoff 先交付 `handoff-source`，再按持久引用的 inputRevision（缺省为 0）交付 fresh/stale/unavailable；stale 剥除输入，引用失败保留来源和 selection.error，未保存与空来源保持不同状态。提醒按任务 ID 读取任务及项目引用，一起交付。reader 不修改调用方对象、不写输入；App 负责草稿恢复、stale 的 revision -1 与提示、settings/tasks 路由、版本及结果抽屉。
+
+`lib/reverse-action.ts` 的 `deriveReverseAction` 消费 resolveCreation 的结果，统一五模式的提示词失效、错误提示优先级、逆向/连续动作资格和 reenact payload，不重复输入回退规则。App 用原有尺寸继承及真实尺寸 helper 提供 sizeValid，保留 Magpie 回退和普通比例校验；实际 reverse 先检查对应动作资格，再交给 App 的 start。提交锁、任务指令、sessionIds、图序与输入快照仍由 start 负责，持久输入 writer 与 generation-session 的所有权不变。
 
 `lib/use-input-operation.ts` 为 CanvasWorkspace 和 QuickWorkspace 统一输入操作的同步防重入、忙碌与错误、上下文 revision 和 React cleanup。读取完成后先检查操作归属，再调用已有保存入口；保存后的选择与焦点回调和归属检查同步执行。离开再返回同一上下文也会使旧操作失效，旧结果不能释放新操作的占用或提交保护。失败释放编辑锁但保留提交阻止，成功重试或明确移除恢复可用性。
 
@@ -119,6 +126,7 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 | 改动 | 主要验证 interface |
 | --- | --- |
 | 输入优先级、历史与草稿 | `project-selection.test.mjs`、`reference-upload.test.mjs` 的实际 creation module；`creation-context.browser.js` 验证 App 接线 |
+| 交接/提醒读取与五模式逆向资格 | `creation-entry.test.mjs` 验证阶段、失败、revision 与 dispose；`workspace-prompt-action.test.mjs` 验证公开派生函数及 App 提交适配；`quick-workspace.test.mjs` 保留初始化与导航合同，浏览器 `creation-context`、`end-to-end-context` 验证实际装配 |
 | 两端生图行为 | `generation-session.test.mjs`，工作台 `generation-actions.browser.js`，快捷界面提交/取消 |
 | 执行、取消、保存失败与重启 | `task-runtime.test.mjs`、`task-records.test.mjs`，现有 server/storage 集成测试 |
 | 批次预检、受理、同键恢复与响应丢失 | `batch-admission.test.mjs`、`batches.test.mjs` 的真实 HTTP 与临时磁盘集成测试 |
