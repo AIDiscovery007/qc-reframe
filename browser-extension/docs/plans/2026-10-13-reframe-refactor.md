@@ -168,3 +168,50 @@
 2. 组件继续拥有选图、焦点、原图/主体大小限制、多图元数据、设置面板和旋转错误传播。Quick 排序的 availability 和成功提交后焦点语义保持。
 3. `creation-context` 是唯一持久输入 writer，现有 App 导航、CAS、generation-session 及后端协议不变；不增加依赖或 UI 设计变化。
 4. 开发代理只可改两个 Workspace 组件、一个共享输入 hook 及架构说明。不得修改测试/fixture/工具/计划/用户既有文件。主代理在代码提交后独立运行锁定测试、相关回归与双轴审查。
+
+## 第三轮实现与审查结果
+
+- 独立 Codex 实现提交 `ca5fe4a4a0b3c71e429b180c0a3642b27936720b`，基准 `7bbd741`。新增 `use-input-operation.ts`，两端复用同步受理、上下文失效、错误、忙碌和结算；组件保留选图、焦点、尺寸及多图处理。Quick 排序继续由 App 管理 availability，成功回调增加当前操作检查。
+- 开发代理 89 项 Node、23 个浏览器场景、类型及差异检查通过。主代理独立运行相同 89 项 Node 和 26 个浏览器场景均通过，报告 `/var/folders/0d/cgp0j7d54qx310xj_4nx5bz00000gn/T/reframe-ui-FsuwTz/report.json`；Standards 与 Spec 独立静态审查均通过，未发现可确认问题。161 个受保护路径摘要均未变化，用户原有改动保持。
+
+## 第四轮用户旅程与锁定规格
+
+用户从快捷端接续草稿、提醒或历史进入项目，并在五种模式中逆向或连续生图。恢复必须遵循原有启动顺序和当前导航归属；按钮说明、可用性和提交输入来自同一创作上下文。
+
+### R1 交接恢复的阶段与版本
+
+- Given 有效 handoff。When 交接读取完成而项目引用仍在读取。Then 先显示交接来源和模式；读取持久项目后才决定草稿是否可恢复。
+- Given 输入 revision 一致（旧记录缺省按 0）。When 引用到达。Then 采用持久引用，恢复原草稿并记录 revision。
+- Given 持久 revision 已变化。Then 打开最新引用、剥除旧窗口对应输入，标记草稿失效并告知用户；不得用旧草稿覆盖当前项目。
+- Given handoff 已过期或读取失败。Then 显示恢复错误，不捏造成功项目。项目引用失败则保留原来源并在 selection.error 中显示错误，仍允许原 settings/tasks 路由；未保存来源与空来源分别保留明确未保存错误与空状态。
+
+### R2 提醒与迟到响应
+
+- Given task 提醒。When 任务和项目引用读取成功。Then 一起采用正确任务、模式、版本及项目；请求的 generation 存在时打开图片，否则定位提示词。
+- Given 交接/任务的首段或项目读取未完成。When A→B→A 导航、打开 unread 列表或界面卸载。Then 旧成功和失败均不能更新当前选择、错误、草稿或面板；失效的首段不继续发起项目读取；卸载后不再启动新读取。
+- 启动顺序保持：项目视图、初始 query 入口/快捷已保存草稿、轮询建立、最后消费 hash。保留六种延迟初始化、Quick ownContext 与新全局选择、重复提醒请求和模式/可见性 revision 的原测试。
+
+### R3 五模式动作合同
+
+- Given 当前 resolveCreation 上下文。Then style 可仅参考图逆向但连续生图需主体；recreate 和 session 不发送 reenact payload；reenact 需主体；multi-reenact 至少两张有效主体；session 需已选会话。主体及多图 payload 保留用户当前任务指令、角色和顺序。
+- 输入/图序/多图内容改变或只有通用风格提示词时需重新逆向。损坏主体不能回退到旧历史；有效替换或明确清空沿用 resolveCreation 的恢复语义。
+- 无选择、参考错误/读取中、主体错误/读取中、模式缺失输入、空指令按既有优先级给出提示；忙碌和未保存提示词编辑禁止提交。生图不可用仅阻止连续动作，逆向仍可用。
+- 尺寸选择保留 App 原算法及真实尺寸 helper；Magpie 非法或部分像素意图仍走现有自动修正/回退，普通比例非法仍阻止连续动作。不要复制尺寸规则到新模块。
+
+### 公共边界与测试范围
+
+`lib/creation-entry.ts` 的 `createEntryReader({ request, query, revision })` 只管理两个入口的读取链、revision/dispose 失效、引用新旧及错误归类；提供 `read({ handoff } | { task }, accept)` 和 `dispose()`。每次 read 捕获外部 revision，每次 await 后及同步交付前复核，App 的每次导航仍先递增 revision。交付事件使用 `kind`：`handoff-source`、`handoff`（handoff、selection、freshness=fresh/stale/unavailable）、`reminder`（job、selection）、`error`（message）。回调同步交付；不传入成组 React setters，不把轮询/初始化/URL 路由挪入 reader。
+
+`lib/reverse-action.ts` 的 `deriveReverseAction({ mode, context, hasSelection, referenceError, subjectUnavailable, blocked, generationBlocked, promptEditing, sizeValid })` 是纯函数，context 是 resolveCreation 的结果。返回 instructionStale、genericPrompt、needsPrompt、subjectError、genericHint、reverseHint、reverseDisabled、chainDisabled 及可选 reenact payload。App 保留尺寸选择、实际 start、状态和界面装配。
+
+主代理在实现前新增 `creation-entry.test.mjs`，在公开 I/O 依赖边界控制阶段、成功/失败及导航失效；`quick-workspace.test.mjs` 仅向既有 App effect harness 注入新 reader，全部原断言保留。`workspace-prompt-action.test.mjs` 的八项私有派生表达式改测纯公开函数，保留尺寸选择与实际 App reverse 小适配器的提取，以验证禁用时不调用 start 和正确提交 payload；14 项测试保留原四模式全部行为并补 session 与错误优先级。迁移后的 14 项断言已在实现前通过临时适配器执行原 App 派生表达式（自动 AST 读取），无手写替代算法；日志 `.local/reframe-refactor/iteration-4-drafts/baseline-action.log`。新 reader/纯模块尚不存在时正式测试预期失败，交付实现后须全部通过。
+
+既有浏览器 `creation-context`、`end-to-end-context`、恢复/连续动作及第三轮输入场景继续验证真实构建装配；最终执行完整浏览器门禁。纯模块测试不声称覆盖真实模型或用户安装环境。
+
+### 架构验收与实施范围
+
+1. App 仍拥有初始化、轮询、导航路由、UI state、generation-session、持久 writer 与 CAS。只抽出真实异步入口读取规则和纯资格/payload 决策；不新增通用流程框架、setter bag、重复状态或转发空壳。
+2. 允许开发代理修改 App.tsx、上述两个新 lib 模块和架构说明。不得修改测试、工具、fixture、计划及用户既有文件；协议、存储、五模式语义、UI 设计及依赖不变。
+3. 用户已统一授权所有轮次，本轮不重复询问；主代理先提交规格与测试，再交给独立 Codex 高推理实现并完成回归及 Standards/Spec 审查。
+
+第四轮锁定前验证：原算法适配器的 14 项动作断言通过；正式三文件运行因两个新公共模块尚不存在而失败（`ERR_MODULE_NOT_FOUND`），符合测试先行预期，日志 `.local/reframe-refactor/iteration-4-red.log`。`git diff --check` 通过。

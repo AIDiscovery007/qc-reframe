@@ -7,44 +7,55 @@ import { validImageSizeRequest } from '../lib/image-size.mjs';
 import { inheritedGenerationSize } from '../lib/generation-size.ts';
 import { validGenerationRatio } from '../lib/generation-session.ts';
 import { creationContext, emptyCreationState, resolveCreation } from '../lib/creation-context.ts';
+import { deriveReverseAction } from '../lib/reverse-action.ts';
 
-// Exercise the actual workspace action derivation and submitted input for each path.
+// Eligibility uses its public domain interface; the small App adapter still proves
+// that disabled actions do not call start and accepted actions forward the payload.
 const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
 const tree = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ['instructionStale', 'genericPrompt', 'needsPrompt', 'subjectError', 'reverseHint', 'genericHint', 'reverseDisabled', 'inheritedSize', 'targetSize', 'chainDisabled', 'reverse'];
 const declarations = new Map();
+let actionBinding = "reverseAction";
 function visit(node) {
-  if (ts.isVariableDeclaration(node) && names.includes(node.name.getText(tree))) declarations.set(node.name.getText(tree), node.initializer.getText(tree));
+  if (ts.isVariableDeclaration(node) && node.initializer && ts.isCallExpression(node.initializer) && node.initializer.expression.getText(tree) === "deriveReverseAction") actionBinding = node.name.getText(tree);
+  if (ts.isVariableDeclaration(node) && ['inheritedSize', 'targetSize', 'reverse'].includes(node.name.getText(tree))) declarations.set(node.name.getText(tree), node.initializer.getText(tree));
   ts.forEachChild(node, visit);
 }
 visit(tree);
-const compiled = ts.transpileModule(names.map(name => `const ${name} = ${declarations.get(name)};`).join('\n') + `\nObject.assign(exports, {${names.join(',')}});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+function evaluate(names, globals) {
+  const exports = {};
+  const script = names.map(name => `const ${name} = ${declarations.get(name)};`).join('\n') + `\nObject.assign(exports, {${names.join(',')}});`;
+  runInNewContext(ts.transpileModule(script, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, { exports, ...globals });
+  return exports;
+}
 function fixture(mode, overrides = {}) {
-  const calls = [], drafts = {}, exports = {};
-  runInNewContext(compiled, {
-    exports, workspace: true, magpie: false, chainSize: undefined, targetGeneration: undefined, validImageSizeRequest, inheritedGenerationSize, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, generationBlocked: false, promptDraft: undefined,
-    selection: { image: 'reference' }, referenceError: undefined, displayImage: 'reference', subjectDraftKey: mode => `project:${mode}:new`, subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
-    taskInstruction: () => 'instruction', defaultInstructions: { [mode]: 'instruction' }, subjectImage: () => 'subject',
+  const calls = [];
+  const values = {
+    workspace: true, magpie: false, chainSize: undefined, targetGeneration: undefined, validImageSizeRequest, inheritedGenerationSize, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, generationBlocked: false, promptDraft: undefined,
+    selection: { image: 'reference' }, referenceError: undefined, displayImage: 'reference', subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
+    taskInstruction: () => 'instruction', subjectImage: () => 'subject', selectedSessions: () => [{ id: 'session-A', title: 'Saved conversation', updatedAt: 1 }],
     multiSubjects: [{ id: 'one', subjectImage: 'one' }, { id: 'two', subjectImage: 'two' }], multiPrompt: 'instruction', multiStale: false,
     contextFor: mode => resolveCreation({ ...emptyCreationState, instructions: { [`project:${mode}:v1`]: (overrides.taskInstruction || (() => 'instruction'))() } },
       { projectId: 'project' }, { id: 'project', jobs: [{ ...overrides.job, id: 'v1', mode, result: overrides.result }] }, {}, mode, 'instruction'),
-    modeJob: () => overrides.job,
-    dispatchCreation: action => Object.assign(drafts, creationContext(emptyCreationState, action).subjectDrafts),
     start: (mode, input, generate) => calls.push({ mode, input, generate }), ...overrides,
-    setSubjectDrafts: update => Object.assign(drafts, update(drafts)),
-  });
-  return { ...exports, calls, drafts };
+  };
+  const context = { ...values.contextFor(mode), image: values.displayImage, subjectImage: values.subjectImage(mode), subjects: values.multiSubjects,
+    instruction: mode === 'multi-reenact' ? values.multiPrompt : values.taskInstruction(mode), multiStale: values.multiStale, sessions: values.selectedSessions() };
+  const { targetSize } = evaluate(['inheritedSize', 'targetSize'], values);
+  const reverseAction = deriveReverseAction({ mode, context, hasSelection: !!values.selection, referenceError: values.referenceError,
+    subjectUnavailable: !!values.subjectUnavailable[values.subjectKey(mode)], blocked: values.blocked, generationBlocked: values.generationBlocked,
+    promptEditing: !!values.promptDraft, sizeValid: values.magpie ? validImageSizeRequest(targetSize) : validGenerationRatio(targetSize) });
+  return { ...reverseAction, ...evaluate(['reverse'], { ...values, [actionBinding]: reverseAction, ...reverseAction }), calls };
 }
 
 test('each path submits its intended reference roles through the shared action', () => {
-  for (const mode of ['style', 'recreate', 'reenact', 'multi-reenact']) {
+  for (const mode of ['style', 'recreate', 'reenact', 'multi-reenact', 'session']) {
     const ui = fixture(mode);
     assert.equal(ui.needsPrompt, true);
     assert.equal(ui.reverseDisabled, false);
     ui.reverse();
     assert.equal(ui.calls[0].mode, mode);
     const input = ui.calls[0].input;
-    if (mode === 'recreate') assert.equal(input, undefined);
+    if (mode === 'recreate' || mode === 'session') assert.equal(input, undefined);
     else if (mode === 'multi-reenact') assert.equal(input.subjects.length, 2);
     else assert.equal(input.subjectImage, 'subject');
   }
@@ -176,7 +187,7 @@ test('user can reverse without submitting a chain while image generation is bloc
 });
 
 test('continuous action uses a new reverse submission and blocks incomplete inputs or invalid ratios', () => {
-  for (const mode of ['style', 'recreate', 'reenact', 'multi-reenact']) {
+  for (const mode of ['style', 'recreate', 'reenact', 'multi-reenact', 'session']) {
     const ui = fixture(mode);
     ui.reverse(true);
     assert.equal(ui.calls.length, 1);
@@ -197,7 +208,7 @@ test('continuous action uses a new reverse submission and blocks incomplete inpu
 
 test('user can start Magpie continuous generation while ready and retain reverse-only actions when generation is blocked', () => {
   // Given each supported reverse mode and a ready Magpie channel.
-  for (const mode of ['style', 'recreate', 'reenact', 'multi-reenact']) {
+  for (const mode of ['style', 'recreate', 'reenact', 'multi-reenact', 'session']) {
     const ui = fixture(mode, { magpie: true });
     // When continuous generation is selected, Then the reverse submission includes generation.
     assert.equal(ui.chainDisabled, false);
@@ -228,4 +239,27 @@ test('user Magpie continuous generation accepts correction and automatic fallbac
     const blocked = fixture('style', { magpie: true, chainSize, generationBlocked: true });
     blocked.reverse(true); assert.equal(blocked.calls.length, 0);
   }
+});
+
+
+test('session extraction requires selected conversations and retains reverse-only access when generation is unavailable', () => {
+  const missing = fixture('session', { selectedSessions: () => [] });
+  assert.equal(missing.reverseHint, '先选择对话会话。');
+  missing.reverse(); missing.reverse(true);
+  assert.equal(missing.calls.length, 0);
+  const available = fixture('session', { generationBlocked: true });
+  available.reverse(true); available.reverse();
+  assert.equal(available.calls.length, 1);
+  assert.equal(available.calls[0].mode, 'session');
+  assert.equal(available.calls[0].input, undefined);
+  assert.equal(available.calls[0].generate, false);
+});
+
+test('reference and subject errors keep their established precedence over incomplete inputs', () => {
+  const missing = fixture('reenact', { selection: undefined, referenceError: 'broken', subjectUnavailable: { 'project:reenact': true } });
+  assert.equal(missing.reverseHint, '先选择一张参考图。');
+  const reference = fixture('reenact', { referenceError: 'broken', displayImage: undefined });
+  assert.equal(reference.reverseHint, '历史参考图不可用，请重新上传参考图。');
+  const reading = fixture('reenact', { displayImage: undefined, subjectUnavailable: { 'project:reenact': true } });
+  assert.equal(reading.reverseHint, '等待参考图读取完成。');
 });

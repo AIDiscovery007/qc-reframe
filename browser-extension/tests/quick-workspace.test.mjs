@@ -6,6 +6,7 @@ import ts from 'typescript';
 import { creationContext, emptyCreationState, restoredQuickDraft } from '../lib/creation-context.ts';
 import { inheritedGenerationSize } from '../lib/generation-size.ts';
 import { createGenerationSession } from '../lib/generation-session.ts';
+import { createEntryReader } from '../lib/creation-entry.ts';
 
 const app = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
 const quick = await readFile(new URL('../entrypoints/popup/QuickWorkspace.tsx', import.meta.url), 'utf8');
@@ -30,7 +31,7 @@ function evaluate(source, globals, names) {
       original[setter](replaceDraft ? creation[key] : () => creation[key]);
     }
   };
-  globals = { dispatchCreation, restoredQuickDraft, noticeNavigation: { current: undefined }, setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, setInputRevisions() {}, ...globals,
+  globals = { createEntryReader, dispatchCreation, restoredQuickDraft, noticeNavigation: { current: undefined }, setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, setInputRevisions() {}, ...globals,
     setProjectMode: original.setProjectMode || ((_id, mode) => original.setPreferences(value => ({ ...value, mode }))),
     request: async message => message.type === 'alchemy:project-views' ? original.projectViews || {} : original.request(message),
   };
