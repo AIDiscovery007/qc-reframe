@@ -39,6 +39,8 @@
 
 N9 是实现前执行域审计发现的必要补充：HTTP 代理不拦截 native host，临时 profile 不隔离系统级 host。保留原 16 项扩展检查并增加 `UI-EXTENSION-NATIVE`；报告声明 `nativeMessagingBlocked: true`、`fixtureRemoved: true` 和副本路径 `isolatedExtension`，记录被修改的 manifest 权限。证据验证器拒绝没有 native 隔离检查/字段的旧报告。此处测试增强用于验证副作用边界，不降低旧断言。
 
+N5 的写入失败合同：已存在且归属本安装的入口和 manifest 更新须逐文件原子替换；文件写入失败保留该文件旧内容、清理临时文件，并允许常规重注册恢复。首次创建继续拒绝覆盖冲突文件。不承诺跨文件事务或断电耐久性。
+
 ## 交付检查
 
 1. 主代理锁定测试并验证新增场景能在旧实现上失败。

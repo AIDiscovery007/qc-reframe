@@ -101,6 +101,34 @@ test("user registers and removes only their own Codex launcher without touching 
   await f.run("native-uninstall", "codex");
 });
 
+for (const artifact of ["launcher", "manifest"]) test(`user retains the valid native ${artifact} when a registration update write fails`, { skip: process.platform === "win32" }, async t => {
+  // Given an owned, valid registration, fail after a partial filesystem write during an update.
+  const f = await registeredLauncher(t), target = artifact === "launcher" ? f.manifest.path : f.manifestPath;
+  const before = await readFile(target, "utf8"), entries = await readdir(dirname(target));
+  const fault = join(f.dir, "fail-native-write.mjs");
+  await writeFile(fault, `import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const write = fs.promises.writeFile;
+fs.promises.writeFile = async (path, data, options) => {
+  const text = typeof data === "string" ? data : Buffer.isBuffer(data) ? data.toString() : "";
+  let manifest = false; try { manifest = JSON.parse(text).name === "com.qc.reframe"; } catch {}
+  if (${JSON.stringify(artifact)} === "launcher" ? text.startsWith("#!/bin/sh\\n# QC-Reframe installation:") : manifest) {
+    await write(path, text.slice(0, Math.max(1, text.length >> 1)), options);
+    throw Object.assign(new Error("INJECTED_NATIVE_WRITE_FAILURE"), { code: "EIO" });
+  }
+  return write(path, data, options);
+};
+syncBuiltinESMExports();
+`);
+  f.env.ALCHEMY_EXTENSION_ID = "c".repeat(32);
+  await assert.rejects(exec(process.execPath, ["--import", fault, join(f.installRoot, "scripts/manage.mjs"), "native-install", "codex"], { env: f.env, timeout: 15000 }), error => /INJECTED_NATIVE_WRITE_FAILURE/.test(error.stderr));
+  // Then the previous file remains complete, temporary writes are removed, and a normal retry recovers.
+  assert.equal(await readFile(target, "utf8"), before);
+  assert.deepEqual(await readdir(dirname(target)), entries);
+  await f.run("native-install", "codex");
+  assert.ok(JSON.parse(await readFile(f.manifestPath, "utf8")).allowed_origins.includes(`chrome-extension://${"c".repeat(32)}/`));
+});
+
 for (const registration of ["foreign", "empty", "invalid"]) test(`user cannot overwrite or uninstall an unowned ${registration} native host registration`, { skip: process.platform === "win32" }, async t => {
   const f = await installation(t, true);
   await mkdir(f.env.ALCHEMY_NATIVE_HOST_DIR, { recursive: true });
