@@ -1,4 +1,5 @@
-import { lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { endianness, homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { connectionOrigins } from "../bridge/connection.mjs";
@@ -11,6 +12,22 @@ async function existingFile(path) {
     if (!(await lstat(path)).isFile()) throw new Error(`启动器路径冲突，保留原文件：${path}`);
     return await readFile(path, "utf8");
   } catch (error) { if (error.code !== "ENOENT") throw error; }
+}
+
+async function writeRegistration(path, content, previous, mode) {
+  if (content === previous) return;
+  if (previous === undefined) return writeFile(path, content, { mode, flag: "wx" });
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, { mode, flag: "wx" });
+    await rename(temporary, path);
+  } catch (error) {
+    // An exclusive-create collision is not our file to remove.
+    if (error.code !== "EEXIST") await unlink(temporary).catch(cleanupError => {
+      if (cleanupError.code !== "ENOENT") throw new AggregateError([error, cleanupError], "Native launcher update and temporary-file cleanup failed");
+    });
+    throw error;
+  }
 }
 
 export async function registerLauncher({ root, dataDir, port, env, uninstall, browser }) {
@@ -49,9 +66,9 @@ export async function registerLauncher({ root, dataDir, port, env, uninstall, br
   await mkdir(join(dataDir, "runtime"), { recursive: true, mode: 0o700 });
   await mkdir(directory, { recursive: true, mode: 0o700 });
   // Exclusive creation prevents a conflicting installation from being overwritten.
-  // Existing owned files are only updated after both ownership checks above.
-  if (launcher !== script) await writeFile(executable, script, { mode: 0o700, flag: launcher === undefined ? "wx" : "w" });
-  if (current !== registration) await writeFile(manifestPath, registration, { mode: 0o600, flag: current === undefined ? "wx" : "w" });
+  // Owned updates replace each file atomically after both ownership checks above.
+  await writeRegistration(executable, script, launcher, 0o700);
+  await writeRegistration(manifestPath, registration, current, 0o600);
 }
 
 function readRequest(signal) {

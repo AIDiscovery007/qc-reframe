@@ -35,4 +35,7 @@ export function browserDomain(files) {
     || ['agent-tool/preview.mjs','agent-tool/gallery-preview.mjs','browser-extension/bridge/image-order.mjs','browser-extension/package.json','browser-extension/package-lock.json','browser-extension/wxt.config.ts','browser-extension/tsconfig.json'].includes(file));
   return createHash('sha256').update(JSON.stringify(selected.sort(([a],[b])=>a.localeCompare(b,'en')))).digest('hex');
 }
-export const reviewedBrowserDomain = "1a1fb310e3ff9b8b84fd58b8c4b3b3c0871aba6f62d55c84d8ee9fb947bdd757";
+// N9 Standards audit: hash-verified copies strip only required/optional nativeMessaging;
+// 17 checks reject old reports and require copy cleanup. Preview remains synthetic;
+// production assets, actual dependency edges and conservative Node policy are unchanged.
+export const reviewedBrowserDomain = "5c6d4c7265ba414ce11e0e94e1f45f034d847b0ca379c03605c059461881fa19";
