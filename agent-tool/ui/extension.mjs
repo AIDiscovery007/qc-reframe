@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,7 +29,7 @@ async function buildState(extensionPath) {
 function markdownReport(report) {
   const cell = value => (typeof value === 'string' ? value : JSON.stringify(value)).replaceAll('|', '\\|').replaceAll('\n', ' ');
   return `# Isolated real-extension verification\n\nStatus: **${report.status}**\n\n` +
-    `Chromium ${report.environment.chromium || 'not launched'}; temporary profile removed: ${report.environment.profileRemoved}; production bundle modified: false.\n\n` +
+    `Chromium ${report.environment.chromium || 'not launched'}; temporary profile removed: ${report.environment.profileRemoved}; production bundle modified: false; Native Messaging blocked in temporary copy: ${report.environment.nativeMessagingBlocked === true}; copy removed: ${report.environment.fixtureRemoved}.\n\n` +
     '| Check | Status | Target | Actual |\n| --- | --- | --- | --- |\n' +
     report.checks.map(item => `| ${item.ruleId} | ${item.status} | ${cell(item.target)} | ${cell(item.actual)} |`).join('\n') +
     '\n\n## Evidence\n\n' + Object.entries(report.evidence).filter(([key]) => key !== 'directory').map(([key, path]) => `- [${key}](${path})`).join('\n') +
@@ -103,15 +103,17 @@ export function verifyExtension(options = {}) { return validationWindow('extensi
 async function runExtension({ progress = () => {}, extensionPath = defaultExtension } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'reframe-ui-extension-'));
   const profile = join(directory, 'profile');
+  const isolatedExtension = join(directory, 'extension');
   const pageErrors = [];
   const report = { status: 'failed', checks: [], evidence: { directory }, uncovered: [
     'Closed Shadow DOM internals, exact inner geometry and the identity of its focused element are not inspected.',
     'The extension popup is opened as its real extension URL; the browser toolbar/action popup chrome is not exercised.',
     'The panel is opened through its existing alchemy:show message; image capture, pairing, projects, bridge and model execution are not covered.',
     'Fresh temporary Chromium profile only; existing user profiles and installed-extension upgrade behavior are not covered.',
+    'Only required/optional nativeMessaging permissions are removed from the temporary extension manifest; native host execution is covered separately with fixture installations.',
   ], environment: { platform: process.platform, arch: process.arch, node: process.version, channel: 'chromium', headless: true,
     extensionPath, locale: 'zh-CN', timezone: 'Asia/Taipei', viewport: { width: 1100, height: 820 }, dpr: 1, motion: 'reduce',
-    productionBundleModified: false, profile, network: 'Deny-forward localhost HTTP proxy; implicit loopback bypass disabled; no real bridge/model access', blockedRequests: [] } };
+    productionBundleModified: false, profile, isolatedExtension, network: 'Deny-forward localhost HTTP proxy; implicit loopback bypass disabled; Native Messaging removed before launch; no real bridge/model access', blockedRequests: [] } };
   let context, server, sockets, host, beforeState, closing, current = 'UI-EXTENSION-BUILD', interrupted, traceStarted = false;
   const closeBrowser = () => closing ??= context?.close().catch(() => {});
   const check = (ruleId, target, actual, expected, passed) => {
@@ -142,6 +144,23 @@ async function runExtension({ progress = () => {}, extensionPath = defaultExtens
     current = 'UI-EXTENSION-LOAD';
     const manifest = JSON.parse(await readFile(join(extensionPath, 'manifest.json'), 'utf8'));
     if (manifest.manifest_version !== 3 || !manifest.background?.service_worker || !manifest.action?.default_popup) throw new Error('Expected an MV3 build with a service worker and popup');
+    // Native hosts bypass the network proxy and disposable profiles. Remove
+    // their browser permission before any production script can execute.
+    await cp(extensionPath, isolatedExtension, { recursive: true });
+    if (await fingerprint(isolatedExtension) !== beforeState.buildHash) throw new Error('Isolated extension copy differs from the fingerprinted production assets');
+    const isolatedManifest = structuredClone(manifest);
+    report.environment.removedNativePermissions = [];
+    for (const key of ['permissions', 'optional_permissions']) {
+      if (!Array.isArray(isolatedManifest[key])) continue;
+      if (isolatedManifest[key].includes('nativeMessaging')) report.environment.removedNativePermissions.push(key);
+      isolatedManifest[key] = isolatedManifest[key].filter(permission => permission !== 'nativeMessaging');
+    }
+    await writeFile(join(isolatedExtension, 'manifest.json'), JSON.stringify(isolatedManifest));
+    const safeManifest = JSON.parse(await readFile(join(isolatedExtension, 'manifest.json'), 'utf8'));
+    report.environment.nativeMessagingBlocked = ![...(safeManifest.permissions || []), ...(safeManifest.optional_permissions || [])].includes('nativeMessaging');
+    check('UI-EXTENSION-NATIVE', 'Temporary copy denies Native Messaging before browser launch; production assets remain unchanged',
+      { blocked: report.environment.nativeMessagingBlocked, removedFrom: report.environment.removedNativePermissions },
+      'Both required and optional Native Messaging permissions absent', report.environment.nativeMessagingBlocked);
     report.environment.extensionVersion = manifest.version;
     const image = await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="420"><rect width="480" height="420" fill="#d5e4df"/><circle cx="190" cy="190" r="100" fill="#649794"/><path d="M70 340H410V370H70Z" fill="#bd7358"/></svg>')).png().toBuffer();
     const fixture = await fixtureServer(image, report.environment.blockedRequests);
@@ -154,7 +173,7 @@ async function runExtension({ progress = () => {}, extensionPath = defaultExtens
     context = await chromium.launchPersistentContext(profile, {
       channel: 'chromium', headless: true, timeout: 20000, viewport: report.environment.viewport,
       locale: 'zh-CN', timezoneId: 'Asia/Taipei', deviceScaleFactor: 1, reducedMotion: 'reduce',
-      args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`,
+      args: [`--disable-extensions-except=${isolatedExtension}`, `--load-extension=${isolatedExtension}`,
         `--proxy-server=${fixture.origin}`, '--proxy-bypass-list=<-loopback>', '--disable-quic'],
       handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
     });
@@ -258,10 +277,12 @@ async function runExtension({ progress = () => {}, extensionPath = defaultExtens
     if (server) { for (const socket of sockets) socket.destroy(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     try { await rm(profile, { recursive: true, force: true }); report.environment.profileRemoved = true; }
     catch (error) { report.environment.profileRemoved = false; report.environment.cleanupError = error.message; }
+    try { await rm(isolatedExtension, { recursive: true, force: true }); report.environment.fixtureRemoved = true; }
+    catch (error) { report.environment.fixtureRemoved = false; report.environment.fixtureCleanupError = error.message; }
     report.environment.browserClosed = !context?.browser()?.isConnected();
     report.environment.serverClosed = !server?.listening;
-    const cleaned = report.environment.profileRemoved && report.environment.browserClosed && report.environment.serverClosed;
-    report.checks.push({ ruleId: 'UI-EXTENSION-CLEANUP', target: 'Browser, temporary profile and fixture server', status: cleaned ? 'passed' : 'failed', expected: 'All released', actual: { profileRemoved: report.environment.profileRemoved, browserClosed: report.environment.browserClosed, serverClosed: report.environment.serverClosed } });
+    const cleaned = report.environment.profileRemoved && report.environment.fixtureRemoved && report.environment.browserClosed && report.environment.serverClosed;
+    report.checks.push({ ruleId: 'UI-EXTENSION-CLEANUP', target: 'Browser, temporary profile, extension copy and fixture server', status: cleaned ? 'passed' : 'failed', expected: 'All released', actual: { profileRemoved: report.environment.profileRemoved, fixtureRemoved: report.environment.fixtureRemoved, browserClosed: report.environment.browserClosed, serverClosed: report.environment.serverClosed } });
     if (!cleaned) report.status = 'failed';
     report.environment.interrupted = interrupted || null;
     report.environment.pageErrors = pageErrors;

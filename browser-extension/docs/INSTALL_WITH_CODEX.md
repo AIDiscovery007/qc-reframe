@@ -77,6 +77,26 @@ npm run status
 
 `start` 在后台运行 bridge，关闭启动终端后仍可使用；它会先验证带配对令牌的 `/health`。重复启动同一版本会复用服务。若端口被其他服务、旧版本或另一份安装占用，会停止启动流程并说明原因，不强行结束别人的进程。不要通过修改端口来绕过冲突，浏览器端默认连接 `43187`。
 
+### macOS Codex：打开时按需启动
+
+初始化、构建完成后，在同一安装目录注册一次：
+
+```bash
+npm run launcher:install -- codex
+```
+
+随后重新加载扩展。打开工作台、轻量面板或主动连接时，若 HTTP 连接不可达，后台通过 `com.qc.reframe` 请求启动本安装的 bridge，再执行原有握手。已有服务在线时直接复用；后台提醒不会启动服务，业务写入失败不会自动重放。关闭界面不会停止服务；没有开机自启，也不自动安装、登录或调用 CLI/模型。
+
+注册写入用户级 `~/Library/Application Support/OpenAI/Codex/NativeMessagingHosts/com.qc.reframe.json`，可执行入口在本安装数据目录的 `runtime/native-launcher`。此路径来自 Codex 应用实现；实际 Codex 调用能力仍需在用户环境单独验证。注册固定当前 Node 可执行文件、安装/数据目录、端口和运行配置，不受浏览器环境中的同名变量影响。移动安装、替换 Node 或修改 CLI/skill 路径后，重新运行注册命令。独立加载的扩展 ID 应先按下文通过 `setup` 保存，再注册启动器；只批准构建路径对应 ID 和这一个明确 ID。
+
+其他浏览器和默认非 macOS 平台继续使用 `npm start`，不会自动注册到 Chrome 等目录。`ALCHEMY_NATIVE_HOST_DIR` 只用于明确指定的注册目录（包括 POSIX Linux 的隔离测试），不会替你选择浏览器配置。需要撤销时运行：
+
+```bash
+npm run launcher:uninstall -- codex
+```
+
+撤销仅删除本安装的注册与入口，不停止服务、不删除项目、配置或令牌；遇到外来同名文件会拒绝覆盖或删除。启动器失败、端口占用、旧版本或启动锁未释放时按错误提示检查，仍可手动运行 `npm start`。宿主最多等待约 9 秒，界面连接操作总期限为 28 秒；超时不会替换或终止其他服务。
+
 `status` 应显示 `service: "qc-alchemy"`、`version: "0.5.0"`、`ready: true`。这只证明 bridge 与 Alchemy skill 就绪；`doctor` 另检查 CLI 登录。它们不会实际调用模型，因此不代表模型或生图已就绪。设置中心会另外展示 CLI 功能接口检查：只读获取本机 CLI 的接口描述，不调用模型；检查结果未知时不拦截任务，明确不支持时只限制相关功能，不关闭整个工作台。
 
 imagegen 默认读取 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`，未设置 `CODEX_HOME` 时读取 `~/.codex/skills/.system/imagegen/SKILL.md`。如果找不到，让 Codex 查找用户实际安装的 imagegen skill 并设置路径；不要创建一个同名空文件充当已安装。缺失 imagegen 不妨碍提示词逆向，但 Codex 内置生图不可用；独立 API/Magpie 渠道不依赖该 skill。找到 skill 也不代表账户一定支持内置 `image_gen`。
@@ -112,7 +132,7 @@ npm run setup
 
 ## 5. 自动连接并打开
 
-从本次安装的 `.output/chrome-mv3` 目录加载扩展后，打开工作台即自动连接本机服务，无需查看或填写配对码。Codex、Pi 及后续接入本机服务的 Agent 共用这条连接；当前 Agent、模型和 CLI 状态在「插件模型」查看。服务未运行时仍需由安装者运行 `npm start`，扩展不会自行启动电脑上的进程，也不会代替用户完成 CLI 登录或安装。
+从本次安装的 `.output/chrome-mv3` 目录加载扩展后，打开工作台即自动连接本机服务，无需查看或填写配对码。Codex、Pi 及后续接入本机服务的 Agent 共用这条连接；当前 Agent、模型和 CLI 状态在「插件模型」查看。macOS Codex 注册本机启动器后，打开界面可按需启动服务；未注册或不支持时由安装者运行 `npm start`。启动器不会代替用户完成 CLI 登录或安装。
 
 自动连接仅向本次安装输出目录对应的扩展 ID 提供既有凭据。普通网页、未知扩展及无 Origin 的请求均不能获取凭据；服务其他接口仍要求认证。升级不会更换已有 token，不将 token 放入扩展构建产物、页面 DOM 或日志。`npm run pair` 仅保留为兼容旧扩展的维护命令，当前界面不提供手工配对入口。
 
@@ -146,7 +166,7 @@ Windows PowerShell 先设置 `$env:ALCHEMY_EXTENSION_ID = '<实际的32位扩展
 2. 保留本地改动与 `.local/` 数据，将完整仓库更新到 `v0.5.0`，在 `browser-extension` 执行 `npm run setup`，再执行 `npm start`；核对 `npm run status` 为 `0.5.0`、`ready: true`。
 3. 重新加载原扩展，再刷新工作台和已打开网页，确认扩展管理页显示 `0.5.0`。使用 ZIP 时，将本版 ZIP 解压到原扩展加载目录；不要删除原扩展或清空浏览器数据。轻量端未提交草稿属于浏览器会话数据，不承诺跨浏览器重启保留。
 
-按上述步骤停止旧服务并启动新版；已支持插件内重启的托管服务，也可在更新和构建完成后通过设置中心的本机服务重启按钮操作。任务、模型验证或 Agent CLI 操作执行中不可重启。按钮不下载更新、不重载扩展；服务离线时仍需终端运行 `npm start`。详见 [v0.5.0 升级说明](releases/v0.5.0.md#升级方式与数据)。
+按上述步骤停止旧服务并启动新版；已支持插件内重启的托管服务，也可在更新和构建完成后通过设置中心的本机服务重启按钮操作。任务、模型验证或 Agent CLI 操作执行中不可重启。按钮不下载更新、不重载扩展；服务离线时，已注册的 macOS Codex 启动器可在重新打开界面时启动，否则需终端运行 `npm start`。详见 [v0.5.0 升级说明](releases/v0.5.0.md#升级方式与数据)。
 
 本版相较 v0.4.4 无新增权限；从 v0.2.0 或更早版本升级时，需按浏览器要求确认自 v0.3.0 起新增的 `notifications`、`offscreen`、`alarms` 权限，分别用于桌面提醒、可选提示音和后台恢复检查。默认桌面通知静默，声音需在设置中心主动开启。系统通知关闭时仍可查看界面未读标记。
 
@@ -155,7 +175,7 @@ Windows PowerShell 先设置 `$env:ALCHEMY_EXTENSION_ID = '<实际的32位扩展
 - 自动连接后在「插件模型」选择 Agent 和模型并点击「验证并使用」。这会发送一次简短请求，消耗少量模型额度；用户仅要求安装时，保留为手动步骤，不自动验证。不要通过修改 Codex 全局模型来修复插件兼容性。
 - `model is not supported when using Codex with a ChatGPT account`：刷新插件模型列表，选择其他模型并验证。CLI 登录成功或目录中出现模型名称，都不等于实际调用成功。切换账号、登录状态或提供方后重新验证。
 - CLI 接口不兼容：在「插件模型」所选 Agent 的管理区检查受影响功能、实际 CLI 路径和更新来源。有新版本时按原渠道升级，复查完成后重新验证模型，并由用户重试失败操作。不要反复提交同一个已知不兼容的任务，也不要把网络、额度或生图权限失败一概归因于版本旧。
-- 在同一 `browser-extension` 目录运行 `npm start`；电脑重启后需要再次运行，不会配置开机自启。
+- macOS Codex 已注册启动器时，电脑重启后打开 Reframe 即按需启动；否则在同一 `browser-extension` 目录运行 `npm start`。不会配置开机自启。
 - `npm stop` 停止脚本启动的后台服务，保留配对码和全部项目；任务运行中会拒绝停止。先在插件完成或取消任务。
 - `npm run bridge` 前台启动，适合排错，用 Ctrl+C 停止。由原终端启动的服务也从原终端停止。
 - 后台日志：`.local/logs/bridge.log`。配置：`.local/config/runtime.json`。这些文件及所有图片/Prompt 都已被 Git 忽略。

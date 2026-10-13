@@ -14,6 +14,8 @@
     "status": "node scripts/manage.mjs status",
     "stop": "node scripts/manage.mjs stop",
     "pair": "node scripts/manage.mjs pair",
+    "launcher:install": "node scripts/manage.mjs native-install",
+    "launcher:uninstall": "node scripts/manage.mjs native-uninstall",
     "dev": "wxt",
     "icons": "node scripts/icons.mjs",
     "prebuild": "npm run icons",

@@ -142,7 +142,7 @@ node agent-tool/ui.mjs evidence --report /absolute/gate.json --sha256 DIGEST --r
 | `ui.mjs baseline --report /absolute/report.json [--scenario ID]` | 生成3个核心场景或指定场景的候选、比较HTML与manifest，不接受截图。 |
 | `ui.mjs visual --report /absolute/report.json [--baseline-dir DIR]` | 固定策略像素比较；缺基线或环境不兼容退出1。 |
 | `ui.mjs accept --candidate DIR --scenario ID --reason TEXT --reviewer NAME [--baseline-dir DIR]` | 人类明确审阅后一次接受一个核心场景，保留来源与审阅记录；reviewer字符串不是授权。 |
-| `ui.mjs extension` | 消费已有verify构建指纹，启动临时profile中的真实MV3；网络仅本次合成fixture，失败/信号清理自己资源。 |
+| `ui.mjs extension` | 消费已有verify构建指纹，启动临时profile中的真实MV3；网络仅本次合成fixture，失败/信号清理自己资源。加载临时副本，仅移除 manifest 的必需/可选 `nativeMessaging` 权限，JS/CSS/资源保持不变；检查并记录权限隔离与副本清理，不能作为真实宿主调用证据。 |
 | `ui.mjs gate --tier quick\|browser\|full [--base REF] [--no-build] [--baseline-dir DIR]` | quick=静态增量+目录+例外；browser再加全场景预览+真实扩展；full再要求已审阅像素基线。 |
 | `ui.mjs change --files PATH … --reason TEXT [--output FILE]` | 生成proposed设计变更记录：来源hash、受影响规则/场景、复核清单。输出文件必须不存在。 |
 | `ui.mjs change --record FILE` | 校验记录与当前来源/映射一致，不证明记录中的证据真实执行或已审阅。 |

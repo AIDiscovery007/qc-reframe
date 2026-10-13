@@ -111,10 +111,10 @@ export function validateBrowserCoverage(preview, extensionReport, expectedScenar
       skips.push({ scenario: scene.id, ...check, reason: check.message });
     }
   }
-  const counts = { 'UI-EXTENSION-BUILD': 2, 'UI-EXTENSION-LOAD': 1, 'UI-EXTENSION-NETWORK': 2, 'UI-EXTENSION-POPUP': 2, 'UI-EXTENSION-CLOSED-SHADOW': 3, 'UI-EXTENSION-MENU': 2, 'UI-EXTENSION-FOCUS': 2, 'UI-EXTENSION-PAGE-ERROR': 1, 'UI-EXTENSION-CLEANUP': 1 };
-  if (extensionReport.status !== 'passed' || extensionReport.error || !extensionReport.checks || extensionReport.checks.length !== 16 || extensionReport.checks.some(check => check.status !== 'passed') || Object.entries(counts).some(([id, count]) => extensionReport.checks.filter(check => check.ruleId === id).length !== count)) throw new Error('真实扩展必需检查不完整');
+  const counts = { 'UI-EXTENSION-BUILD': 2, 'UI-EXTENSION-LOAD': 1, 'UI-EXTENSION-NETWORK': 2, 'UI-EXTENSION-NATIVE': 1, 'UI-EXTENSION-POPUP': 2, 'UI-EXTENSION-CLOSED-SHADOW': 3, 'UI-EXTENSION-MENU': 2, 'UI-EXTENSION-FOCUS': 2, 'UI-EXTENSION-PAGE-ERROR': 1, 'UI-EXTENSION-CLEANUP': 1 };
+  if (extensionReport.status !== 'passed' || extensionReport.error || !extensionReport.checks || extensionReport.checks.length !== 17 || extensionReport.checks.some(check => check.status !== 'passed') || Object.entries(counts).some(([id, count]) => extensionReport.checks.filter(check => check.ruleId === id).length !== count)) throw new Error('真实扩展必需检查不完整');
   const env = extensionReport.environment;
-  if (!env || env.interrupted || env.productionBundleModified !== false || !env.profileRemoved || !env.browserClosed || !env.serverClosed) throw new Error('扩展隔离或清理条件不符');
+  if (!env || env.interrupted || env.productionBundleModified !== false || env.nativeMessagingBlocked !== true || env.fixtureRemoved !== true || !env.isolatedExtension || !env.profileRemoved || !env.browserClosed || !env.serverClosed) throw new Error('扩展隔离或清理条件不符');
   if (!preview.source?.hash || !preview.source?.buildHash || [env.before, env.after].some(item => item?.sourceHash !== preview.source.hash || item?.buildHash !== preview.source.buildHash)) throw new Error('报告来源相互不一致');
   return skips;
 }

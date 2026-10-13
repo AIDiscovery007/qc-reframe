@@ -5,11 +5,14 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 import { storagePaths, ensureStorage, migrateStorage, moveLegacyFile, readStoredConfig, rotateServiceLog } from "../bridge/storage.mjs";
 import { connectionOrigins } from "../bridge/connection.mjs";
+import { registerLauncher, serveNative } from "./native-host.mjs";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Preserve the installer's path spelling: Chromium derives the extension ID
+// from that path, including macOS /var versus /private/var aliases.
+const root = resolve(dirname(process.argv[1]), "..");
 const dataDir = resolve(process.env.ALCHEMY_DATA_DIR || join(root, ".local"));
 const paths = storagePaths(dataDir);
 const configFile = paths.settings;
@@ -17,7 +20,7 @@ const port = Number(process.env.ALCHEMY_PORT || 43187);
 const url = `http://127.0.0.1:${port}`;
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 const runtimeKeys = ["CODEX_BIN", "PI_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms, signal) => delay(ms, undefined, { signal });
 const readable = async path => { try { await access(path); return true; } catch { return false; } };
 const cliCommand = path => process.platform === "win32" ? `& '${path.replaceAll("'", "''")}'` : `'${path.replaceAll("'", "'\"'\"'")}'`;
 
@@ -74,11 +77,14 @@ async function token() {
   return (await readStoredConfig(dataDir, "token"))?.trim() || "";
 }
 
-async function probe() {
+async function probe(signal) {
+  signal?.throwIfAborted();
   let response;
   try {
-    response = await fetch(`${url}/health`, { headers: { Authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(1500) });
+    const timeout = AbortSignal.timeout(1500);
+    response = await fetch(`${url}/health`, { headers: { Authorization: `Bearer ${await token()}` }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, redirect: "error" });
   } catch (error) {
+    signal?.throwIfAborted();
     if (error.cause?.code === "ECONNREFUSED") return null;
     throw new Error(`无法确认 ${url} 的状态，未启动或停止任何现有服务。`);
   }
@@ -92,31 +98,43 @@ function connectionInfo() {
   console.log(`\n服务：${url}\n扩展目录：${join(root, ".output/chrome-mv3")}\n数据目录：${dataDir}\n连接：从上述目录加载的扩展会自动连接，无需填写配对码。\n首次加载说明：${join(root, "docs/INSTALL_WITH_CODEX.md")}\n检查：npm run status　停止：npm stop`);
 }
 
-async function start(env) {
-  const existing = await probe();
-  if (existing) {
+async function start(env, { signal, automatic = false } = {}) {
+  const reuse = existing => {
+    if (!existing) return false;
     if (existing.version !== version) throw new Error(`已运行 ${existing.version}，当前文件为 ${version}。请先停止旧服务，再运行 npm start。`);
     if (!existing.ready) throw new Error("服务已运行，但 Alchemy skill 未就绪。请先停止服务并运行 npm run doctor。");
-    console.log("本机服务已运行，复用现有服务和配对码。");
-    connectionInfo();
-    return;
-  }
-  const release = await prepareStart(env);
-  try { await launch(env); } finally { await release(); }
+    if (!automatic) {
+      console.log("本机服务已运行，复用现有服务和配对码。");
+      connectionInfo();
+    }
+    return true;
+  };
+  if (reuse(await probe(signal))) return;
+  const release = await prepareStart(env, !automatic, signal);
+  try {
+    // Another manager may have completed startup between the first probe and lock.
+    if (!reuse(await probe(signal))) await launch(env, { signal, quiet: automatic });
+  } finally { await release(); }
 }
 
 // Hold the startup lock from preflight through handoff; neither path reacquires it.
-async function prepareStart(env, checkCli = true) {
+async function prepareStart(env, checkCli = true, signal) {
+  signal?.throwIfAborted();
   const manifest = JSON.parse(await readFile(join(root, ".output/chrome-mv3/manifest.json"), "utf8"));
   if (manifest.version !== version) throw new Error("扩展构建与当前版本不同，请先运行 npm run setup。");
   if (checkCli) await doctor(env, true);
   else await checkSkill(env);
   await ensureStorage(dataDir);
   const lock = join(paths.runtime, "start.lock");
-  try { await mkdir(lock); }
-  catch (error) {
-    if (error.code === "EEXIST") throw new Error(`另一个启动操作尚未结束。如上次启动被中断，确认没有启动操作后移除 ${lock} 空目录再重试。`);
-    throw error;
+  for (;;) {
+    signal?.throwIfAborted();
+    try { await mkdir(lock); break; }
+    catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      if (!signal) throw new Error(`另一个启动操作尚未结束。如上次启动被中断，确认没有启动操作后移除 ${lock} 空目录再重试。`);
+      // Only automatic startup waits, always within its host-wide deadline.
+      await sleep(100, signal);
+    }
   }
   try {
     if (await readable(join(dataDir, "start.lock"))) throw new Error("旧版启动锁仍存在，请确认旧启动命令已结束后移除数据目录根部的 start.lock 空目录。");
@@ -125,27 +143,31 @@ async function prepareStart(env, checkCli = true) {
   return () => rmdir(lock);
 }
 
-async function launch(env) {
+async function launch(env, { signal, quiet = false } = {}) {
   let child;
   try {
     await migrateStorage(dataDir);
+    signal?.throwIfAborted();
     await rotateServiceLog(paths.log);
     const log = await open(paths.log, "a", 0o600);
     try {
-      child = spawn(process.execPath, [join(root, "bridge/server.mjs")], {
-        cwd: root, env: { ...env, ALCHEMY_DATA_DIR: dataDir, ALCHEMY_MANAGED: "1" },
+      signal?.throwIfAborted();
+      child = spawn(process.execPath, ["--preserve-symlinks-main", join(root, "bridge/server.mjs")], {
+        cwd: root, env: { ...env, ALCHEMY_DATA_DIR: dataDir, ALCHEMY_PORT: String(port), ALCHEMY_MANAGED: "1" },
         detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd],
       });
       await once(child, "spawn");
     } finally { await log.close(); }
     for (let i = 0; i < 32; i++) {
-      await sleep(250);
+      await sleep(250, signal);
       if (child.exitCode !== null) throw new Error(`服务启动失败，请查看 ${paths.log}。`);
-      const health = await probe();
+      const health = await probe(signal);
       if (health?.ready && health.version === version && health.managed) {
         child.unref();
-        console.log("本机服务已在后台启动，关闭本终端后仍可使用。");
-        connectionInfo();
+        if (!quiet) {
+          console.log("本机服务已在后台启动，关闭本终端后仍可使用。");
+          connectionInfo();
+        }
         return;
       }
     }
@@ -156,7 +178,14 @@ async function launch(env) {
 async function main() {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("ALCHEMY_PORT 无效。");
   const command = process.argv[2];
+  if (command === "native-host") return serveNative(signal => start({ ...process.env }, { signal, automatic: true }));
   const env = await environment();
+  if (command === "native-install" || command === "native-uninstall") {
+    if (process.argv.length !== 4) throw new Error("请运行 npm run launcher:install -- codex 或 npm run launcher:uninstall -- codex。");
+    await registerLauncher({ root, dataDir, port, env, uninstall: command === "native-uninstall", browser: process.argv[3] });
+    console.log(command === "native-install" ? "Codex 本机启动器已注册；打开 Reframe 时按需启动，不配置开机自启。" : "本安装的启动器已撤销，现有服务与数据保留。");
+    return;
+  }
   if (["setup", "start", "run", "restart-after"].includes(command))
     connectionOrigins(join(root, ".output/chrome-mv3"), env.ALCHEMY_EXTENSION_ID);
   if (command === "restart-after") {
@@ -234,7 +263,7 @@ async function main() {
   if (command === "start") return start(env);
   if (command === "run") {
     await doctor(env, true);
-    const child = spawn(process.execPath, [join(root, "bridge/server.mjs")], { cwd: root, env, stdio: "inherit" });
+    const child = spawn(process.execPath, ["--preserve-symlinks-main", join(root, "bridge/server.mjs")], { cwd: root, env, stdio: "inherit" });
     for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => child.kill(signal));
     const [code] = await once(child, "exit");
     process.exitCode = code || 0;

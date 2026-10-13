@@ -6,6 +6,8 @@ export class BridgeError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 
+export class BridgeTransportError extends Error {}
+
 export async function bridge<T>(
   path: string,
   token: string,
@@ -30,7 +32,7 @@ export async function bridge<T>(
   } catch {
     signal?.throwIfAborted();
     if (timeout.aborted) throw new Error("本机服务请求超时，读取已停止；请重新打开项目或任务中心确认状态后重试。");
-    throw new Error("本机服务未运行，启动后将自动连接。");
+    throw new BridgeTransportError("本机服务未运行，启动后将自动连接。");
   }
   const value = await response.json();
   if (!response.ok)

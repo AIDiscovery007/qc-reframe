@@ -1,7 +1,7 @@
 import { openWorkspace } from "../lib/workspace-navigation";
 import { startReminderService } from "../lib/reminder-background";
 import { browser } from "wxt/browser";
-import { bridge as fetchBridge, BridgeError } from "../lib/bridge";
+import { bridge as fetchBridge, BridgeError, BridgeTransportError } from "../lib/bridge";
 import { operationFor, allowsOperation, messageSource, PORT_KEEP_ALIVE } from "../lib/operation-policy";
 import { captureImage } from "../lib/capture";
 import { validImageSizeRequest } from "../lib/image-size.mjs";
@@ -71,13 +71,89 @@ export default defineBackground(() => {
     catch (error) {
       if (!(error instanceof BridgeError) || error.status !== 401) throw error;
       signal?.throwIfAborted();
-      const renewed = await connectionToken(credential);
-      signal?.throwIfAborted();
-      // A 401 proves the operation was rejected before execution; network failures never replay writes.
-      return fetchBridge<T>(path, renewed, body, signal);
+      // Authentication failures must never become permission to start a process.
+      try {
+        const renewed = await connectionToken(credential);
+        signal?.throwIfAborted();
+        // A 401 proves rejection before execution; network failures never replay writes.
+        return await fetchBridge<T>(path, renewed, body, signal);
+      } catch (cause) {
+        if (cause instanceof BridgeTransportError) throw new Error(cause.message, { cause });
+        throw cause;
+      }
     }
   };
   const reminders = startReminderService(bridge);
+  const launcherHelp = "请检查本机启动器，运行 npm run launcher:install -- codex；不支持的浏览器请手动运行 npm start。";
+  const ensureStarted = (signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+    let port: ReturnType<typeof browser.runtime.connectNative> | undefined;
+    let finished = false;
+    const finish = (error?: Error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      if (port) {
+        port.onMessage.removeListener(message);
+        port.onDisconnect.removeListener(disconnected);
+        try { port.disconnect(); } catch { /* The browser may already have destroyed the port. */ }
+      }
+      if (error) reject(error); else resolve();
+    };
+    const fail = (cause: string) => finish(new Error(`本机自动启动失败：${cause} ${launcherHelp}`));
+    const abort = () => finish(signal.reason);
+    const message = (value: unknown) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return fail("启动器返回无效响应。");
+      const response = value as Record<string, unknown>;
+      if (response.ok === true && Object.keys(response).length === 1) return finish();
+      if (response.ok === false && Object.keys(response).length === 2 && typeof response.error === "string" && response.error.length <= 2000)
+        return fail(response.error);
+      fail("启动器返回无效响应。");
+    };
+    const disconnected = () => fail(browser.runtime.lastError?.message || "启动器连接已断开。");
+    const timer = setTimeout(() => fail("启动器未按时响应，已超时。"), 10_000);
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      signal.throwIfAborted();
+      if (typeof browser.runtime.connectNative !== "function") return fail("此浏览器不支持本机启动器。");
+      port = browser.runtime.connectNative("com.qc.reframe");
+      port.onMessage.addListener(message);
+      port.onDisconnect.addListener(disconnected);
+      port.postMessage({ action: "ensure-start" });
+    } catch (error) { fail(error instanceof Error ? error.message : "无法连接启动器。"); }
+  });
+  // Only opening a UI may wake the service. Share the entire bounded operation,
+  // including HTTP recovery, so concurrent windows cannot launch a second host.
+  let opening: Promise<unknown> | undefined;
+  const openingHealth = () => {
+    if (opening) return opening;
+    const controller = new AbortController();
+    const { signal } = controller;
+    const timer = setTimeout(() => controller.abort(new Error(`本机自动连接超时。${launcherHelp}`)), 28_000);
+    let onAbort: () => void;
+    const cancelled = new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    const read = async () => {
+      const { preferences } = await browser.storage.local.get("preferences") as { preferences?: Preferences };
+      const path = `/health${await showsHiddenProjects() ? "?includeHidden=true" : ""}`;
+      signal.throwIfAborted();
+      try { return await bridge(path, preferences?.token || "", undefined, signal); }
+      catch (error) {
+        if (!(error instanceof BridgeTransportError)) throw error;
+        signal.throwIfAborted();
+        await ensureStarted(signal);
+        return bridge(path, preferences?.token || "", undefined, signal);
+      }
+    };
+    opening = Promise.race([read(), cancelled]).finally(() => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      opening = undefined;
+    });
+    return opening;
+  };
   void browser.storage.local.setAccessLevel({
     accessLevel: "TRUSTED_CONTEXTS",
   });
@@ -282,6 +358,7 @@ export default defineBackground(() => {
     });
   };
   const uiMessage = async (message: Record<string, any>, source = "popup", sourceTab?: number, signal?: AbortSignal) => {
+    if (message.type === "alchemy:connect" || message.type === "alchemy:query" && message.path === "/health") return openingHealth();
     // Expose only this public preference; content scripts cannot read local storage.
     if (message.type === "alchemy:get-motion-preference") {
       const { motionPreference } = await browser.storage.local.get("motionPreference");
@@ -430,8 +507,6 @@ export default defineBackground(() => {
         if (typeof message.show !== "boolean") throw new Error("无效显示设置");
         await browser.storage.session.set({ showHiddenProjects: message.show });
         return message.show;
-      case "alchemy:connect":
-        return bridge("/health", token);
       case "alchemy:project-views": {
         const stored = await browser.storage.local.get(null);
         return Object.fromEntries(Object.entries(stored).filter(([key]) => /^projectView:[a-f0-9]{64}$/.test(key))
