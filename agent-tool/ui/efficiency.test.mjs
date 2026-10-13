@@ -39,11 +39,11 @@ catch(error) { console.log(error.message); }`;
 // Structure-only fixtures, never evidence that a browser was executed.
 function coverageFixture() {
   const state = { sourceHash: 's', buildHash: 'b', fixtureHash: 'f', checkerHash: 'c' };
-  const counts = { BUILD: 2, LOAD: 1, NETWORK: 2, POPUP: 2, 'CLOSED-SHADOW': 3, MENU: 2, FOCUS: 2, 'PAGE-ERROR': 1, CLEANUP: 1 };
+  const counts = { BUILD: 2, LOAD: 1, NETWORK: 2, NATIVE: 1, POPUP: 2, 'CLOSED-SHADOW': 3, MENU: 2, FOCUS: 2, 'PAGE-ERROR': 1, CLEANUP: 1 };
   return { schemaVersion: 2, tier: 'browser', status: 'passed', evidenceState: state, steps: [
     { id: 'static-and-maintenance', status: 'passed' },
     { id: 'preview', status: 'passed', scope: 'complete', source: { hash: 's', buildHash: 'b' }, fixture: { hash: 'f' }, rulesAndRunnerHash: 'c', scenarios: scenarios.map(scene => ({ id: scene.id, status: 'passed', evidence: { screenshot: '/synthetic.png' }, checks: (scene.regression ? ['UI-BEHAVIOR'] : scene.rules).map(ruleId => ({ ruleId, status: 'passed' })) })) },
-    { id: 'extension', status: 'passed', checks: Object.entries(counts).flatMap(([id, count]) => Array.from({ length: count }, () => ({ ruleId: 'UI-EXTENSION-' + id, status: 'passed' }))), environment: { productionBundleModified: false, profileRemoved: true, browserClosed: true, serverClosed: true, before: { sourceHash: 's', buildHash: 'b' }, after: { sourceHash: 's', buildHash: 'b' } } },
+    { id: 'extension', status: 'passed', checks: Object.entries(counts).flatMap(([id, count]) => Array.from({ length: count }, () => ({ ruleId: 'UI-EXTENSION-' + id, status: 'passed' }))), environment: { productionBundleModified: false, nativeMessagingBlocked: true, fixtureRemoved: true, isolatedExtension: '/synthetic-isolated-extension', profileRemoved: true, browserClosed: true, serverClosed: true, before: { sourceHash: 's', buildHash: 'b' }, after: { sourceHash: 's', buildHash: 'b' } } },
   ] };
 }
 
@@ -56,6 +56,10 @@ test('receipt structure rejects missing/duplicate scenarios, omitted assertions,
     report => { report.steps[1].scenarios[0].checks[0].status = 'skipped'; },
     report => { report.steps[2].checks.pop(); },
     report => { report.steps[2].environment.interrupted = 'SIGTERM'; },
+    report => { report.steps[2].checks = report.steps[2].checks.filter(check => check.ruleId !== 'UI-EXTENSION-NATIVE'); },
+    report => { delete report.steps[2].environment.nativeMessagingBlocked; },
+    report => { report.steps[2].environment.nativeMessagingBlocked = false; },
+    report => { report.steps[2].environment.fixtureRemoved = false; },
     report => { report.steps[1].fixture.hash = 'changed'; },
     report => { report.steps[1].scope = 'development-only'; },
   ]) { const report = coverageFixture(); mutate(report); assert.throws(() => validateCoverage(report)); }

@@ -33,8 +33,11 @@
 | N6 受控进程 | Given 浏览器没有 shell PATH 且环境中的数据目录/端口被改变，When 调用已安装启动器，Then 使用安装时固定的 Node 和位置，不扫描或登录 CLI，不输出凭据。 |
 | N7 输入边界 | Given 非法来源、未知字段、畸形 JSON、超限帧或不完整 EOF，When host 读取请求，Then 不启动服务，有限时间内返回错误或关闭；分片的合法帧可以启动。 |
 | N8 启动保护 | Given 端口被其他进程占用或启动锁未释放，When 请求自动启动，Then 有界失败，不终止或替换现有服务；复用服务时保持原 instanceId 和 token。 |
+| N9 回归隔离 | Given 已注册真实本机 host，When 运行隔离扩展回归且 HTTP 连接失败，Then 浏览器权限边界禁止 Native Messaging，不可能唤起真实服务。测试加载临时扩展副本，仅删除 manifest 的必需/可选 `nativeMessaging` 权限；生产 JS/CSS/资源逐字节一致，源构建保持不变，副本正常或异常结束均清理。 |
 
 测试通过真实构建 background 的消息入口，以及注册后的可执行 host 和真实临时 bridge 验证行为；Chrome API、时钟和 CLI 属于受控边界替身。旧网络写入、鉴权、隐藏项目和提醒回归必须保持通过。新增权限和执行域需重新审查 CI 指纹边界，不能只更新摘要消除失败。
+
+N9 是实现前执行域审计发现的必要补充：HTTP 代理不拦截 native host，临时 profile 不隔离系统级 host。保留原 16 项扩展检查并增加 `UI-EXTENSION-NATIVE`；报告声明 `nativeMessagingBlocked: true`、`fixtureRemoved: true` 和副本路径 `isolatedExtension`，记录被修改的 manifest 权限。证据验证器拒绝没有 native 隔离检查/字段的旧报告。此处测试增强用于验证副作用边界，不降低旧断言。
 
 ## 交付检查
 

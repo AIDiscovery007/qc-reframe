@@ -7,6 +7,11 @@ import { validImageSizeRequest } from "../lib/image-size.mjs";
 import { validGenerationRatio } from "../lib/generation-session.ts";
 import * as operationPolicy from "../lib/operation-policy.ts";
 
+const bridgeModule = {};
+runInNewContext(ts.transpileModule(await readFile(new URL("../lib/bridge.ts", import.meta.url), "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: bridgeModule, require: () => operationPolicy });
+
 const compiled = ts.transpileModule(await readFile(new URL("../entrypoints/background.ts", import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
@@ -43,9 +48,10 @@ function background(local = { preferences: { token: "private-token" } }) {
   };
   runInNewContext(compiled, {
     exports: {}, defineBackground: fn => fn(), crypto, URLSearchParams, TextEncoder, console,
+    AbortController, AbortSignal, setTimeout, clearTimeout,
     require: name => ({
       "../lib/reminder-background": { startReminderService: () => ({ wake: async () => {}, projectsChanged: async () => {} }) },
-      "wxt/browser": { browser }, "../lib/bridge": { bridge },
+      "wxt/browser": { browser }, "../lib/bridge": { ...bridgeModule, bridge },
       "../lib/operation-policy": operationPolicy,
       "../lib/image-size.mjs": { validImageSizeRequest }, "../lib/generation-session": { validGenerationRatio },
       "../lib/capture": { captureImage: async () => ({ image, capture: "original" }) },
