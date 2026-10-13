@@ -9,7 +9,7 @@ import { runAgent, runCodex } from "../bridge/agent.mjs";
 import { readModelCatalog } from "../bridge/models.mjs";
 import { runGeneration } from "../bridge/generation.mjs";
 
-async function fakeCodex(t, turnCode) {
+async function fakeCodex(t, turnCode, initializeCode = "") {
   const dir = await mkdtemp(join(tmpdir(), "alchemy-inspection-rpc-"));
   const file = join(dir, "codex");
   const log = join(dir, "calls.jsonl");
@@ -25,6 +25,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
   const m = JSON.parse(line); fs.appendFileSync(${JSON.stringify(log)},line+'\\n');
   if (m.id === undefined) return;
   if (!m.method) { if (--expectedReplies === 0) done(); return; }
+  if (m.method === 'initialize') { ${initializeCode} }
   let result = {};
   if (m.method === 'account/read') result={account:{type:'chatgpt',email:'inspection@example.com',planType:'test'},requiresOpenaiAuth:true};
   if (m.method === 'config/read') result={config:{model_provider:'openai'}};
@@ -196,23 +197,60 @@ test("cancelling RPC aborts an active handler and prevents subsequent work and t
   assert.ok((await calls()).every(m => m.id !== "active"));
 });
 
-for (const outcome of ["cancel", "timeout"]) test(`RPC ${outcome} terminates its actual child process`, async t => {
-  const { dir } = await fakeCodex(t, `send({method:'test/pid',params:{pid:process.pid}});`);
-  const controller = new AbortController(), started = Promise.withResolvers();
-  const running = withCodex({ cwd: dir, signal: controller.signal, timeoutMs: 1500,
-    onNotification(message) { if (message.method === "test/pid") started.resolve(message.params.pid); },
+async function pendingRpc(t, initializeCode) {
+  const { dir } = await fakeCodex(t, `send({method:'test/ready'});`,
+    `send({method:'test/pid',params:{pid:process.pid}}); ${initializeCode}`);
+  const controller = new AbortController(), spawned = Promise.withResolvers(), started = Promise.withResolvers();
+  // Startup is real I/O; advance the operation clock explicitly after the chosen handshake.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const running = withCodex({ cwd: dir, signal: AbortSignal.any([controller.signal, t.signal]), timeoutMs: 1500,
+    onNotification(message) {
+      if (message.method === "test/pid") spawned.resolve(message.params.pid);
+      if (message.method === "test/ready") started.resolve();
+    },
   }, async request => {
     await request("turn/start", {});
     await new Promise(() => {});
   });
-  const rejected = assert.rejects(running, outcome === "cancel" ? /取消/ : /超时/);
-  const pid = await started.promise;
-  if (outcome === "cancel") controller.abort();
-  await rejected;
+  const ready = Promise.race([started.promise, running]);
+  ready.catch(() => {});
+  t.after(async () => {
+    controller.abort();
+    await running.catch(() => {});
+    t.mock.timers.reset();
+  });
+  return { running, ready, spawned: Promise.race([spawned.promise, running]), cancel: () => controller.abort() };
+}
+
+async function assertChildExited(pid) {
+  assert.ok(Number.isInteger(pid) && pid > 0, "fixture must identify its actual child");
   for (let attempt = 0; attempt < 100; attempt++) {
     try { process.kill(pid, 0); }
     catch (error) { assert.equal(error.code, "ESRCH"); return; }
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   assert.fail("Codex child survived the operation");
+}
+
+for (const outcome of ["cancel", "timeout"]) test(`RPC ${outcome} terminates its actual child process`, { timeout: 10_000 }, async t => {
+  const rpc = await pendingRpc(t, `setTimeout(() => send({id:m.id,result:{}}), 1700); return;`);
+  const pid = await rpc.spawned;
+  await rpc.ready;
+  const rejected = assert.rejects(rpc.running, outcome === "cancel" ? /取消/ : /超时/);
+  if (outcome === "cancel") rpc.cancel();
+  else t.mock.timers.tick(1500);
+  await rejected;
+  t.mock.timers.reset();
+  await assertChildExited(pid);
+});
+
+for (const outcome of ["failed", "unready"]) test(`RPC ${outcome} initialization ends readiness waiting and cleans its child`, { timeout: 10_000 }, async t => {
+  const rpc = await pendingRpc(t, outcome === "failed" ? `send({id:m.id,error:{message:'fixture initialization failed'}}); return;` : "return;");
+  const pid = await rpc.spawned;
+  if (outcome === "unready") t.mock.timers.tick(1500);
+  const error = await rpc.running.catch(error => error);
+  assert.match(error.message, outcome === "failed" ? /fixture initialization failed/ : /Codex 请求超时/);
+  await assert.rejects(rpc.ready, failure => failure === error);
+  t.mock.timers.reset();
+  await assertChildExited(pid);
 });

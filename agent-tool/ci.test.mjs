@@ -49,7 +49,7 @@ test('PR examines cumulative branch diff and excludes unrelated base advancement
 
 test('mixed, unknown Markdown, UI contracts/baselines, tools, dependencies and workflow require full', t => {
   const f = fixture(t);
-  for (const name of ['unknown.md', 'browser-extension/docs/uiux/README.md', 'browser-extension/docs/uiux/visual-baselines/linux/manifest.json', 'agent-tool/README.md', 'browser-extension/package-lock.json', '.github/workflows/uiux.yml', 'source.js']) {
+  for (const name of ['unknown.md', '.agents/roles/executor.md', 'agent-logs/session.md', 'docs/standards/code.md', 'browser-extension/docs/uiux/README.md', 'browser-extension/docs/uiux/visual-baselines/linux/manifest.json', 'agent-tool/README.md', 'browser-extension/package-lock.json', '.github/workflows/uiux.yml', 'source.js']) {
     f.git('reset', '--hard', f.base);
     f.write('README.md', 'docs\n'); f.write(name, 'change\n');
     assert.equal(f.push(f.commit()).mode, 'full', name);
@@ -66,21 +66,21 @@ test('manual, unknown events, empty diff, unavailable/all-zero/missing base and 
 
 test('deletion checks incoming links; rename considers both names', t => {
   const f = fixture(t);
-  f.write('agent-logs/old.md'); f.write('README.md', '[log](agent-logs/old.md)\n'); const base = f.commit();
-  rmSync(path.join(f.cwd, 'agent-logs/old.md'));
+  f.write('browser-extension/docs/releases/old.md'); f.write('README.md', '[release](browser-extension/docs/releases/old.md)\n'); const base = f.commit();
+  rmSync(path.join(f.cwd, 'browser-extension/docs/releases/old.md'));
   let result = f.push(f.commit(), base);
   assert.equal(result.mode, 'docs');
   assert.throws(() => checkDocs(result, f.cwd), /链接失效/);
   f.git('reset', '--hard', base);
-  renameSync(path.join(f.cwd, 'agent-logs/old.md'), path.join(f.cwd, 'agent-logs/new.md'));
+  renameSync(path.join(f.cwd, 'browser-extension/docs/releases/old.md'), path.join(f.cwd, 'browser-extension/docs/releases/new.md'));
   result = f.push(f.commit(), base);
-  assert.deepEqual(new Set(result.files), new Set(['agent-logs/old.md', 'agent-logs/new.md']));
+  assert.deepEqual(new Set(result.files), new Set(['browser-extension/docs/releases/old.md', 'browser-extension/docs/releases/new.md']));
   assert.throws(() => checkDocs(result, f.cwd), /链接失效/);
   f.git('reset', '--hard', base);
-  renameSync(path.join(f.cwd, 'source.js'), path.join(f.cwd, 'agent-logs/code.md'));
+  renameSync(path.join(f.cwd, 'source.js'), path.join(f.cwd, 'browser-extension/docs/releases/code.md'));
   assert.equal(f.push(f.commit(), base).mode, 'full');
   f.git('reset', '--hard', base);
-  renameSync(path.join(f.cwd, 'agent-logs/old.md'), path.join(f.cwd, 'unknown.md'));
+  renameSync(path.join(f.cwd, 'browser-extension/docs/releases/old.md'), path.join(f.cwd, 'unknown.md'));
   assert.equal(f.push(f.commit(), base).mode, 'full');
 });
 
@@ -92,7 +92,7 @@ test('ordinary unreferenced document deletion passes', t => {
 
 test('NUL-delimited paths preserve spaces, tabs, newlines, Unicode and shell metacharacters', t => {
   const f = fixture(t);
-  const file = 'agent-logs/中文 space\tline\n$(echo danger).md';
+  const file = 'browser-extension/docs/releases/中文 space\tline\n$(echo danger).md';
   f.write(file);
   const result = f.push(f.commit());
   assert.equal(result.mode, 'docs'); assert.deepEqual(result.files, [file]);

@@ -55,8 +55,7 @@
     {
       "kind": "build-and-types",
       "result": "npm run build 与 compile通过，生产设计值不变",
-      "log": "agent-logs/01a11556-7e12-7440-b956-f968b3a00034.md",
-      "section": "阶段6维护机制与同值迁移"
+      "note": "原本机验证日志已删除；此项仅保留历史结果摘要。"
     },
     {
       "kind": "static",
@@ -77,9 +76,8 @@
     {
       "kind": "integrated-gate",
       "result": "静态通过，21预览场景通过，16真实扩展检查通过；full仅因3个初始视觉基线未审阅而失败",
-      "log": "agent-logs/01a11556-7e12-7440-b956-f968b3a00034.md",
-      "section": "阶段2–6最终技术交付 · 2026-10-07",
-      "report": "<OS临时目录>/reframe-ui-gate-R4jX5S/gate.json"
+      "report": "<OS临时目录>/reframe-ui-gate-R4jX5S/gate.json",
+      "note": "原本机验证日志已删除；此项仅保留历史结果摘要。"
     }
   ],
   "reviewChecklist": [

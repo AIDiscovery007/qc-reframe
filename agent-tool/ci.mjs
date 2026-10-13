@@ -11,7 +11,7 @@ const exactDocs = new Set([
   'browser-extension/docs/INSTALL_WITH_CODEX.md',
 ]);
 export const isDoc = file => exactDocs.has(file)
-  || /^(?:\.agents\/roles|agent-logs|browser-extension\/docs\/releases)\/[^/]+\.md$/.test(file);
+  || /^browser-extension\/docs\/releases\/[^/]+\.md$/.test(file);
 const decode = buffer => new TextDecoder('utf-8', { fatal: true }).decode(buffer);
 function git(cwd, ...args) {
   return decode(execFileSync('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }));
@@ -63,7 +63,7 @@ export function classify({ cwd = process.cwd(), eventName, event, sha } = {}) {
         if (entry.mode !== '100644' || entry.type !== 'blob') throw Error('文档不是普通非执行文件');
       }
     }
-    return { ...result, mode: 'docs', reason: '仅说明文档、协作规则或日志' };
+    return { ...result, mode: 'docs', reason: '仅白名单说明文档' };
   } catch (error) {
     // Never turn incomplete Git/event evidence into a lightweight success.
     return { mode: 'full', reason: `保守回退：${error.message}`, base, head };

@@ -8,7 +8,7 @@
 2. 同步catalog的来源、关系与场景。改变几何规则时同步probe的独立期望及正反例；不能直接以当前测量作为正确答案。
 3. `node agent-tool/ui.mjs sync`并复核目录差异。运行`change --files PATH … --reason "设计依据" --output /absolute/proposed.json`创建记录，不覆盖历史记录。
 4. 开发期用 `node agent-tool/test-run.mjs plan --index /absolute/test-index.json` 查看统一选测与回退原因；`run` 保留构建、类型、静态、核心＋受影响＋新改测试，缺可信映射则完整。定向 `verify --scenarios ID … --no-build --reason TEXT` 仍可用于快速诊断，不冒充完整证据。每小时集中完整回归及合并前准确SHA检查见[工具索引](../../../agent-tool/README.md#文件级选测与集中回归)。用 `inspect --scenario ID --no-build` 读取规则/期望/实际、祖先rect、样式和截图；`change --record FILE` 检查来源与映射。
-5. 在变更记录的evidence中附实际报告路径、结果和验证边界，交监工复核。视觉变化另外提出候选，逐场景由人类审阅后接受。`reviewStatus: proposed`不能作为已批准证据。
+5. 在变更记录的evidence中附实际报告路径、结果和验证边界，供复核。视觉变化另外提出候选，逐场景由人类审阅后接受。`reviewStatus: proposed`不能作为已批准证据。
 6. 后续来源或场景映射变化需创建新提案/重新审阅。历史记录作为历史证据保存，不要求旧记录永远匹配新源码。
 
 ## 分层门禁
@@ -35,6 +35,6 @@ CI任务需在远端实际运行后才能认定CI通过；分支保护/必需检
 
 ## 有效证据与轻量交付
 
-执行者交付最终gate路径及工具返回的`evidenceSha256`。监工以`evidence --report FILE --sha256 DIGEST`核验来源（test-run生成的coverage报告使用`REFRAME_TEST_COVERAGE=1 node agent-tool/ui.mjs evidence --report FILE --sha256 DIGEST`，普通构建不加该环境变量）、环境、完整覆盖、附件和限制后复用同一份有效浏览器结果，再按风险独立补验；不能仅根据passed或重新计算待审摘要认定可信。证据仅本机24小时内有效，检查范围与失效条件见[工具索引](../../../agent-tool/README.md#开发反馈最终证据与耗时)。产品和工具自测分别提供结果，不从浏览器回执推断通过；视觉待审阅始终保留。
+交付最终gate路径及工具返回的`evidenceSha256`。复核时以`evidence --report FILE --sha256 DIGEST`核验来源（test-run生成的coverage报告使用`REFRAME_TEST_COVERAGE=1 node agent-tool/ui.mjs evidence --report FILE --sha256 DIGEST`，普通构建不加该环境变量）、环境、完整覆盖、附件和限制后复用同一份有效浏览器结果，再按风险独立补验；不能仅根据passed或重新计算待审摘要认定可信。证据仅本机24小时内有效，检查范围与失效条件见[工具索引](../../../agent-tool/README.md#开发反馈最终证据与耗时)。产品和工具自测分别提供结果，不从浏览器回执推断通过；视觉待审阅始终保留。
 
 共享验证窗口由工具锁及团队协调共同保护；直接npm构建不受锁控制。源码、fixture、检查器、产物或环境变化必须重新判定，不能为了减少重跑绕过指纹。日志只记录本轮变化、报告路径/可信摘要、未覆盖项、复核结论及耗时；阶段等待和重跑原因单列，无实测值写未知。小改动优先复用已有断言/场景，只有已有检查无法捕获风险时才扩充工具；不得删除必要断言、隐藏skip、放宽视觉阈值或自动接受基线提速。

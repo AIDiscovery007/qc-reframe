@@ -200,7 +200,7 @@
         "/tmp/reframe-model-settings-static.json",
         "/tmp/reframe-model-settings-compile.log"
       ],
-      "note": "增量静态0finding，tsc通过。最终完整回归及浏览器域审阅由监工/主执行者协调。"
+      "note": "增量静态0finding，tsc通过。最终完整回归及浏览器域审阅待完成。"
     }
   ],
   "reviewChecklist": [

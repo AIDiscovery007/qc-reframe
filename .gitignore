@@ -1,4 +1,4 @@
-# Track the browser extension, engineering tools and collaboration documents.
+# Track the browser extension, engineering tools and project documentation.
 # Local skills, experiments, downloaded images and prompts remain on disk.
 /*
 !/.gitignore
@@ -6,22 +6,18 @@
 !/Contribution.md
 !/AGENTS.md
 !/GLOSSARY.md
-# Session logs stay on this machine and are not distributed by clone.
-/agent-logs/
 !/browser-extension/
 !/agent-tool/
 
-# Track only collaboration role documents; keep local skills and other agent data ignored.
-!/.agents/
-/.agents/*
-!/.agents/roles/
-/.agents/roles/*
-!/.agents/roles/supervisor.md
-!/.agents/roles/project-manager.md
-!/.agents/roles/executor.md
-!/.agents/roles/uiux-engineer.md
-!/.agents/roles/architecture-engineer.md
-!/.agents/roles/assignments.md
+# Track only the four engineering standards.
+!/docs/
+/docs/*
+!/docs/standards/
+/docs/standards/*
+!/docs/standards/code.md
+!/docs/standards/frontend.md
+!/docs/standards/backend.md
+!/docs/standards/review.md
 
 # Explicit verification workflows only.
 !/.github/
