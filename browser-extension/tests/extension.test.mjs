@@ -1399,6 +1399,134 @@ function portClient(bg, clock, sender = { id: 'test', url: 'chrome-extension://t
   return { request: exports.request, ports };
 }
 const flushRequest = () => new Promise(resolve => setImmediate(resolve));
+
+async function launcherBackground({ online = false, token = "", native, fetch: respond, clock, realReminder = false } = {}) {
+  const storage = { preferences: { token, mode: "reenact" } }, calls = [], ports = [];
+  const event = () => {
+    const listeners = new Set();
+    return { addListener: fn => listeners.add(fn), removeListener: fn => listeners.delete(fn), emit: value => [...listeners].forEach(fn => fn(value)), listeners };
+  };
+  const fetch = async (url, options) => {
+    calls.push({ path: new URL(url).pathname, options });
+    if (respond) return respond(url, options);
+    if (!online) throw new TypeError("Failed to fetch");
+    return { ok: true, json: async () => url.endsWith("/connection") ? { token: "private-native-token" } : { serviceReady: true, instanceId: "same-service" } };
+  };
+  const bg = await background(fetch, { ...(clock || {}), ...(realReminder ? { fetch } : {}) }, (chrome, handlers) => {
+    chrome.storage.local.get = async () => structuredClone(storage);
+    chrome.storage.local.set = async value => Object.assign(storage, structuredClone(value));
+    chrome.alarms.onAlarm.addListener = fn => { handlers.alarm = fn; };
+    chrome.runtime.connectNative = host => {
+      const port = { host, onMessage: event(), onDisconnect: event(), requests: [], closed: false };
+      port.disconnect = () => { port.closed = true; };
+      port.postMessage = message => {
+        port.requests.push(structuredClone(message));
+        if (native) native(port, chrome);
+        else { online = true; queueMicrotask(() => port.onMessage.emit({ ok: true })); }
+      };
+      ports.push(port);
+      return port;
+    };
+  });
+  const send = (message = { type: "alchemy:query", path: "/health" }, sender = { id: "test", url: "chrome-extension://test/workspace.html" }) => new Promise(resolve => {
+    if (bg.handlers.message(message, sender, resolve) !== true) resolve(undefined);
+  });
+  return { ...bg, send, storage, calls, ports, setOnline(value) { online = value; } };
+}
+
+for (const token of ["", "saved-private-token"]) test(`user opens Reframe offline and one native startup serves concurrent windows (saved token=${Boolean(token)})`, async () => {
+  // Given an offline installation, hold the native response while two UI consumers connect.
+  const bg = await launcherBackground({ token, native() {} });
+  const replies = Promise.all([bg.send(), bg.send({ type: "alchemy:connect" })]);
+  await flushRequest();
+  assert.equal(bg.ports.length, 1);
+  assert.equal(bg.ports[0].host, "com.qc.reframe");
+  assert.deepEqual(bg.ports[0].requests, [{ action: "ensure-start" }]);
+  // When startup succeeds, Then both read authenticated health without exposing the credential.
+  bg.setOnline(true); bg.ports[0].onMessage.emit({ ok: true });
+  const results = await replies;
+  assert.ok(results.every(result => result.ok), JSON.stringify(results));
+  assert.ok(bg.calls.filter(call => call.path === "/health").every(call => call.options.headers.Authorization));
+  assert.equal(bg.storage.preferences.mode, "reenact");
+  assert.equal(bg.storage.preferences.token, token || "private-native-token");
+  assert.ok(!JSON.stringify(results).includes("token"));
+  assert.equal(bg.ports[0].closed, true);
+  assert.equal(bg.ports[0].onMessage.listeners.size, 0);
+  assert.equal(bg.ports[0].onDisconnect.listeners.size, 0);
+});
+
+test("user reconnects to an online service without starting a native process", async () => {
+  const bg = await launcherBackground({ online: true });
+  assert.equal((await bg.send()).value.instanceId, "same-service");
+  assert.equal(bg.ports.length, 0);
+});
+
+for (const failure of ["disconnect", "malformed", "rejected", "unavailable"]) test(`user gets an actionable launcher ${failure} error and can retry later`, async () => {
+  const bg = await launcherBackground({ token: "keep-private", native(port, chrome) {
+    queueMicrotask(() => {
+      if (failure === "disconnect") {
+        chrome.runtime.lastError = { message: "Specified native messaging host not found." };
+        port.onDisconnect.emit(); delete chrome.runtime.lastError;
+      } else port.onMessage.emit(failure === "malformed" ? { ok: "yes" } : { ok: false, error: "启动失败，请检查端口占用" });
+    });
+  } });
+  const connect = bg.chrome.runtime.connectNative;
+  if (failure === "unavailable") delete bg.chrome.runtime.connectNative;
+  // When the native boundary fails, Then do not report HTTP success or erase preferences.
+  const result = await bg.send();
+  assert.equal(typeof result.error, "string");
+  assert.match(result.error, /启动器|自动启动|启动失败/);
+  assert.equal(bg.storage.preferences.token, "keep-private");
+  assert.ok(bg.ports.every(port => port.closed));
+  bg.chrome.runtime.connectNative = host => {
+    const port = connect(host);
+    port.postMessage = message => { port.requests.push(structuredClone(message)); bg.setOnline(true); queueMicrotask(() => port.onMessage.emit({ ok: true })); };
+    return port;
+  };
+  assert.equal((await bg.send()).ok, true);
+});
+
+test("user is released from a hanging native launcher before the UI response deadline", async () => {
+  const clock = requestClock(), bg = await launcherBackground({ clock, token: "keep-private", native() {} });
+  const reply = bg.send();
+  await flushRequest();
+  assert.equal(bg.ports.length, 1);
+  clock.tick(30_000); await flushRequest();
+  const result = await reply;
+  assert.equal(typeof result.error, "string");
+  assert.match(result.error, /超时|未按时/);
+  assert.equal(bg.ports[0].closed, true);
+  assert.equal(bg.storage.preferences.token, "keep-private");
+});
+
+test("user sees real HTTP failures without invoking a launcher or replaying a write", async () => {
+  let status = 503;
+  const bg = await launcherBackground({ token: "private", fetch: async () => {
+    if (status === 0) throw new TypeError("response lost");
+    return { ok: false, status, json: async () => ({ error: "service rejects this request" }) };
+  } });
+  for (status of [503, 403, 401]) assert.match((await bg.send()).error, /service rejects/);
+  status = 0;
+  const before = bg.calls.length;
+  assert.match((await bg.send({ type: "alchemy:model-verify", model: "vision" })).error, /本机服务/);
+  assert.equal(bg.calls.length - before, 1);
+  assert.equal(bg.ports.length, 0);
+});
+
+test("user keeps the service stopped during background reminders and rejected messages", async () => {
+  // Given an offline service and no visible UI, startup and alarm polling may fail but never wake it.
+  const bg = await launcherBackground({ token: "private", realReminder: true });
+  bg.handlers.alarm({ name: "reframe-task-reminders" }); await flushRequest();
+  assert.equal(await bg.send(undefined, { id: "other", url: "chrome-extension://other/workspace.html" }), undefined);
+  assert.match((await bg.send({ type: "alchemy:query", path: "/health?command=start" })).error, /无效/);
+  assert.equal(bg.ports.length, 0);
+});
+
+test("native startup permission is included in the installed extension manifest", async () => {
+  const manifest = JSON.parse(await readFile(new URL("manifest.json", build), "utf8"));
+  assert.ok(manifest.permissions.includes("nativeMessaging"));
+});
+
 const transportProject = 'a'.repeat(64);
 const transportReference = { id: 'input-1', projectId: transportProject, image: 'reference', inputRevision: 1 };
 const transportMessages = [

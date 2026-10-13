@@ -1,14 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFile, fork } from "node:child_process";
+import { execFile, fork, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { tmpdir } from "node:os";
+import { endianness, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createBridge } from "../bridge/server.mjs";
+import { extensionOrigin } from "../bridge/connection.mjs";
 
 const exec = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -33,12 +34,139 @@ async function installation(t, copyRoot = false) {
   const codex = join(dir, "codex-test");
   await writeFile(codex, '#!/usr/bin/env node\nconsole.log("codex-cli test");\n', { mode: 0o700 });
   const env = { ...process.env, ALCHEMY_DATA_DIR: dir, ALCHEMY_PORT: String(await unusedPort()),
+    ALCHEMY_NATIVE_HOST_DIR: join(dir, "native manifests"),
     CODEX_BIN: codex, CODEX_HOME: join(dir, "codex-home"), IMAGEGEN_SKILL_PATH: join(dir, "missing-imagegen.md") };
   delete env.ALCHEMY_SKILL_PATH;
-  const run = command => exec(process.execPath, [join(installRoot, "scripts/manage.mjs"), command], { env, timeout: 15000 });
+  const run = (command, ...args) => exec(process.execPath, [join(installRoot, "scripts/manage.mjs"), command, ...args], { env, timeout: 15000 });
   t.after(async () => { await run("stop").catch(() => {}); await rm(dir, { recursive: true, force: true }); });
   return { dir, env, run, installRoot };
 }
+
+const nativeHostName = "com.qc.reframe";
+function nativeFrame(value) {
+  const body = Buffer.from(JSON.stringify(value));
+  const size = Buffer.alloc(4);
+  size[endianness() === "LE" ? "writeUInt32LE" : "writeUInt32BE"](body.length);
+  return Buffer.concat([size, body]);
+}
+async function registeredLauncher(t) {
+  const installationState = await installation(t, true);
+  installationState.env.ALCHEMY_EXTENSION_ID = "b".repeat(32);
+  await installationState.run("native-install", "codex");
+  const manifestPath = join(installationState.env.ALCHEMY_NATIVE_HOST_DIR, `${nativeHostName}.json`);
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  return { ...installationState, manifestPath, manifest };
+}
+async function nativeRequest(installationState, { origin = `chrome-extension://${"b".repeat(32)}/`, bytes = nativeFrame({ action: "ensure-start" }), fragment = false, env = installationState.env } = {}) {
+  const child = spawn(installationState.manifest.path, [origin], { cwd: tmpdir(), env, stdio: ["pipe", "pipe", "pipe"] });
+  const output = [], errors = [];
+  child.stdout.on("data", data => output.push(data));
+  child.stderr.on("data", data => errors.push(data));
+  child.stdin.on("error", () => {}); // A rejected caller can close before consuming its request.
+  const timer = setTimeout(() => child.kill("SIGKILL"), 12000);
+  try {
+    if (fragment) {
+      for (const part of [bytes.subarray(0, 2), bytes.subarray(2, 7), bytes.subarray(7)]) {
+        child.stdin.write(part); await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      child.stdin.end();
+    } else child.stdin.end(bytes);
+    const [code, signal] = await once(child, "close");
+    assert.equal(signal, null, "native host must exit within its own bounded lifetime");
+    const buffer = Buffer.concat(output);
+    assert.ok(buffer.length >= 4, `native host should return one framed response (exit ${code}, stderr ${Buffer.concat(errors).toString()})`);
+    const length = buffer[endianness() === "LE" ? "readUInt32LE" : "readUInt32BE"](0);
+    assert.equal(length, buffer.length - 4, "stdout must contain exactly one JSON frame and no command logs");
+    return JSON.parse(buffer.subarray(4).toString("utf8"));
+  } finally { clearTimeout(timer); if (child.exitCode === null) child.kill(); }
+}
+
+test("user registers and removes only their own Codex launcher without touching project data", { skip: process.platform === "win32" }, async t => {
+  // Given a spaced installation path, When installing twice, Then the host has exact allowed origins and a runnable path.
+  const f = await registeredLauncher(t);
+  const before = await readFile(f.manifestPath, "utf8");
+  await f.run("native-install", "codex");
+  assert.equal(await readFile(f.manifestPath, "utf8"), before);
+  assert.equal(f.manifest.name, nativeHostName);
+  assert.equal(f.manifest.type, "stdio");
+  assert.equal(f.manifest.path, resolve(f.manifest.path));
+  assert.ok((await stat(f.manifest.path)).mode & 0o100);
+  assert.deepEqual(new Set(f.manifest.allowed_origins), new Set([`${extensionOrigin(join(f.installRoot, ".output/chrome-mv3"))}/`, `chrome-extension://${"b".repeat(32)}/`]));
+  const preserved = join(f.dir, "project-keep.json");
+  await writeFile(preserved, '{"keep":true}');
+  await f.run("native-uninstall", "codex");
+  await assert.rejects(readFile(f.manifestPath), { code: "ENOENT" });
+  await assert.rejects(readFile(f.manifest.path), { code: "ENOENT" });
+  assert.equal(await readFile(preserved, "utf8"), '{"keep":true}');
+  await f.run("native-uninstall", "codex");
+});
+
+test("user cannot overwrite or uninstall another installation's native host", { skip: process.platform === "win32" }, async t => {
+  const f = await installation(t, true);
+  await mkdir(f.env.ALCHEMY_NATIVE_HOST_DIR, { recursive: true });
+  const path = join(f.env.ALCHEMY_NATIVE_HOST_DIR, `${nativeHostName}.json`);
+  const foreign = JSON.stringify({ name: nativeHostName, type: "stdio", path: "/another-install/launcher", allowed_origins: [] });
+  await writeFile(path, foreign);
+  for (const command of ["native-install", "native-uninstall"]) {
+    await assert.rejects(f.run(command, "codex"), error => /其他|另一|属于|冲突/.test(error.stderr));
+    assert.equal(await readFile(path, "utf8"), foreign);
+  }
+});
+
+test("user opens concurrent windows and the registered launcher starts one service without CLI probes", { skip: process.platform === "win32" }, async t => {
+  const f = await registeredLauncher(t), cliMarker = join(f.dir, "cli-called");
+  await writeFile(f.env.CODEX_BIN, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(cliMarker)}, 'called'); process.exit(99);\n`, { mode: 0o700 });
+  // A browser may have no shell PATH or may inherit unrelated configuration; the installed launcher owns its location.
+  const browserEnv = { ...f.env, PATH: "", ALCHEMY_DATA_DIR: join(f.dir, "wrong-data"), ALCHEMY_PORT: String(await unusedPort()) };
+  const results = await Promise.all([nativeRequest(f, { fragment: true, env: browserEnv }), nativeRequest(f, { env: browserEnv }), nativeRequest(f, { env: browserEnv })]);
+  assert.deepEqual(results, [{ ok: true }, { ok: true }, { ok: true }]);
+  await assert.rejects(readFile(cliMarker), { code: "ENOENT" });
+  const health = JSON.parse((await f.run("status")).stdout);
+  const token = (await readFile(join(f.dir, "config/token"), "utf8")).trim();
+  assert.equal(health.service, "qc-alchemy");
+  assert.equal(health.managed, true);
+  assert.deepEqual(await nativeRequest(f), { ok: true });
+  assert.equal(JSON.parse((await f.run("status")).stdout).instanceId, health.instanceId);
+  assert.equal((await readFile(join(f.dir, "config/token"), "utf8")).trim(), token);
+  assert.ok(!JSON.stringify(results).includes(token));
+  await f.run("native-uninstall", "codex");
+  assert.equal(JSON.parse((await f.run("status")).stdout).instanceId, health.instanceId);
+});
+
+for (const scenario of ["foreign-origin", "extra-command", "unknown-action", "bad-json", "oversize", "partial-eof"]) test(`user remains offline when the native host receives ${scenario}`, { skip: process.platform === "win32" }, async t => {
+  const f = await registeredLauncher(t), request = {};
+  if (scenario === "foreign-origin") request.origin = `chrome-extension://${"c".repeat(32)}/`;
+  if (scenario === "extra-command") request.bytes = nativeFrame({ action: "ensure-start", command: "echo bad" });
+  if (scenario === "unknown-action") request.bytes = nativeFrame({ action: "restart" });
+  if (scenario === "bad-json") { request.bytes = nativeFrame("invalid"); request.bytes[4] = 0; }
+  if (scenario === "oversize") {
+    request.bytes = Buffer.alloc(4);
+    request.bytes[endianness() === "LE" ? "writeUInt32LE" : "writeUInt32BE"](1024 * 1024);
+  }
+  if (scenario === "partial-eof") request.bytes = nativeFrame({ action: "ensure-start" }).subarray(0, 7);
+  const response = await nativeRequest(f, request);
+  assert.equal(response.ok, false);
+  assert.equal(typeof response.error, "string");
+  await assert.rejects(f.run("status"), error => /未运行/.test(error.stdout));
+  await assert.rejects(readFile(join(f.dir, "config/token")), { code: "ENOENT" });
+});
+
+test("user receives a bounded error for an occupied port or held startup lock without replacing anything", { skip: process.platform === "win32" }, async t => {
+  const f = await registeredLauncher(t);
+  const other = createServer((_request, response) => { response.writeHead(401); response.end("occupied"); });
+  other.listen(Number(f.env.ALCHEMY_PORT), "127.0.0.1"); await once(other, "listening");
+  try {
+    const result = await nativeRequest(f);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /占用/);
+    assert.equal((await fetch(`http://127.0.0.1:${f.env.ALCHEMY_PORT}/health`)).status, 401);
+  } finally { await new Promise(resolve => other.close(resolve)); }
+  await mkdir(join(f.dir, "runtime/start.lock"), { recursive: true });
+  const blocked = await nativeRequest(f);
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /启动|锁|超时/);
+  await assert.rejects(f.run("status"), error => /未运行/.test(error.stdout));
+});
 
 test("user approves their separately loaded extension during setup and reconnects after restart without a code", { skip: process.platform === "win32" }, async t => {
   // Given a fixed browser extension ID approved by the local installer; npm is stubbed to avoid rebuilding shared files.
