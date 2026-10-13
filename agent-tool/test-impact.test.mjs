@@ -272,3 +272,17 @@ test('user（开发者）缺少coverage脚本文本只记未知，其他正常�
   assert.deepEqual(result.executed,['src/a.ts']);
   assert.deepEqual(result.attribution.map(item=>item.classification),['unknown','mapped']);
 });
+
+test('user（开发者）修改构建脚本、脚本依赖或编译配置后浏览器执行域审阅失效', async () => {
+  const { browserDomain } = await import('./test-policy.mjs');
+  const files = Object.fromEntries([
+    'browser-extension/scripts/icons.mjs', 'browser-extension/scripts/manage.mjs', 'browser-extension/tsconfig.json',
+  ].map(file => [file, { mode: '100644', oid: 'reviewed-content', type: 'blob' }]));
+  const reviewed = browserDomain(files);
+  for (const file of Object.keys(files)) {
+    assert.notEqual(browserDomain({ ...files, [file]: { ...files[file], oid: 'changed-content' } }), reviewed, file);
+  }
+  assert.notEqual(browserDomain({ ...files,
+    'browser-extension/scripts/helpers/new-build-step.mjs': { mode: '100644', oid: 'new-content', type: 'blob' },
+  }), reviewed, 'new build helpers must invalidate the execution boundary');
+});

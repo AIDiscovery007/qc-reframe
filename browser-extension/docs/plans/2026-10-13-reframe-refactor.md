@@ -217,3 +217,17 @@
 第四轮锁定前验证：原算法适配器的 14 项动作断言通过；正式三文件运行因两个新公共模块尚不存在而失败（`ERR_MODULE_NOT_FOUND`），符合测试先行预期，日志 `.local/reframe-refactor/iteration-4-red.log`。`git diff --check` 通过。
 
 第四轮测试适配补正：首次交付后 86 项通过、7 项旧 quick-workspace 测试在断言前报 `ReferenceError`。原因是主代理迁移时只注入了 reader factory，漏掉了独立函数提取器所需 reader 实例及 handoff-only fixture 的 query 依赖。开发代理按约定停止且未修改测试。主代理补齐真实 reader 注入，并让未配置 query 的意外调用显式失败；所有既有断言、输入、等待和错误预期保持不变。这是已声明私有 harness 迁移的依赖补全，不是对实现结果放宽合同；两个公共模块的锁定测试已经通过。补正后重新锁定摘要再继续实现。
+
+第四轮实现提交 `3539da2cd537bb410c44eedcddb2bcda3e22750d`，只包含四个允许文件。开发代理类型、差异检查及 93 项 Node、18 个浏览器场景通过；主代理独立重跑六文件 93 项测试通过，166 个受保护路径未变。双轴审查与最终全量验证结果另记。
+
+## 最终验证维护：浏览器执行域审阅
+
+本轮前 CI 指纹断言已失败，前端重构又使旧审阅摘要必然失效。主代理安排独立只读边界审计后确认：preview 只加载显式登记的 image-order 纯模块和前端 fixture；runner 拦截外部 origin；真实扩展检查通过不转发代理隔离 loopback，并不把生产 bridge 当场景 page coverage。用户原有 CI 修改只收紧文档分流，没有新增执行入口。
+
+审计发现现有指纹漏掉真实 prebuild 入口 `scripts/icons.mjs` 和编译配置 `tsconfig.json`。普通 build 不运行 manage 服务入口，但新增脚本/helper 的执行变化也必须使原审阅失效。因此在最终验证前增加一个独立维护闭环：
+
+- Given 已审阅浏览器构建/预览执行域。When icons、manage、新增脚本 helper 或 tsconfig 内容改变。Then 域指纹改变，既有 bridge 兜底依赖排除失效；实际映射/未知执行仍遵循原保守策略。
+- 主代理先在 test-impact.test.mjs 增加独立负例；开发代理仅修改 test-policy.mjs 的域文件集合（整个 scripts 目录及 tsconfig）和经过审计的固定摘要。不得改变可靠源、core tests、保守回退或既有断言来接受未知执行。
+- 审阅摘要绑定完整实现后的已提交干净树。当前工作区域内额外存在用户原有的 CI 修改，必须继续使精确审阅失效，不将未经提交的用户内容混入实现提交；完整工作区测试如仍因此失败须明确报告。另在独立干净 checkout 验证提交的门禁，不暂改、暂存或还原用户文件。
+
+边界证据：`agent-tool/ui/build.mjs:67`、`browser-extension/package.json:18`、`agent-tool/ui/runner.mjs:29`/`:244`、`agent-tool/preview.mjs:345`、`agent-tool/ui/extension.mjs:39`/`:154`/`:175`、`agent-tool/test-impact.mjs:97`。更新摘要依据已审阅的执行边界，不自动学习当前值。工作区与干净树证据分开记录。
