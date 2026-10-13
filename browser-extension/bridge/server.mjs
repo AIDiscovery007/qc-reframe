@@ -1,5 +1,6 @@
 import { validImageSizeRequest, requestedImageSize, normalizeMagpieSize } from '../lib/image-size.mjs';
 import { createBatchStore, batchActive } from "./batches.mjs";
+import { createBatchAdmission } from "./batch-admission.mjs";
 import { referencePosition, savedReferenceIndex } from "./image-order.mjs";
 import { createSessionStore, sessionIds } from "./sessions.mjs";
 import { prepareRestart } from "./restart.mjs";
@@ -8,7 +9,7 @@ import { createTaskRecords } from "./task-records.mjs";
 import { createTaskRuntime } from "./task-runtime.mjs";
 import { createGenerationOutputs } from "./generation-output.mjs";
 import { createServer } from "node:http";
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile, lstat } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -522,22 +523,11 @@ export async function createBridge({
   const publicBatch = (batch, visible = () => true) => ({ id: batch.id, createdAt: batch.createdAt, language: batch.language,
     ...(batch.aspectRatio ? { aspectRatio: batch.aspectRatio } : {}), ...(batch.imageSize ? { imageSize: batch.imageSize } : {}), ...(batch.sizeRule ? { submittedImageSize: batch.submittedImageSize, sizeRule: batch.sizeRule } : {}), provider: batch.generationModelSettings?.imageProvider || "codex", agent: batch.modelSettings.agent || "codex", model: batch.modelSettings.model,
     items: batchItems(batch).filter(item => visible(item.projectId)) });
-  const validateBatchProjects = body => {
-    if (!Array.isArray(body.projects) || !body.projects.length || body.projects.length > 100 || body.projects.some(item =>
-      !item || typeof item.projectId !== 'string' || !/^[a-f0-9]{64}$/.test(item.projectId) || !Number.isSafeInteger(item.inputRevision) || item.inputRevision < 0)) throw bad('请选择 1–100 个有效项目和输入版本');
-    if (new Set(body.projects.map(item => item.projectId)).size !== body.projects.length) throw bad('批量任务包含重复项目');
-    return body.projects.map(({ projectId, inputRevision }) => ({ projectId, inputRevision }));
-  };
-  const inspectBatchProject = async item => {
-    const project = projects.summary(item.projectId);
-    if (!project) throw bad('项目不存在', 404);
-    if (item.inputRevision !== project.inputRevision) throw bad('项目输入已更新，请重新预检', 409);
-    if (batches.hasProject(project.id) || projects.get(project.id).jobs.some(job => runtime.has(job.id) || job.status === 'running' || job.generations?.some(generation => runtime.has(generation.id) || generation.status === 'running'))) throw bad('项目已有任务，请等待完成', 409);
-    const input = projects.input(project.id, 'recreate');
-    await storedImage(project);
-    if (input.instruction !== undefined && (typeof input.instruction !== 'string' || input.instruction.length > 20000)) throw bad('项目任务指令无效');
-    return { imageAsset: project.imageAsset, instruction: input.instruction, referenceIndex: 0, sourceUrl: project.sourceUrl, capture: project.capture, inputRevision: project.inputRevision };
-  };
+  const batchAdmission = createBatchAdmission({
+    batches, projects, runtime, agents, cliBusy, storedImage, skillPath, requireFeature, batchGenerationSettings,
+    generation: { selection: generationSelection, check: checkGeneration, validateOptions: validateGenerationOptions,
+      validateSize: validateGenerationSize, sizeSnapshot: generationSizeSnapshot },
+  });
   const cancelJob = async job => {
     if (job.autoGeneration?.status === 'pending') {
       job.autoGeneration.status = 'cancelled';
@@ -938,43 +928,10 @@ export async function createBridge({
         return;
       }
       if (req.method === 'POST' && (path === '/batches/preview' || path === '/batches')) {
-        const body = await readBody(req), selected = validateBatchProjects(body);
-        const allowed = path.endsWith('/preview') ? ['projects'] : ['projects', 'requestId', 'language', 'aspectRatio', 'imageSize'];
-        if (Object.keys(body).some(key => !allowed.includes(key))) throw bad('批量启动仅支持完整复刻和自动生图');
-        let requestHash, existing;
-        if (path === '/batches') {
-          if (typeof body.requestId !== 'string' || !/^[\w-]{1,100}$/.test(body.requestId)) throw bad('批量请求编号无效');
-          validateGenerationOptions(body);
-          requestHash = createHash('sha256').update(JSON.stringify({ projects: selected, language: body.language, ...(body.aspectRatio ? { aspectRatio: { width: body.aspectRatio.width, height: body.aspectRatio.height } } : {}), ...(body.imageSize ? { imageSize: { width: body.imageSize.width, height: body.imageSize.height } } : {}) })).digest('hex');
-          existing = batches.all.find(batch => batch.requestId === body.requestId);
-          if (existing) {
-            if (existing.requestHash !== requestHash) throw bad('同一批量请求编号不能用于不同输入或选项', 409);
-            json(202, publicBatch(existing)); return;
-          }
-        }
-        if (cliBusy()) throw bad('Agent CLI 正在安装或更新，请等待完成。', 409);
-        if (agents.busy) throw bad('正在验证模型，请稍候', 409);
-        const modelSettings = agents.selection(), generationModelSettings = await generationSelection(submission.signal);
-        validateGenerationSize(body, generationModelSettings);
-        const sizeSnapshot = generationSizeSnapshot(generationModelSettings, body.imageSize);
-        await Promise.all([...(agents.selected === "codex" ? [requireFeature('reverse')] : []), checkGeneration(generationModelSettings, submission.signal), readFile(skillPath)]);
-        const items = [];
-        for (const selectedItem of selected) {
-          const title = projects.summary(selectedItem.projectId)?.title || '项目不存在';
-          try {
-            const snapshot = await inspectBatchProject(selectedItem);
-            items.push({ ...selectedItem, title, eligible: true, snapshot });
-          } catch (error) { items.push({ ...selectedItem, title, eligible: false, error: error.message }); }
-        }
-        submission.signal.throwIfAborted();
-        if (path.endsWith('/preview')) { json(200, { model: modelSettings.model, items: items.map(({ snapshot, ...item }) => item) }); return; }
-        const batch = { id: randomUUID(), requestId: body.requestId, requestHash, createdAt: new Date().toISOString(), modelSettings, generationModelSettings: Object.fromEntries(Object.entries(generationModelSettings).filter(([key]) => key !== "apiKey")),
-          language: body.language, ...(body.aspectRatio ? { aspectRatio: body.aspectRatio } : {}), ...sizeSnapshot,
-          items: items.map(({ eligible, inputRevision, ...item }) => ({ ...item, status: eligible ? 'queued' : 'rejected', stage: eligible ? '等待启动' : '未受理', ...(eligible ? { jobId: randomUUID() } : {}) })) };
-        batchGenerationSettings.set(batch.id, generationModelSettings);
-        try { await batches.put(batch); }
-        catch (error) { batchGenerationSettings.delete(batch.id); throw error; }
-        json(202, publicBatch(batch)); return;
+        const body = await readBody(req);
+        if (path.endsWith('/preview')) json(200, await batchAdmission.preview(body, submission.signal));
+        else json(202, publicBatch(await batchAdmission.admit(body, submission.signal)));
+        return;
       }
       const batchCancelMatch = /^\/batches\/([\da-f-]{36})\/cancel$/.exec(path);
       if (req.method === 'POST' && batchCancelMatch) {

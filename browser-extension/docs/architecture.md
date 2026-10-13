@@ -16,6 +16,8 @@ flowchart TD
   Policy -.-> Background
   Background --> Bridge[本机 HTTP server]
   Bridge --> Projects[Project Store]
+  Bridge --> Admission[Batch Admission]
+  Admission --> Batches[Batch Store]
   Bridge --> Runtime[Task Runtime]
   Runtime --> Records[Task Records]
   Records --> Feed[已提交任务列表]
@@ -74,6 +76,12 @@ Codex 内置生图不依赖插件中的文字模型选择或验证。`generation
 
 ## 运行与持久化
 
+`bridge/batch-admission.mjs` 提供批次 `preview` 与 `admit`，拥有请求校验、项目资格检查、请求指纹、部分受理和受理快照。两者共用渠道/技能检查与项目检查；预检不保存批次、不调用模型。提交先校验请求并查找同键记录，同体恢复原身份，异体返回冲突，再检查当前依赖与项目资格；恢复不依赖后来改变的设置或项目输入。生图选项、尺寸及渠道检查复用 server 装配的既有函数，与独立及连续任务保持同一规则。
+
+HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；锁覆盖预检或受理的完整调用。Admission 预分配任务 ID，固定项目输入、语言、尺寸及两阶段设置，通过 `bridge/batches.mjs` 的原子写入提交后才返回。Store 继续拥有持久快照、启动中断恢复、活动引用和删除 journal 的批次清理；磁盘格式保持不变。响应仍由 server 过滤内部快照，任务记录尚未创建时不公开 jobId。
+
+批次受理将含密钥的生图设置放入既有内存 Map，写盘前剔除 API Key，提交失败立即移除该内存项。server 中的调度器沿用两条完整流程槽位、执行与取消规则，并在终态保存后或服务关闭时释放密钥快照。请求收尾释放 mutation lock 后才触发调度；持久提交后的客户端断开不取消批次，也不阻止自动衔接。请求信号只用于受理前准备，不传给已受理任务。
+
 `bridge/task-runtime.mjs` 统一逆向和生图的执行占用及完成路径。`reserve` 为每个任务保留独立 AbortController；`cancel` 标记取消、发出信号并保存，直到 `run` 的最终保存结束才释放占用。跨项目并行不共享取消信号。读取占用和运行占用都参与维护操作的忙碌判断。
 
 `bridge/task-records.mjs` 拥有任务 JSON 的加载、提交与恢复：
@@ -101,6 +109,7 @@ Codex 内置生图不依赖插件中的文字模型选择或验证。`generation
 | 输入优先级、历史与草稿 | `project-selection.test.mjs`、`reference-upload.test.mjs` 的实际 creation module；`creation-context.browser.js` 验证 App 接线 |
 | 两端生图行为 | `generation-session.test.mjs`，工作台 `generation-actions.browser.js`，快捷界面提交/取消 |
 | 执行、取消、保存失败与重启 | `task-runtime.test.mjs`、`task-records.test.mjs`，现有 server/storage 集成测试 |
+| 批次预检、受理、同键恢复与响应丢失 | `batch-admission.test.mjs`、`batches.test.mjs` 的真实 HTTP 与临时磁盘集成测试 |
 | CAS、空输入、旧记录 | `project-inputs.test.mjs` 与项目恢复测试 |
 | 发送方及慢请求 | `operation-policy.test.mjs` 与构建后的 `extension.test.mjs` |
 | 示例与生产一致性 | `preview-contract.test.mjs`：运行实际 preview 脚本并与生产检索契约对照 |
