@@ -31,10 +31,11 @@ function evaluate(source, globals, names) {
       original[setter](replaceDraft ? creation[key] : () => creation[key]);
     }
   };
-  globals = { createEntryReader, dispatchCreation, restoredQuickDraft, noticeNavigation: { current: undefined }, setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, setInputRevisions() {}, ...globals,
+  globals = { createEntryReader, query: async () => assert.fail("Unexpected query in this fixture"), dispatchCreation, restoredQuickDraft, noticeNavigation: { current: undefined }, setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, setInputRevisions() {}, ...globals,
     setProjectMode: original.setProjectMode || ((_id, mode) => original.setPreferences(value => ({ ...value, mode }))),
     request: async message => message.type === 'alchemy:project-views' ? original.projectViews || {} : original.request(message),
   };
+  if (globals.selectionRevision) globals.entryReader = createEntryReader({ request: globals.request, query: globals.query, revision: () => globals.selectionRevision.current });
   const exports = {};
   runInNewContext(ts.transpileModule(`${source}\nObject.assign(exports,{${names.join(',')}});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, { exports, ...globals });
   return exports;

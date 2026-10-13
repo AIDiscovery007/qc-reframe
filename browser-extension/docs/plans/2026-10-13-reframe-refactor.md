@@ -215,3 +215,5 @@
 3. 用户已统一授权所有轮次，本轮不重复询问；主代理先提交规格与测试，再交给独立 Codex 高推理实现并完成回归及 Standards/Spec 审查。
 
 第四轮锁定前验证：原算法适配器的 14 项动作断言通过；正式三文件运行因两个新公共模块尚不存在而失败（`ERR_MODULE_NOT_FOUND`），符合测试先行预期，日志 `.local/reframe-refactor/iteration-4-red.log`。`git diff --check` 通过。
+
+第四轮测试适配补正：首次交付后 86 项通过、7 项旧 quick-workspace 测试在断言前报 `ReferenceError`。原因是主代理迁移时只注入了 reader factory，漏掉了独立函数提取器所需 reader 实例及 handoff-only fixture 的 query 依赖。开发代理按约定停止且未修改测试。主代理补齐真实 reader 注入，并让未配置 query 的意外调用显式失败；所有既有断言、输入、等待和错误预期保持不变。这是已声明私有 harness 迁移的依赖补全，不是对实现结果放宽合同；两个公共模块的锁定测试已经通过。补正后重新锁定摘要再继续实现。
