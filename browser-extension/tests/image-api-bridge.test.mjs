@@ -190,6 +190,35 @@ test('user using Magpie refuses models absent from the image catalog without fal
   assert.equal(s.generation.length, 0); assert.equal(s.codex.length, 0);
 });
 
+test('user keeps the completed prompt when the accepted Magpie model disappears during reverse', async t => {
+  // Given an accepted flow, When its model disappears and the user selects another provider, Then handoff refuses the original model without fallback.
+  let available = true;
+  const inspected = [];
+  const s = await setup(t, async ({ baseUrl }) => {
+    inspected.push(baseUrl);
+    return { models: available ? [{ id: magpie.model }] : [] };
+  });
+  await s.request('/image-settings', magpie);
+  const task = await s.request('/jobs', { image, mode: 'recreate', generation: { language: 'en' } });
+  assert.equal(task.status, 202);
+  await wait(() => s.reverse.length);
+  available = false;
+  assert.equal((await s.request('/image-settings', settings)).status, 200);
+  s.reverse[0].resolve(result);
+  await wait(async () => !(await s.request('/health')).body.active);
+  const job = (await s.request(`/jobs/${task.body.id}`)).body;
+  assert.equal(job.status, 'completed');
+  assert.deepEqual(job.result, result);
+  assert.equal(job.autoGeneration.status, 'failed');
+  assert.match(job.autoGeneration.error, /Magpie.*不可用/);
+  assert.equal(job.generations?.length || 0, 0);
+  assert.ok(inspected.length >= 2, 'accepted availability is checked again at handoff');
+  assert.ok(inspected.every(baseUrl => baseUrl === 'http://127.0.0.1:3425/v1'));
+  assert.equal(s.reverse.length, 1); assert.equal(s.generation.length, 0); assert.equal(s.codex.length, 0);
+  const disk = JSON.parse(await readFile(join(s.dir, 'records', `${job.id}.json`), 'utf8'));
+  assert.deepEqual(disk.result, result); assert.equal(disk.autoGeneration.status, 'failed');
+});
+
 test('user disconnects while Magpie catalog is pending without starting generation', async t => {
   // Given a pending catalog check, When the submission disconnects, Then its cancellation prevents generation.
   let inspecting;
@@ -360,6 +389,54 @@ test('user sees a failed batch item complete after retrying only local image sav
     assert.equal(savedItem.error, undefined);
     assert.equal(s.generation.length, 1);
   } finally { fs.promises.rename = rename; syncBuiltinESMExports(); }
+});
+
+test('user saving another project preserves an uncommitted paid image and later saves it without calling the model again', async t => {
+  // Given an output whose terminal task records cannot commit, When another input requests collection, Then output survives and local save recovers the same generation.
+  const s = await setup(t); await s.request('/image-settings', settings);
+  const otherBytes = await sharp({ create: { width: 2, height: 1, channels: 3, background: '#10bc4f' } }).png().toBuffer();
+  const other = (await s.request('/projects', { image: `data:image/png;base64,${otherBytes.toString('base64')}` })).body;
+  const obsolete = join(s.dir, 'images', other.imageAsset);
+  const task = await s.request('/jobs', { image, mode: 'recreate', generation: { language: 'en' } });
+  assert.equal(task.status, 202);
+  await wait(() => s.reverse.length); s.reverse[0].resolve(result); await wait(() => s.generation.length);
+  const generationId = (await s.request(`/jobs/${task.body.id}`)).body.generations[0].id;
+  const bytes = await sharp({ create: { width: 2, height: 1, channels: 3, background: '#fe2301' } }).png().toBuffer();
+  const record = join(s.dir, 'records', `${task.body.id}.json`), rename = fs.promises.rename;
+  let failures = 0, asset;
+  fs.promises.rename = async (source, target) => {
+    if (target === record) { failures++; throw new Error('fixture persistent task record failure'); }
+    return rename(source, target);
+  };
+  syncBuiltinESMExports();
+  try {
+    s.generation[0].resolve({ bytes, extension: 'png' });
+    await wait(async () => !(await s.request('/health')).body.active);
+    assert.ok(failures >= 2, 'both completed and failed-state commits were rejected');
+    const pending = (await s.request(`/jobs/${task.body.id}`)).body.generations[0];
+    assert.equal(pending.id, generationId); assert.equal(pending.status, 'failed'); assert.equal(pending.resultSavePending, true);
+    asset = pending.imageAsset;
+    assert.ok(asset);
+    const disk = JSON.parse(await readFile(record, 'utf8'));
+    assert.equal(disk.generations[0].status, 'running'); assert.equal(disk.generations[0].imageAsset, undefined);
+    const saved = await s.request(`/projects/${other.id}/input`, { expectedRevision: other.inputRevision, image, mode: 'recreate', instruction: '' });
+    assert.equal(saved.status, 200); assert.equal(saved.body.inputRevision, other.inputRevision + 1);
+    assert.deepEqual(await readFile(join(s.dir, 'images', asset)), bytes);
+    assert.deepEqual(await readFile(obsolete), otherBytes, 'collection waits for the uncommitted task record');
+  } finally { fs.promises.rename = rename; syncBuiltinESMExports(); }
+  const recovered = await s.request(`/jobs/${task.body.id}/generations/${generationId}/save`, {});
+  assert.equal(recovered.status, 200);
+  assert.equal(recovered.body.generations.length, 1);
+  assert.equal(recovered.body.generations[0].id, generationId);
+  assert.equal(recovered.body.generations[0].status, 'completed');
+  assert.equal(recovered.body.generations[0].resultSavePending, undefined);
+  const collected = await s.request(`/projects/${other.id}/input`, { expectedRevision: other.inputRevision + 1, image, mode: 'recreate', instruction: 'saved' });
+  assert.equal(collected.status, 200);
+  await assert.rejects(readFile(obsolete), { code: 'ENOENT' });
+  assert.deepEqual(await readFile(join(s.dir, 'images', asset)), bytes);
+  const fetched = await s.request(`/jobs/${task.body.id}/generations/${generationId}/image`);
+  assert.equal(fetched.status, 200); assert.equal(fetched.body.image, `data:image/png;base64,${bytes.toString('base64')}`);
+  assert.equal(s.reverse.length, 1); assert.equal(s.generation.length, 1); assert.equal(s.codex.length, 0);
 });
 
 for (const action of ['recover', 'delete']) test(`user can ${action} paid output after every final task commit fails without a second model call`, async t => {
