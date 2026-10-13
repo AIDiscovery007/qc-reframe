@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { validateGenerationOptions } from "./generation-preparation.mjs";
 
 const bad = (message, status = 400) => Object.assign(new Error(message), { status });
 
@@ -33,9 +34,8 @@ export function createBatchAdmission({
   const prepare = async (body, selected, signal) => {
     if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
     if (agents.busy) throw bad("正在验证模型，请稍候", 409);
-    const modelSettings = agents.selection(), generationModelSettings = await generation.selection(signal);
-    generation.validateSize(body, generationModelSettings);
-    const sizeSnapshot = generation.sizeSnapshot(generationModelSettings, body.imageSize);
+    const modelSettings = agents.selection();
+    const { modelSettings: generationModelSettings, sizeSnapshot } = await generation.prepare(body, { signal });
     await Promise.all([...(agents.selected === "codex" ? [requireFeature("reverse")] : []), generation.check(generationModelSettings, signal), readFile(skillPath)]);
     const items = [];
     for (const selectedItem of selected) {
@@ -58,7 +58,7 @@ export function createBatchAdmission({
     async admit(body, signal) {
       const selected = validateProjects(body, ["projects", "requestId", "language", "aspectRatio", "imageSize"]);
       if (typeof body.requestId !== "string" || !/^[\w-]{1,100}$/.test(body.requestId)) throw bad("批量请求编号无效");
-      generation.validateOptions(body);
+      validateGenerationOptions(body);
       const requestHash = createHash("sha256").update(JSON.stringify({ projects: selected, language: body.language,
         ...(body.aspectRatio ? { aspectRatio: { width: body.aspectRatio.width, height: body.aspectRatio.height } } : {}),
         ...(body.imageSize ? { imageSize: { width: body.imageSize.width, height: body.imageSize.height } } : {}),
