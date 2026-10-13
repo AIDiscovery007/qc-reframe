@@ -4,6 +4,7 @@ import RecoveryAction from "../popup/RecoveryAction";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Mode, MultiSubject } from "../../lib/types";
 import { normalizeImage } from "../../lib/image";
+import { useInputOperation } from "../../lib/use-input-operation";
 import Icon from "../popup/Icon";
 import SelectField from "../popup/SelectField";
 import TaskInstruction from "../popup/TaskInstruction";
@@ -31,14 +32,9 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
   const editorExpansion = useEditorExpansion(composer, reduced, contextKey, composerSlot);
   useEffect(() => { if (open) editorExpansion.change(false, true); }, [open]);
   const [settings, setSettings] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState("");
+  const { pending: uploading, error: uploadError, setError: setUploadError, run: saveInput } = useInputOperation(contextKey, disabled, onAvailability);
   const upload = useRef<HTMLInputElement>(null);
   const target = useRef("");
-  const revision = useRef(0);
-  const pendingInput = useRef(false);
-  const scope = useRef(contextKey);
-  scope.current = contextKey;
   const previous = useRef(contextKey);
   const trigger = useRef<HTMLButtonElement>(null);
   const generate = useRef<HTMLButtonElement>(null);
@@ -57,12 +53,11 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
   const imageIndex = imageIds.indexOf(selectedId);
   const locked = disabled || uploading || open;
   useEffect(() => {
-    if (previous.current !== contextKey) { setOpen(false); setSettings(false); setUploadError(""); setUploading(false); pendingInput.current = false; revision.current++; }
+    if (previous.current !== contextKey) { setOpen(false); setSettings(false); }
     if (!hasPrompt) setOpen(false);
     previous.current = contextKey;
   }, [contextKey, hasPrompt]);
   useEffect(() => { if (revealPrompt && hasPrompt) { setOpen(true); onPromptRevealed?.(); } }, [revealPrompt, contextKey, hasPrompt, onPromptRevealed]);
-  useEffect(() => () => { revision.current++; pendingInput.current = false; onAvailability(true); }, [contextKey]);
   useEffect(() => {
     if (!settings) return;
     settingsPanel.current?.querySelector('select')?.focus();
@@ -74,28 +69,12 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
   }, [settings]);
   const select = (id: string) => { onSelect(id); setSettings(false); };
   const choose = (id: string) => { target.current = id; upload.current?.click(); };
-  const saveInput = async (save: (current: () => boolean) => void | Promise<void>, rethrow = false) => {
-    if (disabled || pendingInput.current) return false;
-    const attempt = ++revision.current, context = contextKey;
-    const current = () => attempt === revision.current && context === scope.current;
-    pendingInput.current = true;
-    setUploading(true); setUploadError(""); onAvailability(false);
-    let saved = false;
-    try { await save(current); saved = true; return current(); }
-    catch (reason) {
-      if (current()) setUploadError((reason as Error).message);
-      if (rethrow) throw reason;
-      return false;
-    } finally {
-      if (current()) { pendingInput.current = false; setUploading(false); onAvailability(saved); }
-    }
-  };
   const readFiles = async (files: File[]) => {
     if (!files.length || locked) return;
     const id = target.current, multi = mode === "multi-reenact";
     if (id === "add" && subjects.length + files.length > 6) { setUploadError("最多添加 6 张主体图"); return; }
     let selectedId = id;
-    const saved = await saveInput(async current => {
+    await saveInput(async current => {
       const images = await Promise.all((id === "add" ? files : files.slice(0, 1)).map(file => {
         if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 20 * 1024 * 1024) throw new Error("请选择 20 MB 以内的 PNG、JPEG 或 WebP");
         return normalizeImage(file, (id === "reference" ? 4 : 2) * 1024 * 1024);
@@ -107,13 +86,13 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
         await onSubjects(id === "add" ? [...subjects, ...added] : subjects.map(item => item.id === id ? { ...item, subjectImage: images[0]! } : item));
         selectedId = added[0]?.id || id;
       } else { await onSubject(images[0]!); selectedId = "subject"; }
-    });
-    if (saved) onSelect(selectedId);
+    }, { onSaved: () => onSelect(selectedId) });
   };
   const remove = async () => {
-    if (!await saveInput(() => current ? onSubjects(subjects.filter(item => item.id !== current.id)) : onSubject(""))) return;
-    onSelect("reference"); setSettings(false);
-    inputArea.current?.querySelector<HTMLButtonElement>('[aria-label="查看参考图"]')?.focus({ preventScroll: true });
+    await saveInput(() => current ? onSubjects(subjects.filter(item => item.id !== current.id)) : onSubject(""), { onSaved: () => {
+      onSelect("reference"); setSettings(false);
+      inputArea.current?.querySelector<HTMLButtonElement>('[aria-label="查看参考图"]')?.focus({ preventScroll: true });
+    } });
   };
   const update = async (patch: Partial<MultiSubject>) => {
     await saveInput(() => onSubjects(subjects.map(item => item.id === current?.id ? { ...item, ...patch } : item)));
@@ -121,14 +100,15 @@ export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contex
   const reorder = async (delta: number) => {
     const next = moveImage(subjectIds, referenceIndex, selectedId, delta);
     if (!next) return;
-    if (!await saveInput(() => onImageOrder(next.referenceIndex, mode === "multi-reenact"
-      ? next.subjectIds.map(id => subjects.find(item => item.id === id)!) : subjects))) return;
-    inputArea.current?.querySelector<HTMLButtonElement>(`[data-image-id="${selectedId}"]`)?.focus({ preventScroll: true });
+    await saveInput(() => onImageOrder(next.referenceIndex, mode === "multi-reenact"
+      ? next.subjectIds.map(id => subjects.find(item => item.id === id)!) : subjects), { onSaved: () => {
+      inputArea.current?.querySelector<HTMLButtonElement>(`[data-image-id="${selectedId}"]`)?.focus({ preventScroll: true });
+    } });
   };
   const rotateInput = async (next: string) => {
     const saved = await saveInput(() => isSubject ? current
       ? onSubjects(subjects.map(item => item.id === current.id ? { ...item, subjectImage: next } : item))
-      : onSubject(next) : onReferenceRotate(next), true);
+      : onSubject(next) : onReferenceRotate(next), { rethrow: true });
     if (!saved) throw new Error("当前输入已切换，请重新调整图片");
   };
   const returnFocus = () => {

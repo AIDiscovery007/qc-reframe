@@ -38,6 +38,10 @@ flowchart TD
 
 App 仍拥有页面导航、提醒、弹层、轮询和效果，不把所有 UI 状态塞入领域 reducer。QuickWorkspace 沿用自己的初始化与交接编排，输入草稿过滤复用同一规则。
 
+`lib/use-input-operation.ts` 为 CanvasWorkspace 和 QuickWorkspace 统一输入操作的同步防重入、忙碌与错误、上下文 revision 和 React cleanup。读取完成后先检查操作归属，再调用已有保存入口；保存后的选择与焦点回调和归属检查同步执行。离开再返回同一上下文也会使旧操作失效，旧结果不能释放新操作的占用或提交保护。失败释放编辑锁但保留提交阻止，成功重试或明确移除恢复可用性。
+
+组件保留图片校验与尺寸、多图元数据、选择、焦点和旋转错误传播。Quick 排序由 App 维护 availability，成功提交回调经操作归属检查后设置组件的 `focusAfterOrder`，供渲染后恢复焦点；不套用上传的 availability 通知。hook 不保存输入、不取消已经发出的写入；`creation-context` writer 仍是唯一持久输入写入入口与 CAS 协调者。
+
 ## 共享生图行为
 
 `lib/generation-session.ts` 提供 `generationReadiness` 和 `createGenerationSession`；`lib/use-generation.ts` 是 React adapter。工作台和快捷结果共用资格判断、提交参数、取消、同步防重入、失败状态、图片及参考快照读取。

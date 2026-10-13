@@ -4,6 +4,7 @@ import RecoveryAction from "./RecoveryAction";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { normalizeImage } from "../../lib/image";
 import { useGeneration } from "../../lib/use-generation";
+import { useInputOperation } from "../../lib/use-input-operation";
 import type { Job, Mode, Selection } from "../../lib/types";
 import ImagePreview from "./ImagePreview";
 import LoadingPlaceholder from "./LoadingPlaceholder";
@@ -25,12 +26,7 @@ export default function QuickWorkspace({ pixelSize = false, revealPrompt, target
   // Stable action buttons preserve keyboard focus; aria-disabled requests remain guarded.
   const [selected, select] = useState<"reference" | "subject">("reference");
   const [promptOpen, setPromptOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState("");
-  const revision = useRef(0);
-  const pendingInput = useRef(false);
-  const scope = useRef(contextKey);
-  scope.current = contextKey;
+  const { pending: uploading, error, run: saveInput } = useInputOperation(contextKey, disabled, onAvailability);
   const subjectFile = useRef<HTMLInputElement>(null);
   const referenceFile = useRef<HTMLInputElement>(null);
   const promptToggle = useRef<HTMLButtonElement>(null);
@@ -46,43 +42,23 @@ export default function QuickWorkspace({ pixelSize = false, revealPrompt, target
     }
   }, [job?.id, job?.status]);
   useEffect(() => { select("reference"); }, [selection?.projectId || selection?.id, mode]);
-  useEffect(() => { setUploading(false); setError(""); return () => { revision.current++; pendingInput.current = false; onAvailability(true); }; }, [contextKey]);
   useEffect(() => {
     if (!focusAfterOrder.current) return;
     focusAfterOrder.current = false;
     (selected === "subject" ? subjectTab : referenceTab).current?.focus({ preventScroll: true });
   }, [referenceIndex, contextKey]);
   useEffect(() => { if (revealPrompt !== undefined) setPromptOpen(true); else if (targetGeneration) setPromptOpen(false); }, [revealPrompt, targetGeneration]);
-  const saveSubject = async (read: () => Promise<string>, rethrow = false) => {
-    if (disabled || pendingInput.current) return false;
-    const attempt = ++revision.current, context = contextKey;
-    const current = () => attempt === revision.current && context === scope.current;
-    pendingInput.current = true;
-    setUploading(true); setError(""); onAvailability(false);
-    let saved = false;
-    try {
-      const image = await read();
-      if (!current()) return false;
-      await onSubject(image);
-      saved = true;
-      return current();
-    } catch (error) {
-      if (current()) setError((error as Error).message);
-      if (rethrow) throw error;
-      return false;
-    } finally { if (current()) { pendingInput.current = false; setUploading(false); onAvailability(saved); } }
-  };
   const uploadSubject = async (file?: File) => {
     if (!file) return;
-    const saved = await saveSubject(async () => {
+    await saveInput(async current => {
       if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size > 20 * 1024 * 1024) throw new Error("请上传不超过20 MB的PNG、JPEG或WebP图片");
-      return normalizeImage(file, 2 * 1024 * 1024);
-    });
-    if (saved) { select("subject"); subjectTab.current?.focus({ preventScroll: true }); }
+      const image = await normalizeImage(file, 2 * 1024 * 1024);
+      if (current()) await onSubject(image);
+    }, { onSaved: () => { select("subject"); subjectTab.current?.focus({ preventScroll: true }); } });
   };
-  const removeSubject = async () => { if (await saveSubject(async () => "")) select("reference"); };
+  const removeSubject = () => saveInput(() => onSubject(""), { onSaved: () => select("reference") });
   const rotateSubject = async (image: string) => {
-    if (!await saveSubject(async () => image, true)) throw new Error("当前输入已切换，请重新调整图片");
+    if (!await saveInput(() => onSubject(image), { rethrow: true })) throw new Error("当前输入已切换，请重新调整图片");
   };
   const multi = mode === "multi-reenact" || mode === "session";
   const paired = mode === "style" || mode === "reenact";
@@ -90,14 +66,9 @@ export default function QuickWorkspace({ pixelSize = false, revealPrompt, target
   const label = selected === "subject" && paired ? "主体图" : "参考图";
   const imageIds = orderedImageIds(paired && subject ? ["subject"] : [], referenceIndex);
   const imageIndex = imageIds.indexOf(selected);
-  const reorder = async () => {
-    if (disabled || pendingInput.current) return;
-    const context = contextKey, attempt = ++revision.current;
-    pendingInput.current = true; setUploading(true); setError("");
-    try { await onImageOrder(referenceIndex === 0 ? 1 : 0, () => { focusAfterOrder.current = true; }); }
-    catch (error) { if (context === scope.current && attempt === revision.current) setError((error as Error).message); }
-    finally { if (context === scope.current && attempt === revision.current) { pendingInput.current = false; setUploading(false); } }
-  };
+  const reorder = () => saveInput(current => onImageOrder(referenceIndex === 0 ? 1 : 0, () => {
+    if (current()) focusAfterOrder.current = true;
+  }), { availability: "app" });
   const locked = disabled || uploading;
   return <section className="quick-workspace" aria-label="快捷逆向">
     <div className="quick-heading"><h1>{title || "选择参考图"}</h1><SelectField label="" aria-label="逆向模式" value={mode} disabled={modeDisabled || uploading} onChange={e => onMode(e.target.value as Mode)}>{Object.entries(modes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</SelectField></div>
