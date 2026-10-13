@@ -37,9 +37,11 @@ async function setup(t, options = {}) {
     headers: { Authorization: `Bearer ${app.token}`, "Content-Type": "application/json", ...options.headers } });
   const wait = async (id, status) => {
     for (let i = 0; i < 100; i++) {
-      const job = await (await request(`/jobs/${id}`)).json();
       const health = await (await request("/health")).json();
-      if (job.status === status && health.active === 0) return job;
+      if (health.active === 0) {
+        const job = await (await request(`/jobs/${id}`)).json();
+        if (job.status === status) return job;
+      }
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     assert.fail(`job did not reach ${status}`);
