@@ -37,6 +37,28 @@
 
 | ID | 表面 / 视口 | 状态 | 检查 |
 | --- | --- | --- | --- |
+| input-operation-workspace-retry | workspace 1440×1000 | /workspace.html?state=projects&mode=style&inputOperationRegression=retry | inputOperationRegression |
+| input-operation-workspace-remove-recovery | workspace 1440×1000 | /workspace.html?state=projects&mode=style&inputOperationRegression=remove-recovery | inputOperationRegression |
+| input-operation-workspace-save-failure | workspace 1440×1000 | /workspace.html?state=projects&mode=style&inputOperationRegression=save-failure | inputOperationRegression |
+| input-operation-workspace-duplicate | workspace 1440×1000 | /workspace.html?state=projects&mode=style&inputOperationRegression=duplicate | inputOperationRegression |
+| input-operation-workspace-read-late | workspace 1440×1000 | /workspace.html?state=projects&mode=style&inputOperationRegression=read-late | inputOperationRegression |
+| input-operation-workspace-read-failure-late | workspace 1440×1000 | /workspace.html?state=projects&mode=style&inputOperationRegression=read-failure-late | inputOperationRegression |
+| input-operation-workspace-save-late | workspace 1440×1000 | /workspace.html?state=projects&mode=style&inputOperationRegression=save-late | inputOperationRegression |
+| input-operation-workspace-save-failure-late | workspace 1440×1000 | /workspace.html?state=projects&mode=style&inputOperationRegression=save-failure-late | inputOperationRegression |
+| input-operation-workspace-rotation-failure | workspace 1440×1000 | /workspace.html?state=projects&mode=style&inputOperationRegression=rotation-failure | inputOperationRegression |
+| input-operation-workspace-remove-failure | workspace 1440×1000 | /workspace.html?state=projects&mode=style&inputOperationRegression=remove-failure | inputOperationRegression |
+| input-operation-popup-retry | popup 400×740 | /popup.html?state=projects&mode=style&inputOperationRegression=retry | inputOperationRegression |
+| input-operation-popup-remove-recovery | popup 400×740 | /popup.html?state=projects&mode=style&inputOperationRegression=remove-recovery | inputOperationRegression |
+| input-operation-popup-save-failure | popup 400×740 | /popup.html?state=projects&mode=style&inputOperationRegression=save-failure | inputOperationRegression |
+| input-operation-popup-duplicate | popup 400×740 | /popup.html?state=projects&mode=style&inputOperationRegression=duplicate | inputOperationRegression |
+| input-operation-popup-read-late | popup 400×740 | /popup.html?state=projects&mode=style&inputOperationRegression=read-late | inputOperationRegression |
+| input-operation-popup-read-failure-late | popup 400×740 | /popup.html?state=projects&mode=style&inputOperationRegression=read-failure-late | inputOperationRegression |
+| input-operation-popup-save-late | popup 400×740 | /popup.html?state=projects&mode=style&inputOperationRegression=save-late | inputOperationRegression |
+| input-operation-popup-save-failure-late | popup 400×740 | /popup.html?state=projects&mode=style&inputOperationRegression=save-failure-late | inputOperationRegression |
+| input-operation-popup-rotation-failure | popup 400×740 | /popup.html?state=projects&mode=style&inputOperationRegression=rotation-failure | inputOperationRegression |
+| input-operation-popup-remove-failure | popup 400×740 | /popup.html?state=projects&mode=style&inputOperationRegression=remove-failure | inputOperationRegression |
+| input-operation-multi-upload | workspace 1440×1000 | /workspace.html?state=multi&mode=multi-reenact&inputOperationRegression=multi-upload | inputOperationRegression |
+| input-operation-multi-failure | workspace 1440×1000 | /workspace.html?state=multi&mode=multi-reenact&inputOperationRegression=multi-failure | inputOperationRegression |
 | image-settings-sync-codex-to-magpie-manual | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=codex-to-magpie-manual&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
 | image-settings-sync-codex-to-magpie-continuous | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=codex-to-magpie-continuous&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
 | image-settings-sync-codex-to-magpie-batch | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=codex-to-magpie-batch&generationDelay=60000&reverseDelay=300 | imageSettingsSyncRegression |
