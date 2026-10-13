@@ -194,7 +194,7 @@ test('user（开发者）已审阅浏览器执行域可排除bridge依赖，但�
   // A changed/new fixture invalidates the proof, and actual execution edges always take precedence.
   const altered={...files,'browser-extension/tests/new.browser.js':{mode:'100644',oid:'new',type:'blob'}};
   assert.notEqual(browserDomain(altered),reviewedBrowserDomain);
-  for (const file of ['browser-extension/entrypoints/popup/App.tsx', 'browser-extension/lib/generation-session.ts', 'agent-tool/preview.mjs', 'agent-tool/ui/runner.mjs', 'browser-extension/package-lock.json']) {
+  for (const file of ['browser-extension/entrypoints/popup/App.tsx', 'browser-extension/lib/generation-session.ts', 'agent-tool/ci.mjs', 'agent-tool/preview.mjs', 'agent-tool/ui/runner.mjs', 'browser-extension/package-lock.json']) {
     assert.notEqual(browserDomain({...files, [file]: {mode:'100644',oid:'changed',type:'blob'}}), reviewedBrowserDomain, file);
   }
   assert.ok(withConservativeDependencies({id:'browser:scene',executed:[],unknown:['anonymous']}).dependencies.includes(backend));
