@@ -2,7 +2,7 @@
 
 目标：在保留五条创作路径、既有界面和数据兼容性的前提下，收拢重复业务规则，明确异步操作和持久化归属。以可观察行为、独立测试和审查判断完成；不把构建成功或代码行数下降等同于功能验收。
 
-状态：用户于 2026-10-13 确认重构计划和第一轮 B1–B3 规格及测试。第一轮已实现并完成独立审查，未发现新增回归；完整门禁仍有下文记录的既有 CI 指纹失败。第二轮规格和测试已准备，等待确认后锁定。用户已选择独立 Codex 开发代理，高推理强度。主代理维护规格、测试与验收，开发代理仅修改实现并提交。推送、合并、发布不在当前交付范围。
+状态：用户于 2026-10-13 确认重构计划和第一轮 B1–B3 规格及测试。第一轮已实现并完成独立审查，未发现新增回归；完整门禁仍有下文记录的既有 CI 指纹失败。用户随后确认第二轮 G1–G2，并明确授权所有后续轮次、不再逐轮询问。第二轮规格与测试已锁定，进入实现；后续继续由主代理先写并锁定测试，再独立交付、验证和审查。用户已选择独立 Codex 开发代理，高推理强度。主代理维护规格、测试与验收，开发代理仅修改实现并提交。推送、合并、发布不在当前交付范围。
 
 ## 现有边界与重构依据
 
@@ -22,7 +22,7 @@
 | 3 | 在工作台或快捷端替换、移除、旋转输入后继续创作 | 两端共用输入操作生命周期；持久输入仍归 creation-context writer | 同步防重入、读取/保存失败、A→B→A 迟到响应、焦点与多图顺序 |
 | 4 | 从快捷端接续工作台、切换版本并再次逆向 | 明确恢复/响应采纳接口和纯逆向资格规则，减少 App 闭包耦合 | 草稿隔离、远端 revision、提醒与接续交错、历史资源缺失、五路径资格 |
 
-每轮先由主代理写出并运行对应测试，用户确认后锁定，再交给开发代理实现。每轮包含相关接线、文档、验证及独立提交；后一轮不用于补齐前一轮缺失的功能。新证据可调整后续范围，但须保留已确认行为。
+每轮先由主代理写出并运行对应测试，再锁定交给开发代理实现。用户于 2026-10-13 明确授权所有轮次，覆盖技能的逐轮确认要求，不再重复询问。每轮包含相关接线、文档、验证及独立提交；后一轮不用于补齐前一轮缺失的功能。新证据可调整后续范围，但须保留已确认行为。
 
 ## 第一轮 用户旅程与规格
 
@@ -72,7 +72,7 @@
 - 主代理在同一 coverage 环境重新核对浏览器基线报告与摘要，`ui.mjs evidence` 返回 `passed`、`reusable: true`；第一轮只改后端，139 个场景与隔离扩展证据仍有效。报告 `.local/reframe-refactor/iteration-1-full/browser-evidence.json`；保留前述跳过项及真实环境限制，不代表再次执行了浏览器场景。
 - 结论：第一轮范围内未发现需修改问题，可进入第二轮规格确认；全项目最终验收尚未完成。CI 审阅指纹差异仍显式保留，未通过刷新摘要或改断言消除失败。
 
-## 第二轮用户旅程与规格（待确认）
+## 第二轮用户旅程与规格（已确认）
 
 用户独立生图、连续逆向后生图或提交批次时，执行使用受理时的渠道和尺寸。执行期间配置可能变化、模型可能下架；图片已经生成后也可能遇到本地任务记录保存失败。用户应保有成功提示词和可恢复图片，并能继续编辑其他项目而不丢失产物。
 
@@ -104,7 +104,7 @@
 ### 确认前验证
 
 - `node --test --test-reporter=spec browser-extension/tests/image-api-bridge.test.mjs browser-extension/tests/project-inputs.test.mjs browser-extension/tests/agent-bridge.test.mjs browser-extension/tests/magpie-size.test.mjs browser-extension/tests/batches.test.mjs browser-extension/tests/batch-admission.test.mjs browser-extension/tests/task-runtime.test.mjs browser-extension/tests/task-records.test.mjs browser-extension/tests/images.test.mjs`：106 项通过，0 失败、0 跳过；日志 `.local/reframe-refactor/iteration-2-baseline.log`。
-- 待确认测试文件 SHA-256：`image-api-bridge.test.mjs` → `ee8f8721bde24b4fe48bfd052b1b85381e385a97ce84a7cd5dd47ebe4b1a3f71`。本轮仅新增 G1、G2，既有测试断言保持不变。第一轮 `batch-admission.test.mjs` 摘要仍与锁定值一致。
+- 锁定测试文件 SHA-256：`image-api-bridge.test.mjs` → `ee8f8721bde24b4fe48bfd052b1b85381e385a97ce84a7cd5dd47ebe4b1a3f71`。本轮仅新增 G1、G2，既有测试断言保持不变。第一轮 `batch-admission.test.mjs` 摘要仍与锁定值一致。
 - `git diff --check` 通过。此阶段未修改第二轮生产代码，也未启动第二轮开发代理。
 
 ## 实现交接与最终交付
