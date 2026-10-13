@@ -30,6 +30,15 @@ export const components = [
 
 const wide = { width: 1440, height: 1000 };
 export const scenarios = [
+  ...['workspace', 'popup'].flatMap(surface => ['retry', 'remove-recovery', 'save-failure', 'duplicate', 'read-late', 'read-failure-late', 'save-late', 'save-failure-late', 'rotation-failure', 'remove-failure'].map(flow => ({
+    id: `input-operation-${surface}-${flow}`, surface,
+    path: `/${surface}.html?state=projects&mode=style&inputOperationRegression=${flow}`,
+    viewport: surface === 'popup' ? { width: 400, height: 740 } : wide, regression: 'inputOperationRegression', rules: [],
+  }))),
+  ...['multi-upload', 'multi-failure'].map(flow => ({
+    id: `input-operation-${flow}`, surface: 'workspace', path: `/workspace.html?state=multi&mode=multi-reenact&inputOperationRegression=${flow}`,
+    viewport: wide, regression: 'inputOperationRegression', rules: [],
+  })),
   ...['codex-to-magpie-manual', 'codex-to-magpie-continuous', 'codex-to-magpie-batch', 'magpie-to-codex-manual', 'magpie-to-codex-continuous', 'magpie-to-codex-batch', 'stale-health', 'rapid-switch', 'reopen-draft', 'snapshot'].map(flow => ({
     id: `image-settings-sync-${flow}`, surface: 'workspace',
     path: `/workspace.html?state=projects&count=4&mode=style&imageSettingsSyncRegression=${flow}&generationDelay=60000&reverseDelay=300`,

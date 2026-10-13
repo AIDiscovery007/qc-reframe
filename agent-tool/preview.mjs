@@ -50,7 +50,7 @@ const job = {
 };
 
 // Receipts travel over the parent IPC channel, never through page-controlled state.
-const regressions = Object.fromEntries(['workspace-image-model', 'image-settings-sync', 'magpie-workflows', 'generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
+const regressions = Object.fromEntries(['input-operation', 'workspace-image-model', 'image-settings-sync', 'magpie-workflows', 'generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
   .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
 const previewSources = ['browser-extension/lib/image-size.mjs', 'agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs', 'browser-extension/lib/operation-policy.ts', 'browser-extension/bridge/image-order.mjs'];
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -190,7 +190,7 @@ const server = createServer(async (req, res) => {
           job.generations=[];
           job.autoGeneration={status:'failed',language:'zh',aspectRatio:{width:3,height:2},error:'示例：自动生图启动失败，请重试'};
         }
-        if(previewOptions.has('creationContextRegression')) {
+        if(previewOptions.has('creationContextRegression') || previewOptions.has('inputOperationRegression')) {
           job.id='11111111-1111-4111-8111-111111111111';
           older.id='22222222-2222-4222-8222-222222222222';
           reenact.id='33333333-3333-4333-8333-333333333333';
@@ -714,6 +714,8 @@ const server = createServer(async (req, res) => {
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/auto-style-regression.js"></script></body>'));
     if (['/workspace.html','/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('imageOrderRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/image-order-regression.js"></script></body>'));
+    if (['/workspace.html','/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('inputOperationRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/input-operation-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('creationContextRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/creation-context-regression.js"></script></body>'));
     if (path === '/popup.html'  && new URL(req.url, 'http://127.0.0.1').searchParams.has('panelClip'))
