@@ -6,10 +6,11 @@
 
 后续待发布改动见 [unreleased](unreleased.md)。
 
-最新版本：[v0.5.0 · 多 Agent 与独立生图渠道](v0.5.0.md)。
+最新版本：[v0.6.0 · 按需启动与 Agent 架构地基](v0.6.0.md)。
 
 | 版本 | 更新内容 | 详情 |
 | --- | --- | --- |
+| 0.6.0 | macOS Codex 按需启动本机服务、网页面板按需加载、本机服务 Agent 适配器与路由重构、扩展模块化瘦身 | [版本说明](v0.6.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.6.0) |
 | 0.5.0 | Codex/Pi 逆向与 CLI 管理、自动连接、独立生图渠道、Magpie 工作流与尺寸适配、保存恢复 | [版本说明](v0.5.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.5.0) |
 | 0.4.4 | 批量逆向并生图、持久队列与任务进度、操作栏响应式修复、CI 分级验证 | [版本说明](v0.4.4.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.4) |
 | 0.4.3 | 逆向后自动生图、保留独立逆向与重复生图、预览控制不遮图、开发验证与证据复用改进 | [版本说明](v0.4.3.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.3) |

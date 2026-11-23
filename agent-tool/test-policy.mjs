@@ -39,5 +39,5 @@ export function browserDomain(files) {
 // 17 checks reject old reports and require copy cleanup. Preview remains synthetic;
 // production assets, actual dependency edges and conservative Node policy are unchanged.
 // Architecture audit: the preview adds only a synthetic `alchemy:panel-load` that injects its own
-// page-panel bundle; no fixture or preview path reaches the bridge.
-export const reviewedBrowserDomain = "107e3278be562574407b916854e8b8073c43494656b9385c12638c2f97ef192f";
+// page-panel bundle; no fixture or preview path reaches the bridge. v0.6.0 changes only package versions.
+export const reviewedBrowserDomain = "22ccf1fcb4160237af74496ef9ae2fffe6ae4c1d4007ffabd8c46258cf3a3378";

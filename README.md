@@ -4,15 +4,15 @@
 
 在浏览器里收集灵感，在本机工作台调整主体、提示词与结果。默认沿用 Codex 登录和额度，也可独立选择 API 或本机 Magpie 生图渠道。
 
-**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.5.0](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.5.0)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
+**[开始使用 ↗](browser-extension/docs/INSTALL_WITH_CODEX.md#让-codex-帮你安装)**　·　[下载 v0.6.0](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.6.0)　·　[效果画廊](browser-extension/docs/gallery/README.md)　·　[使用手册](browser-extension/README.md)
 
-## v0.5.0，自选逆向 Agent，独立配置生图
+## v0.6.0，按需启动，为任意本机 Agent 打好地基
 
-逆向可选 Codex 或 Pi，CLI 管理随顶部卡片切换，浏览器自动连接已启动的本机服务。生图独立选择 Codex、OpenAI 兼容 API、Gemini API 或本机 Magpie；Magpie 支持附图、连续和批量生成，在目标尺寸旁切换模型，按模型适配尺寸。图片已生成但保存失败时，可重试本地保存。
+macOS Codex 注册本机启动器后，打开 Reframe 即按需启动本机服务，无需先开终端。网页逆向面板改为打开时才加载，普通网页只加载选图浮层，不再预载完整面板。本机服务按 Agent 适配器与路由重构，Codex、Pi 与后续接入的本机 Agent 或 CLI 客户端共用同一接口。
 
-本次升级需先等待任务结束，再更新完整仓库并重启本机服务，重载原扩展、刷新工作台和网页；已有项目、历史结果与连接凭据保留。
+本次升级需先等待任务结束，再更新完整仓库并重启本机服务，重载原扩展（新增 `nativeMessaging`、`scripting` 权限）、刷新工作台和网页；已有项目、历史结果与连接凭据保留。
 
-[查看 v0.5.0 更新与升级说明 →](browser-extension/docs/releases/v0.5.0.md)
+[查看 v0.6.0 更新与升级说明 →](browser-extension/docs/releases/v0.6.0.md)
 
 ## 工作台，让画面成为主角
 
