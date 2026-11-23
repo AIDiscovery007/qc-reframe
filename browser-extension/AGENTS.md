@@ -64,16 +64,27 @@
 
 | 文件或目录 | 职责 |
 | --- | --- |
-| `entrypoints/content.ts`、`lib/image-action-placement.ts` | 网页选图、悬浮按钮避让、closed Shadow DOM 浮层及焦点行为。 |
-| `entrypoints/background.ts`、`lib/bridge.ts`、`lib/client.ts` | 扩展消息、配对、受限后台请求；令牌留在扩展后台。 |
+| `entrypoints/content.ts`、`lib/image-action-placement.ts` | 网页选图、悬浮按钮避让、closed Shadow DOM 浮层及焦点行为；不含 React 面板。 |
+| `entrypoints/page-panel.ts`、`lib/page-panel.ts` | 网页面板按需 bundle：首次打开时由后台注入发起请求的顶层 frame isolated world，再挂载到浮层。 |
+| `entrypoints/background.ts`、`lib/bridge.ts`、`lib/client.ts` | 扩展消息路由、选图与任务编排、受限后台请求；令牌留在扩展后台。 |
+| `lib/service-connection.ts`、`lib/session-drafts.ts`、`lib/message-validation.ts` | 后台的本机服务连接（配对、401 续期、原生启动器）、草稿与交接的串行 session 存储、消息参数纯校验。 |
+| `lib/agents.ts` | 扩展端 Agent ID 格式与查询构造；支持哪些 Agent 由 bridge 注册表决定。 |
 | `entrypoints/popup/`、`entrypoints/workspace/` | 共用 React 业务界面；轻量浮层/弹窗保留，独立扩展工作台提供分栏、任务中心及宽版设置。 |
-| `lib/creation-context.ts` | 创作上下文的草稿、版本与历史优先级，输入写入防重入及迟到响应隔离；导航与界面效果留在 App。 |
+| `entrypoints/popup/App.tsx` | 两端共用的组合根：持有 React 状态、布局与组件接线，并把 setter/ref 交给下列 module；不在此新增同步、轮询或提交规则。 |
+| `lib/creation-context.ts` | 创作上下文的草稿、版本与历史优先级，输入写入防重入及迟到响应隔离；`viewScope` 判定视图动作是否仍属于当前上下文。 |
+| `lib/surface-sync.ts`、`lib/creation-entry.ts` | 界面启动顺序、后台选择轮询、交接/提醒读取与导航、toast 与任务中心路由。 |
+| `lib/service-health.ts`、`lib/generation-settings.ts` | 本机服务健康轮询与打开项目的按 revision 刷新；生图渠道设置写入与健康轮询的 token 串行化。 |
+| `lib/project-inputs.ts`、`lib/project-visibility.ts` | 项目输入按 revision 水合、重开与历史参考图读取；隐藏/恢复项目与隐藏范围切换。 |
+| `lib/reverse-action.ts`、`lib/workspace-handoff.ts`、`lib/prompt-export.ts` | 逆向资格、提交参数与按任务取消锁；交接草稿组装与串行打开工作台；按冻结图序导出提示词。 |
 | `lib/generation-session.ts`、`lib/use-generation.ts` | 工作台与快捷界面共用的生图资格、提交、取消和资源读取，以及 React adapter。 |
 | `lib/operation-policy.ts` | UI 请求来源、通信方式及超时的共同目录；不能替代发送方、参数与 HTTP 鉴权。 |
 | `bridge/cli.mjs`、`bridge/pi-cli.mjs` | 分别识别 Codex/Pi 安装来源、版本与更新，复用固定参数的进程执行器；安装更新与模型验证和任务全局互斥。 |
-| `bridge/server.mjs`、`bridge/projects.mjs`、`bridge/images.mjs`、`bridge/storage.mjs` | 本机 HTTP 服务、任务与项目持久化、共享图片存储、迁移与回收。 |
+| `bridge/server.mjs`、`bridge/routes/`、`bridge/http.mjs` | 本机 HTTP 服务装配、鉴权与 mutation lock；路由按服务/项目/任务拆分，请求体与图片解码集中在 http.mjs。 |
+| `bridge/batch-scheduler.mjs` | 批次公开视图与空闲时启动下一项的调度泵。 |
+| `bridge/projects.mjs`、`bridge/images.mjs`、`bridge/storage.mjs` | 任务与项目持久化、共享图片存储、迁移与回收。 |
 | `bridge/task-runtime.mjs`、`bridge/task-records.mjs` | 独立任务占用/取消/收尾，任务快照有序原子保存、提交发布及重启恢复。 |
-| `bridge/codex-rpc.mjs`、`bridge/agent.mjs` | Codex CLI app-server stdio JSON-RPC、图片与 skill 输入、逆向结果校验。 |
+| `bridge/agents.mjs` | 逆向 Agent 注册表：登记 adapter、持久化选择、按任务快照解析执行者；新增本机 Agent 在 `builtinAgents()` 登记。 |
+| `bridge/agent.mjs`、`bridge/codex-agent.mjs`、`bridge/codex-rpc.mjs`、`bridge/pi-agent.mjs` | 与 Agent 无关的逆向输入、图片顺序与结果校验；Codex（app-server JSON-RPC）与 Pi（子进程）adapter。 |
 | `bridge/sessions.mjs`、`entrypoints/workspace/SessionPicker.tsx` | 本机会话列表与整会话选择、正文过滤及私有快照；通过既有后台与 bridge 鉴权链路访问。 |
 | `bridge/inspection.mjs` | 逆向专用只读图像工具；仅按当次输入编号裁切、放大和取样，内存返回图像与元信息。 |
 | `bridge/models.mjs`、`bridge/model-context.mjs` | 动态模型目录、真实验证、选择保存与账号/CLI 上下文检查。 |

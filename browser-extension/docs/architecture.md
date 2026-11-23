@@ -24,9 +24,9 @@ flowchart TD
   Bridge --> Runtime[Task Runtime]
   Runtime --> Records[Task Records]
   Records --> Feed[已提交任务列表]
-  Runtime --> Agent[逆向 Agent 适配]
-  Agent --> Codex[每任务独立 Codex 进程]
-  Agent --> Pi[每任务独立 Pi 进程]
+  Runtime --> Agent[逆向 Agent 注册表]
+  Agent --> Codex[Codex adapter：每任务独立进程]
+  Agent --> Pi[Pi adapter：每任务独立进程]
   Runtime --> Generation[Codex 或 API 生图]
 ```
 
@@ -39,11 +39,23 @@ flowchart TD
 - `createInputWriter` 同步防重入，发送输入 revision，并在响应到达时核对上下文对象身份和导航 revision。检查通过与 commit 回调在同一段同步执行中完成，不能在两者间再插入 `await`。
 - writer 丢弃旧响应只影响界面接收。服务端可能已经成功保存；后续重新读取项目按服务端 revision 恢复，不伪造撤销。
 
-App 仍拥有页面导航、提醒、弹层、轮询和效果，不把所有 UI 状态塞入领域 reducer。工作台与快捷端的初始化、交接和轮询由 App 编排，快捷草稿过滤复用同一规则。启动顺序保持为项目视图、初始 query 入口或快捷已保存草稿、提醒导航与轮询建立、最后消费最新 hash；Quick 的 ownContext 与全局选择变化仍由 App 协调。
+不把所有 UI 状态塞入领域 reducer。`entrypoints/popup/App.tsx` 是两端共用的组合根：持有 React 状态与布局，把 setter 和 revision ref 交给以下 module，自身只保留输入上传/保存/换序、提交与删除等直接接线。
 
-`lib/creation-entry.ts` 的 `createEntryReader({ request, query, revision })` 只读取 handoff 或提醒任务。`read(entry, accept)` 捕获 App 的 selectionRevision，在每次异步返回、继续读取和同步交付前检查归属；App 每次导航（含 unread 与无效 ID）递增 revision，effect 清理调用 `dispose()`，使在途及后续读取失效。handoff 先交付 `handoff-source`，再按持久引用的 inputRevision（缺省为 0）交付 fresh/stale/unavailable；stale 剥除输入，引用失败保留来源和 selection.error，未保存与空来源保持不同状态。提醒按任务 ID 读取任务及项目引用，一起交付。reader 不修改调用方对象、不写输入；App 负责草稿恢复、stale 的 revision -1 与提示、settings/tasks 路由、版本及结果抽屉。
+| module | interface | 职责 |
+| --- | --- | --- |
+| `lib/surface-sync.ts` | `createSurfaceSync(env)` → `start / dispose / openNotice / openTask / navigateReminder / navigateHandoff / onHashChange` | 启动顺序为项目视图、初始 query 入口或快捷已保存草稿、提醒导航与轮询建立、最后消费 hash；Quick 的 ownContext 与全局选择变化；初始化完成前 toast 明确报错，任务中心则静默等待。 |
+| `lib/service-health.ts` | `pollServiceHealth(env, projectId)` → cleanup | 健康轮询（忙碌 2s、空闲 10s）、连接/Agent/模型状态，缺 `projectsRevision` 视为 legacy；项目 revision 变化才带已保存 revision 重取项目；`projectRevision` 防止旧轮询覆盖新的本地变更，生图设置 token 过期的读取整体丢弃。 |
+| `lib/generation-settings.ts` | `createGenerationSettings({ request, query, publish })` → `save / apply / token / current` | 渠道设置写入与健康轮询串行：写入替换 token，之前或期间开始的轮询被丢弃。 |
+| `lib/project-inputs.ts` | `hydrateProjectInput`、`openProject`、`restoreJobReference`、`inputConflict` | 按 inputRevision 水合一次；其他窗口提交了更新时报冲突而不静默替换；重开是陈旧窗口的显式恢复路径。 |
+| `lib/project-visibility.ts` | `projectVisibilityActions(env, view)` | 隐藏/恢复与隐藏范围切换；只采用服务端确认的 ID，响应不替换请求期间新打开的项目。 |
+| `lib/workspace-handoff.ts` | `workspaceContext`、`draftSnapshot`、`projectDraft`、`createWorkspaceOpener` | 交接只带来源引用和当前项目草稿，固定当前显示的版本；打开工作台同时只有一次。 |
+| `lib/prompt-export.ts` | `promptMarkdown(job)` | 附图顺序取任务冻结的 referenceIndex，旧记录保持主体在前、参考最后。 |
 
-`lib/reverse-action.ts` 的 `deriveReverseAction` 消费 resolveCreation 的结果，统一五模式的提示词失效、错误提示优先级、逆向/连续动作资格和 reenact payload，不重复输入回退规则。App 用原有尺寸继承及真实尺寸 helper 提供 sizeValid，保留 Magpie 回退和普通比例校验；实际 reverse 先检查对应动作资格，再交给 App 的 start。提交锁、任务指令、sessionIds、图序与输入快照仍由 start 负责，持久输入 writer 与 generation-session 的所有权不变。
+长生命周期的 surface sync 与取消锁持有首次渲染的 env，只能通过稳定 setter 与 ref 读写；需要最新渲染值的逻辑以参数传入（如 `projectVisibilityActions` 的 view）。
+
+`lib/creation-entry.ts` 的 `createEntryReader({ request, query, revision })` 只读取 handoff 或提醒任务。`read(entry, accept)` 捕获界面的 selectionRevision，在每次异步返回、继续读取和同步交付前检查归属；surface sync 每次导航（含 unread 与无效 ID）递增 revision，`dispose()` 时一并释放 reader，使在途及后续读取失效。handoff 先交付 `handoff-source`，再按持久引用的 inputRevision（缺省为 0）交付 fresh/stale/unavailable；stale 剥除输入，引用失败保留来源和 selection.error，未保存与空来源保持不同状态。提醒按任务 ID 读取任务及项目引用，一起交付。reader 不修改调用方对象、不写输入；surface sync 负责草稿恢复、stale 的 revision -1 与提示、settings/tasks 路由、版本及结果抽屉。
+
+`lib/reverse-action.ts` 的 `deriveReverseAction` 消费 resolveCreation 的结果，统一五模式的提示词失效、错误提示优先级、逆向/连续动作资格和 reenact payload，不重复输入回退规则。App 用原有尺寸继承及真实尺寸 helper 提供 sizeValid，保留 Magpie 回退和普通比例校验；`reverseSubmission` 只在对应动作可用时给出提交参数，再交给 App 的 start。`createReverseCancellation` 按任务同步加锁，点击时捕获的任务只取消一次，其他任务仍可取消。提交锁、任务指令、sessionIds、图序与输入快照仍由 start 负责，持久输入 writer 与 generation-session 的所有权不变。
 
 `lib/use-input-operation.ts` 为 CanvasWorkspace 和 QuickWorkspace 统一输入操作的同步防重入、忙碌与错误、上下文 revision 和 React cleanup。读取完成后先检查操作归属，再调用已有保存入口；保存后的选择与焦点回调和归属检查同步执行。离开再返回同一上下文也会使旧操作失效，旧结果不能释放新操作的占用或提交保护。失败释放编辑锁但保留提交阻止，成功重试或明确移除恢复可用性。
 
@@ -59,15 +71,29 @@ App 仍拥有页面导航、提醒、弹层、轮询和效果，不把所有 UI 
 
 ## 逆向 Agent
 
-`bridge/agent.mjs` 统一构造 Alchemy 输入、图片顺序和输出合同，再按提交时的 `modelSettings.agent` 分派 Codex 或 Pi。缺少旧字段按 Codex 解释，未知 Agent 明确失败。`bridge/agents.mjs` 持久化逆向选择，`models.mjs` 复用同一验证与保存流程，将 Codex 和 Pi 模型分别存入配置文件；切换不改动全局 CLI 设置或凭据。
+`bridge/agents.mjs` 是逆向 Agent 的 seam。`createAgentRegistry({ dataDir, adapters })` 校验并登记 adapter，持久化当前选择（`agent-settings.json`，原子替换），向界面提供 `view()` 目录（ID、名称、当前模型、是否可安装），并以 `frozen(snapshot)` 按任务冻结的 `modelSettings.agent` 解析执行者：缺少字段按 `LEGACY_AGENT`（Codex）解释，未登记 ID 明确失败，不回退到当前选择。`builtinAgents()` 装配现有 Codex 与 Pi adapter；新增本机 Agent 只需在此登记一个对象：
+
+```js
+{ id: "my-agent", label: "My Agent", models, cli?, run, compatibility? }
+// run({ input, schema, instructions, dynamicTools, cwd, dataDir, signal, onProgress, modelSettings }) → { text }
+// models：createModelStore 实例（目录、验证、选择、busy、close）；cli 可选，提供 install 时界面显示安装入口
+```
+
+`bridge/agent.mjs` 只构造 Alchemy 输入、图片顺序、取证工具和输出合同，再调用冻结 adapter 的 `run`，不认识具体 Agent。`codex-agent.mjs` 是 Codex adapter（app-server JSON-RPC，也供模型验证与 Codex 内置生图复用）；`models.mjs` 为每个 adapter 独立保存模型选择，切换不改动全局 CLI 设置或凭据。扩展端 `lib/agents.ts` 只校验 ID 格式并构造 `?agent=` 查询，支持哪些 Agent 由 bridge 注册表决定；界面名称来自目录，不再硬编码 Codex/Pi。
 
 `bridge/pi-agent.mjs` 管理 Pi 子进程协议、模型目录、错误与取消；`pi-extension.mjs` 只开放本次图片取证及技能资料读取。图片操作复用 `inspection.mjs`，没有第二套裁切规则。Pi 不提供 Codex 的 OS sandbox，因此通过禁用默认工具、个人扩展和上下文文件限制模型可调用能力；该限制不声称隔离 CLI 自身或模型服务。
 
 任务和排队批次冻结逆向 Agent/provider/model/推理参数；自动生图另冻结所选生图渠道、模型及 API 配置。两阶段仍由既有 Task Runtime 和 Batch Store 调度，取消、保存失败及重启恢复使用原规则。会话正文读取独立使用 Codex，只把既有显式快照交给所选逆向 Agent。
 
-CLI 管理由 `cli.mjs` 与 `pi-cli.mjs` 分别验证安装来源，复用固定参数的子进程执行器。`/cli/*?agent=codex|pi` 显式指定管理目标；省略时兼容 Codex。安装更新与任务、模型验证全局互斥，完成后只清除对应 Agent 的模型信任；Codex 更新还复查兼容性并重建会话读取器。
+CLI 管理由 `cli.mjs` 与 `pi-cli.mjs` 分别验证安装来源，复用固定参数的子进程执行器。`/cli/*?agent=<id>` 与 `/models?agent=<id>` 显式指定已登记的管理目标；省略时兼容 Codex。安装更新与任务、模型验证全局互斥，完成后只清除对应 Agent 的模型信任；Codex 更新还复查兼容性并重建会话读取器。
 
 Pi 新安装使用固定官方 npm 包、私有暂存目录和禁用生命周期脚本的安装参数；验证成功后原子替换当前安装指针。外部 npm 安装先核对包身份、真实入口和运行时；具备原生自更新能力时调用原 CLI 的固定 `update --self --no-approve`，由 Pi 从自身安装位置确定原 prefix，不把资源包更新当作 CLI 升级。不支持原生自更新时仍仅允许已验证 npm manager 的原 prefix 更新。更新后复检路径、版本与 Reframe 接口；失败或取消时，已发生部分替换也须清除旧模型信任。App 或无法确认来源的安装不自动覆盖。管理操作不接受任意命令或路径，也不读取或复制登录凭据。设置中的管理目标独立于已保存的逆向 Agent；旧 `section=cli` 和 Pi 恢复入口只定位对应管理区域。
+
+## Bridge 装配
+
+`bridge/server.mjs` 只负责启动恢复、鉴权与 Host/Origin 校验、mutation lock、POST `/jobs` 受理及各模块装配。路由按职责拆分到 `bridge/routes/`：`service.mjs`（健康、会话、Agent/模型/CLI 管理、生图设置、重启）、`projects.mjs`（项目、图库、批次、任务 feed）、`jobs.mjs`（任务读取、提示词、生图与文件操作）。每个路由模块签名为 `(request, app) → handled`，`app` 是 server 显式传入的依赖集合，没有全局状态。`bridge/http.mjs` 拥有请求体读取、图片与主体解码及错误映射；`bridge/batch-scheduler.mjs` 拥有批次公开视图与空闲时启动下一项的泵，停止条件由 server 注入。
+
+bridge 只接受本机 Host；带 Origin 的请求必须是已批准的扩展 Origin，不带 Origin 的本机客户端（例如后续 CLI）凭 `.local/config/token`（`0600`）中的 Bearer token 调用同一 HTTP interface，不需要另一套服务。
 
 ## 生图渠道
 
@@ -115,6 +141,10 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 
 ## 通信与预览
 
+网页端分两段加载：`entrypoints/content.ts` 只含选图、悬浮菜单、液态表面与收集反馈，注入每个 http(s) 页面；React 面板是独立 unlisted script `entrypoints/page-panel.ts`。用户首次打开面板时，content 发送 `alchemy:panel-load`，后台仅对发起请求的标签页顶层 frame 调用 `scripting.executeScript` 注入 `/page-panel.js`，脚本运行在同一 isolated world，通过 `lib/page-panel.ts` 的 realm 共享 symbol 登记挂载函数。注入失败时面板关闭并提示刷新网页；页面无法自行加载该文件（不列入 web_accessible_resources）。
+
+扩展后台按职责拆分：`lib/service-connection.ts` 拥有配对、401 单次续期、原生启动器与共享健康打开；`lib/session-drafts.ts` 拥有快捷草稿与工作台交接的串行 session 存储；`lib/message-validation.ts` 是消息参数的纯校验；`entrypoints/background.ts` 只保留消息路由、选图与任务编排。
+
 `lib/operation-policy.ts` 是 UI 请求来源和 transport 的共同目录，供 client、background、bridge 超时与 preview 使用。慢输入请求和会话请求使用 port，后台仍验证扩展 ID、URL、frame 及具体消息参数；会话读取仅允许扩展页面。为了旧页面兼容，保留允许操作的单次消息处理及 callback 响应。
 
 [`agent-tool/preview.mjs`](../../agent-tool/preview.mjs) 是示例 adapter，运行实际构建的 UI，模拟外部环境。它复用请求目录，正文索引损坏时标题搜索回退与生产模块有契约测试。它仍模拟任务、图片和项目写入，不是第二个生产存储实现，也不能证明真实扩展权限、跨域取图或模型调用可用。
@@ -126,15 +156,18 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 | 改动 | 主要验证 interface |
 | --- | --- |
 | 输入优先级、历史与草稿 | `project-selection.test.mjs`、`reference-upload.test.mjs` 的实际 creation module；`creation-context.browser.js` 验证 App 接线 |
-| 交接/提醒读取与五模式逆向资格 | `creation-entry.test.mjs` 验证阶段、失败、revision 与 dispose；`workspace-prompt-action.test.mjs` 验证公开派生函数及 App 提交适配；`quick-workspace.test.mjs` 保留初始化与导航合同，浏览器 `creation-context`、`end-to-end-context` 验证实际装配 |
+| 交接/提醒读取与五模式逆向资格 | `creation-entry.test.mjs` 验证阶段、失败、revision 与 dispose；`workspace-prompt-action.test.mjs`、`reverse-cancel.test.mjs` 验证逆向资格、提交与取消锁；`quick-workspace.test.mjs` 经 `createSurfaceSync` 与交接 module 验证初始化与导航合同，浏览器 `creation-context`、`end-to-end-context` 验证实际装配 |
+| 服务健康、渠道设置、项目输入与可见性 | `service-health.test.mjs`、`image-settings-sync.test.mjs`、`project-selection.test.mjs`、`project-visibility-ui.test.mjs`；提示词导出图序见 `prompt-export.test.mjs` |
 | 两端生图行为 | `generation-session.test.mjs`，工作台 `generation-actions.browser.js`，快捷界面提交/取消 |
 | 执行、取消、保存失败与重启 | `task-runtime.test.mjs`、`task-records.test.mjs`，现有 server/storage 集成测试 |
 | 批次预检、受理、同键恢复与响应丢失 | `batch-admission.test.mjs`、`batches.test.mjs` 的真实 HTTP 与临时磁盘集成测试 |
 | CAS、空输入、旧记录 | `project-inputs.test.mjs` 与项目恢复测试 |
 | 发送方及慢请求 | `operation-policy.test.mjs` 与构建后的 `extension.test.mjs` |
+| 逆向 Agent 登记、选择与旧快照 | `agents.test.mjs` 的注册表 interface；`extension.test.mjs` 验证扩展只校验 ID 格式 |
+| 网页浮层与按需面板 | `content-collection.test.mjs`（按需加载、失败提示）；`extension.test.mjs`（bundle 拆分、仅顶层 frame 注入） |
 | 示例与生产一致性 | `preview-contract.test.mjs`：运行实际 preview 脚本并与生产检索契约对照 |
 
-测试优先通过真实 interface 注入 request、execute 或文件系统故障，验证可观察行为。已有部分 App 导航编排仍通过 AST 提取测试；随对应职责迁移逐步替换，不为测试重新暴露私有闭包。预览也不泛化成适配器框架；出现第二个真实实现和实际分歧后再深化 seam。
+测试优先通过真实 interface 注入 request、execute 或文件系统故障，验证可观察行为。App 的同步与编排规则已移入上述 module，测试直接导入；只读取 App 源码检查组件回调接线（`callbackProps`），不再提取闭包执行。新增规则放进对应 module，不为测试重新暴露 App 私有闭包。预览也不泛化成适配器框架；出现第二个真实实现和实际分歧后再深化 seam。
 
 输入保存浏览器回归：启动 preview 后访问 `/workspace.html?state=alignment&mode=recreate&inputSaveDelay=1800&creationContextRegression=mode`；末项可改 `version`、`project` 或 `failure`（失败场景另加 `&swap=failed`）。使用真实画布上传及外部提醒导航，顶部应显示 PASS。保存期间普通导航控件禁用，测试不绕过 disabled。主操作回归入口为 `/workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200`。
 

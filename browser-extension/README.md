@@ -262,6 +262,8 @@ Codex 渠道只接受 App Server 的 `imageGeneration` 完成事件，不把聊�
 
 新增 `notifications` 权限用于桌面提醒，`offscreen` 仅在用户开启声音或试听时播放短提示音，`alarms` 用于后台恢复同步。提醒状态、已读记录和声音偏好保存在扩展本地存储；桌面通知不包含图片、提示词、项目名称或文件路径。系统通知被关闭时，界面与未读标记仍可用。浏览器需保持运行且本机服务可连接；休眠、断线或后台恢复时可能延迟，恢复后先核对最新状态再合并派发；无法连接时保留待提醒记录，不直接发送缓存通知。
 
+`scripting` 权限仅用于在用户打开网页逆向面板时，把面板脚本注入当前标签页顶层页面的扩展隔离环境；普通浏览只加载轻量选图浮层。
+
 更新后需在任务结束时重启本机服务并重新加载扩展，使后台任务接口与新增权限生效。真实桌面通知和声音仍需分别在 Chrome / Codex 内置浏览器验收；界面预览不播放声音。
 
 ## 本机 Codex 与技能
@@ -348,7 +350,7 @@ npm run preview   # 弹窗视觉预览，不调用 Codex
 
 `/content-preview` 用于网页内浮层验收，`?state=invalidated` 可模拟扩展失效提示；同样只使用示例数据。
 
-`/workspace.html?demo=task` 是 localhost 专用的任务编排模拟页：1.2 秒模拟导出，支持取消与重播，不读取会话或创建文件。会话状态可在 `/workspace.html?state=session&sessions=many&sessionIndex=partial` 检查；`sessionIndex=error` 为明确注入的索引失败示例，不代表本机服务实际报错。
+会话状态可在 `/workspace.html?state=session&sessions=many&sessionIndex=partial` 检查；`sessionIndex=error` 为明确注入的索引失败示例，不代表本机服务实际报错。
 
 画廊正式组件预览：`/workspace.html?state=works`，点击左侧「作品画廊」。加 `&count=1200` 验证分页与窗口化，`&count=0` 查看空态，`&galleryFail=once` 验证读取失败重试，`&galleryImageFail=1` 模拟原图读取失败，`&galleryDelay=1000` 检查筛选请求交错。仅使用公开示例与合成素材，不读写真实项目或调用模型；重复素材的压力测试不代表真实图库内存基准。
 

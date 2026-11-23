@@ -205,52 +205,51 @@
 
 | 变量 | 值 | 选择器 | 来源行 |
 | --- | --- | --- | --- |
-| --input-image-height | clamp(120px,30cqi,180px) | .workspace-inputs,.composition-layout | [browser-extension/entrypoints/popup/image-input.css](../../../browser-extension/entrypoints/popup/image-input.css):2 |
-| --paper | #faf9f6 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):14 |
-| --surface | #fffefa | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):15 |
-| --surface-muted | #f0ede6 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):16 |
-| --ink | #26241f | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):17 |
-| --muted | #746f65 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):18 |
-| --line | #e5e1d8 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):19 |
-| --yellow | #ffd440 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):20 |
-| --pink | #fe7da8 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):21 |
-| --cyan | #27ccf3 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):22 |
-| --shadow-floating | 0 16px 48px rgb(40 34 24 / .12), 0 2px 8px rgb(40 34 24 / .04) | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):23 |
-| --ease-out | cubic-bezier(.23, 1, .32, 1) | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):24 |
-| --font | "Space Grotesk", "Trebuchet MS", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):25 |
-| --select-inset | 12px | .select-control | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):143 |
+| --paper | #faf9f6 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):13 |
+| --surface | #fffefa | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):14 |
+| --surface-muted | #f0ede6 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):15 |
+| --ink | #26241f | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):16 |
+| --muted | #746f65 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):17 |
+| --line | #e5e1d8 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):18 |
+| --yellow | #ffd440 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):19 |
+| --pink | #fe7da8 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):20 |
+| --cyan | #27ccf3 | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):21 |
+| --shadow-floating | 0 16px 48px rgb(40 34 24 / .12), 0 2px 8px rgb(40 34 24 / .04) | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):22 |
+| --ease-out | cubic-bezier(.23, 1, .32, 1) | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):23 |
+| --font | "Space Grotesk", "Trebuchet MS", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):24 |
+| --select-inset | 12px | .select-control | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):103 |
 | --prompt-editor-height | max(240px,min(56dvh,calc(100dvh - 420px),600px)) | .workspace-app | [browser-extension/entrypoints/workspace/canvas-workspace.css](../../../browser-extension/entrypoints/workspace/canvas-workspace.css):112 |
-| --result-drawer-width | 50cqw | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |
-| --canvas-label-height | 26px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |
-| --canvas-strip-height | 56px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |
-| --canvas-controls-height | min(270px,38dvh) | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |
-| --canvas-gap | 8px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |
-| --canvas-half-gap | 12px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |
-| --drawer-duration | 380ms | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |
-| --drawer-ease | cubic-bezier(.32,.72,0,1) | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):15 |
-| --canvas-rows | var(--canvas-label-height) minmax(0,1fr) var(--canvas-strip-height) var(--canvas-controls-height) | .workspace-body | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):16 |
-| --canvas-controls-height | calc(var(--prompt-editor-height) + 38px) | .workspace-body:has(.workspace-editor:not([inert]) .canvas-workspace[data-prompt-open="true"]) | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):18 |
-| --drawer-duration | 0ms | .workspace-app[data-motion="reduce"],.workspace-app[data-motion-input="keyboard"] | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):52 |
-| --canvas-half-gap | 9px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):55 |
-| --result-drawer-width | 100cqw | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):59 |
-| --canvas-label-height | 24px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):59 |
-| --canvas-strip-height | 52px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):59 |
-| --canvas-controls-height | 190px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):59 |
-| --canvas-half-gap | 0px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):59 |
-| --canvas-strip-height | 46px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):69 |
-| --canvas-controls-height | 150px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):69 |
-| --canvas-gap | 6px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):69 |
+| --result-drawer-width | 50cqw | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):13 |
+| --canvas-label-height | 26px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):13 |
+| --canvas-strip-height | 56px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):13 |
+| --canvas-controls-height | min(270px,38dvh) | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):13 |
+| --canvas-gap | 8px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):13 |
+| --canvas-half-gap | 12px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):13 |
+| --drawer-duration | 380ms | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):13 |
+| --drawer-ease | cubic-bezier(.32,.72,0,1) | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):13 |
+| --canvas-rows | var(--canvas-label-height) minmax(0,1fr) var(--canvas-strip-height) var(--canvas-controls-height) | .workspace-body | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):14 |
+| --canvas-controls-height | calc(var(--prompt-editor-height) + 38px) | .workspace-body:has(.workspace-editor:not([inert]) .canvas-workspace[data-prompt-open="true"]) | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):16 |
+| --drawer-duration | 0ms | .workspace-app[data-motion="reduce"],.workspace-app[data-motion-input="keyboard"] | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):50 |
+| --canvas-half-gap | 9px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):53 |
+| --result-drawer-width | 100cqw | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):57 |
+| --canvas-label-height | 24px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):57 |
+| --canvas-strip-height | 52px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):57 |
+| --canvas-controls-height | 190px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):57 |
+| --canvas-half-gap | 0px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):57 |
+| --canvas-strip-height | 46px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):67 |
+| --canvas-controls-height | 150px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):67 |
+| --canvas-gap | 6px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):67 |
 | --task-accent | #8b731b | .task-orchestration | [browser-extension/entrypoints/workspace/task-orchestration.css](../../../browser-extension/entrypoints/workspace/task-orchestration.css):1 |
 | --task-accent | #5b7140 | .task-orchestration[data-state=success] | [browser-extension/entrypoints/workspace/task-orchestration.css](../../../browser-extension/entrypoints/workspace/task-orchestration.css):4 |
 | --workspace-footer-height | 96px | .workspace-app | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):3 |
 | --sidebar-inset | 12px | .workspace-app | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):3 |
 | --sidebar-width | 204px | .workspace-app | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):3 |
-| --sidebar-inset | 9px | .workspace-app | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):89 |
-| --sidebar-width | 170px | .workspace-app | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):89 |
-| --sidebar-width | 64px | .workspace-app[data-sidebar-collapsed="true"] | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):99 |
-| --sidebar-inset | 7px | .workspace-app[data-sidebar-collapsed="true"] | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):99 |
-| --sidebar-width | 54px | .workspace-app[data-sidebar-collapsed="true"] | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):114 |
-| --sidebar-inset | 4px | .workspace-app[data-sidebar-collapsed="true"] | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):114 |
+| --sidebar-inset | 9px | .workspace-app | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):73 |
+| --sidebar-width | 170px | .workspace-app | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):73 |
+| --sidebar-width | 64px | .workspace-app[data-sidebar-collapsed="true"] | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):83 |
+| --sidebar-inset | 7px | .workspace-app[data-sidebar-collapsed="true"] | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):83 |
+| --sidebar-width | 54px | .workspace-app[data-sidebar-collapsed="true"] | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):98 |
+| --sidebar-inset | 4px | .workspace-app[data-sidebar-collapsed="true"] | [browser-extension/entrypoints/workspace/workspace.css](../../../browser-extension/entrypoints/workspace/workspace.css):98 |
 
 ## 覆盖边界
 
