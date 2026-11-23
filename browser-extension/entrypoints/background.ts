@@ -1,11 +1,15 @@
 import { openWorkspace } from "../lib/workspace-navigation";
 import { startReminderService } from "../lib/reminder-background";
 import { browser } from "wxt/browser";
-import { bridge as fetchBridge, BridgeError, BridgeTransportError } from "../lib/bridge";
+import { createServiceConnection } from "../lib/service-connection";
+import { createDraftStore } from "../lib/session-drafts";
+import { handoffContext, modes, validateDraft, validSubjects } from "../lib/message-validation";
 import { operationFor, allowsOperation, messageSource, PORT_KEEP_ALIVE } from "../lib/operation-policy";
+import { pagePanelFile } from "../lib/page-panel";
 import { captureImage } from "../lib/capture";
 import { validImageSizeRequest } from "../lib/image-size.mjs";
 import { validGenerationRatio } from "../lib/generation-session";
+import { agentQuery, isAgentId } from "../lib/agents";
 import type {
   ImageTarget,
   AspectRatio,
@@ -20,140 +24,12 @@ import type {
   Selection,
 } from "../lib/types";
 
-const modes = ["style", "recreate", "reenact", "multi-reenact", "session"];
-const subjectRoles = ["自动", "人物", "物品", "服饰", "场景", "细节"];
-const validSubjectImage = (image: unknown) => {
-  if (typeof image !== "string" || image.length > 3 * 1024 * 1024 || !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image)) return false;
-  const data = image.slice(image.indexOf(",") + 1);
-  return data.length % 4 === 0 && data.length / 4 * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0) <= 2 * 1024 * 1024;
-};
-const validSubjects = (subjects: unknown, minimum = 2): subjects is MultiSubject[] => Array.isArray(subjects)
-  && subjects.length >= minimum && subjects.length <= 6
-  && subjects.every(subject => subject && typeof subject === "object" && !Array.isArray(subject)
-    && typeof subject.id === "string" && /^[\w-]{1,100}$/.test(subject.id)
-    && (validSubjectImage(subject.subjectImage) || minimum === 0 && subject.subjectImage === "") && subjectRoles.includes(subject.role)
-    && typeof subject.detail === "string" && subject.detail.length <= 2000)
-  && new Set(subjects.map(subject => subject.id)).size === subjects.length;
-
 export default defineBackground(() => {
-  // Only credentials live in storage; concurrent callers share an in-flight handshake.
-  let connecting: Promise<string> | undefined;
-  let preferencesWrite = Promise.resolve();
-  const savePreferences = (patch: Partial<Preferences>) => {
-    const previous = preferencesWrite;
-    const save = (async () => {
-      await previous;
-      const { preferences } = await browser.storage.local.get("preferences") as { preferences?: Preferences };
-      await browser.storage.local.set({ preferences: { mode: "style", ...preferences, ...patch } });
-    })();
-    preferencesWrite = save.catch(() => {});
-    return save;
-  };
-  const connectionToken = async (rejectedToken?: string): Promise<string> => {
-    if (connecting) return connecting;
-    const { preferences } = await browser.storage.local.get("preferences") as { preferences?: Preferences };
-    if (preferences?.token && preferences.token !== rejectedToken) return preferences.token;
-    if (connecting) return connecting;
-    connecting = (async () => {
-      const { token } = await fetchBridge<{ token: string }>("/connection", "", {});
-      if (typeof token !== "string" || !token || token.length > 1024) throw new Error("本机服务未提供有效连接凭据，请更新本机服务。");
-      await savePreferences({ token });
-      return token;
-    })();
-    try { return await connecting; }
-    finally { connecting = undefined; }
-  };
-  const bridge = async <T,>(path: string, token: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
-    signal?.throwIfAborted();
-    const credential = token || await connectionToken();
-    signal?.throwIfAborted();
-    try { return await fetchBridge<T>(path, credential, body, signal); }
-    catch (error) {
-      if (!(error instanceof BridgeError) || error.status !== 401) throw error;
-      signal?.throwIfAborted();
-      // Authentication failures must never become permission to start a process.
-      try {
-        const renewed = await connectionToken(credential);
-        signal?.throwIfAborted();
-        // A 401 proves rejection before execution; network failures never replay writes.
-        return await fetchBridge<T>(path, renewed, body, signal);
-      } catch (cause) {
-        if (cause instanceof BridgeTransportError) throw new Error(cause.message, { cause });
-        throw cause;
-      }
-    }
-  };
+  const connection = createServiceConnection();
+  const bridge = connection.request;
+  const savePreferences = connection.savePreferences;
   const reminders = startReminderService(bridge);
-  const launcherHelp = "请检查本机启动器，运行 npm run launcher:install -- codex；不支持的浏览器请手动运行 npm start。";
-  const ensureStarted = (signal: AbortSignal) => new Promise<void>((resolve, reject) => {
-    let port: ReturnType<typeof browser.runtime.connectNative> | undefined;
-    let finished = false;
-    const finish = (error?: Error) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      signal.removeEventListener("abort", abort);
-      if (port) {
-        port.onMessage.removeListener(message);
-        port.onDisconnect.removeListener(disconnected);
-        try { port.disconnect(); } catch { /* The browser may already have destroyed the port. */ }
-      }
-      if (error) reject(error); else resolve();
-    };
-    const fail = (cause: string) => finish(new Error(`本机自动启动失败：${cause} ${launcherHelp}`));
-    const abort = () => finish(signal.reason);
-    const message = (value: unknown) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return fail("启动器返回无效响应。");
-      const response = value as Record<string, unknown>;
-      if (response.ok === true && Object.keys(response).length === 1) return finish();
-      if (response.ok === false && Object.keys(response).length === 2 && typeof response.error === "string" && response.error.length <= 2000)
-        return fail(response.error);
-      fail("启动器返回无效响应。");
-    };
-    const disconnected = () => fail(browser.runtime.lastError?.message || "启动器连接已断开。");
-    const timer = setTimeout(() => fail("启动器未按时响应，已超时。"), 10_000);
-    signal.addEventListener("abort", abort, { once: true });
-    try {
-      signal.throwIfAborted();
-      if (typeof browser.runtime.connectNative !== "function") return fail("此浏览器不支持本机启动器。");
-      port = browser.runtime.connectNative("com.qc.reframe");
-      port.onMessage.addListener(message);
-      port.onDisconnect.addListener(disconnected);
-      port.postMessage({ action: "ensure-start" });
-    } catch (error) { fail(error instanceof Error ? error.message : "无法连接启动器。"); }
-  });
-  // Only opening a UI may wake the service. Share the entire bounded operation,
-  // including HTTP recovery, so concurrent windows cannot launch a second host.
-  let opening: Promise<unknown> | undefined;
-  const openingHealth = () => {
-    if (opening) return opening;
-    const controller = new AbortController();
-    const { signal } = controller;
-    const timer = setTimeout(() => controller.abort(new Error(`本机自动连接超时。${launcherHelp}`)), 28_000);
-    let onAbort: () => void;
-    const cancelled = new Promise<never>((_, reject) => {
-      onAbort = () => reject(signal.reason);
-      signal.addEventListener("abort", onAbort, { once: true });
-    });
-    const read = async () => {
-      const { preferences } = await browser.storage.local.get("preferences") as { preferences?: Preferences };
-      const path = `/health${await showsHiddenProjects() ? "?includeHidden=true" : ""}`;
-      signal.throwIfAborted();
-      try { return await bridge(path, preferences?.token || "", undefined, signal); }
-      catch (error) {
-        if (!(error instanceof BridgeTransportError)) throw error;
-        signal.throwIfAborted();
-        await ensureStarted(signal);
-        return bridge(path, preferences?.token || "", undefined, signal);
-      }
-    };
-    opening = Promise.race([read(), cancelled]).finally(() => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-      opening = undefined;
-    });
-    return opening;
-  };
+  const openingHealth = () => connection.open(async () => `/health${await showsHiddenProjects() ? "?includeHidden=true" : ""}`);
   void browser.storage.local.setAccessLevel({
     accessLevel: "TRUSTED_CONTEXTS",
   });
@@ -298,67 +174,16 @@ export default defineBackground(() => {
       selecting = false;
     }
   };
-  const validateDraft = (draft: any) => {
-    if (draft !== undefined && (typeof draft !== "object" || draft === null || Array.isArray(draft) || new TextEncoder().encode(JSON.stringify(draft)).length > 8 * 1024 * 1024))
-      throw new Error("草稿过大，请在工作台保存后重试");
-    if (draft?.multiSubjectDrafts !== undefined && (!draft.multiSubjectDrafts || typeof draft.multiSubjectDrafts !== "object" || Array.isArray(draft.multiSubjectDrafts)
-      || Object.values(draft.multiSubjectDrafts).some(subjects => !validSubjects(subjects, 0))))
-      throw new Error("多图草稿无效，请重新选择主体图");
-  };
-  const handoffContext = (context: any) => {
-    if (!context || !modes.includes(context.mode)) throw new Error("无效工作台模式");
-    const value = context.selection;
-    if (value !== null && (!value || typeof value.id !== "string" || value.id.length > 100 || (value.projectId !== undefined && !/^[\da-f]{64}$/.test(value.projectId))
-      || (value.inputRevision !== undefined && (!Number.isSafeInteger(value.inputRevision) || value.inputRevision < 0))))
-      throw new Error("无效工作台项目");
-    return { mode: context.mode, selection: value ? { id: value.id, projectId: value.projectId, sourceUrl: typeof value.sourceUrl === "string" ? value.sourceUrl : "", capture: value.capture, inputRevision: value.inputRevision } : null };
-  };
-  // Serialize session writes so rapid input and simultaneous panels cannot reorder drafts.
-  let sessionWrite: Promise<unknown> = Promise.resolve();
-  const sessionTask = <T,>(action: () => Promise<T>) => {
-    const task = sessionWrite.catch(() => {}).then(action);
-    sessionWrite = task;
-    return task;
-  };
-  const storeDraft = (key: string, value: Record<string, any>, transferFrom?: string) => {
-    return sessionTask(async () => {
-      const all = await browser.storage.session.get(null);
-      for (const [storedKey, item] of Object.entries(all)) {
-        if (!storedKey.startsWith("quick:") && !storedKey.startsWith("workspace:")) continue;
-        const createdAt = (item as { createdAt?: number })?.createdAt;
-        if (!createdAt || Date.now() - createdAt > 24 * 60 * 60 * 1000) {
-          await browser.storage.session.remove(storedKey); delete all[storedKey];
-        }
-      }
-      const original = transferFrom ? all[transferFrom] as Record<string, any> | undefined : undefined;
-      const shared = original?.handoff ? all[original.handoff] as Record<string, any> | undefined : original;
-      if (shared?.draft && value.draft) {
-        const draft = { ...shared.draft, ...value.draft };
-        for (const name of ["multiSubjectDrafts", "subjectDrafts", "instructions", "versions", "promptDrafts"])
-          draft[name] = { ...shared.draft[name], ...value.draft[name] };
-        value.draft = draft;
-      }
-      const changes = { [key]: value, ...(transferFrom ? { [transferFrom]: { createdAt: value.createdAt, handoff: key } } : {}) };
-      if (transferFrom) value.source = transferFrom;
-      if (new TextEncoder().encode(JSON.stringify({ ...all, ...changes })).length > 9 * 1024 * 1024)
-        throw new Error("临时草稿空间不足，请先在已打开的工作台保存草稿");
-      await browser.storage.session.set(changes);
-    });
-  };
-  const consumeHandoff = (key: string) => {
-    return sessionTask(async () => {
-      const value = (await browser.storage.session.get(key))[key] as Record<string, any> | undefined;
-      if (value?.source) {
-        const quick = (await browser.storage.session.get(value.source))[value.source] as { handoff?: string } | undefined;
-        // Transfer ownership without ever storing two copies of the image payload.
-        if (quick?.handoff === key) await browser.storage.session.set({ [key]: null, [value.source]: { ...value, source: undefined } });
-      }
-      await browser.storage.session.remove(key);
-      return value && Date.now() - value.createdAt <= 24 * 60 * 60 * 1000 ? value : undefined;
-    });
-  };
+  const drafts = createDraftStore();
   const uiMessage = async (message: Record<string, any>, source = "popup", sourceTab?: number, signal?: AbortSignal) => {
     if (message.type === "alchemy:connect" || message.type === "alchemy:query" && message.path === "/health") return openingHealth();
+    if (message.type === "alchemy:panel-load") {
+      // Inject only into the requesting top frame's isolated world, never into the page world.
+      if (sourceTab == null) throw new Error("无效请求");
+      try { await browser.scripting.executeScript({ target: { tabId: sourceTab, frameIds: [0] }, files: [pagePanelFile] }); }
+      catch { throw new Error("逆向面板未能加载，请刷新网页后重试"); }
+      return;
+    }
     // Expose only this public preference; content scripts cannot read local storage.
     if (message.type === "alchemy:get-motion-preference") {
       const { motionPreference } = await browser.storage.local.get("motionPreference");
@@ -393,29 +218,23 @@ export default defineBackground(() => {
         const viewKey = selection?.projectId ? `projectView:${selection.projectId}` : undefined;
         const savedView = !message.context && viewKey ? (await browser.storage.local.get(viewKey) as Record<string, { mode?: Mode }>)[viewKey] : undefined;
         const context = handoffContext(message.context ?? { mode: viewKey ? savedView?.mode || "style" : preferences?.mode || "style", selection: selection || null });
-        await storeDraft(`workspace:${id}`, { ...context, draft, createdAt: Date.now() }, message.draft ? `quick:${source}` : undefined);
+        await drafts.store(`workspace:${id}`, { ...context, draft, createdAt: Date.now() }, message.draft ? `quick:${source}` : undefined);
         try { await openWorkspace(new URLSearchParams({ handoff: id, ...(message.view ? { view: message.view } : {}), ...(message.section ? { section: message.section } : {}) }), sourceTab); }
-        catch (error) { await consumeHandoff(`workspace:${id}`); throw error; }
+        catch (error) { await drafts.consume(`workspace:${id}`); throw error; }
         return;
       }
       case "alchemy:workspace-handoff": {
         if (typeof message.id !== "string" || !/^[\da-f-]{36}$/.test(message.id)) throw new Error("无效工作台入口");
-        return consumeHandoff(`workspace:${message.id}`);
+        return drafts.consume(`workspace:${message.id}`);
       }
       case "alchemy:quick-draft": {
         const key = `quick:${source}`;
         if (message.context !== undefined) {
           validateDraft(message.draft);
-          await storeDraft(key, { ...handoffContext(message.context), draft: message.draft, createdAt: Date.now() });
+          await drafts.store(key, { ...handoffContext(message.context), draft: message.draft, createdAt: Date.now() });
           return;
         }
-        return sessionTask(async () => {
-          let value = (await browser.storage.session.get(key))[key] as Record<string, any> | undefined;
-          if (value?.handoff) value = (await browser.storage.session.get(value.handoff))[value.handoff] as Record<string, any> | undefined;
-          if (value && Date.now() - value.createdAt <= 24 * 60 * 60 * 1000) return value;
-          await browser.storage.session.remove(key);
-          return;
-        });
+        return drafts.readQuick(key);
       }
       case "alchemy:upload-reference": {
         if (selecting) throw new Error("正在处理图片，请稍候");
@@ -483,9 +302,9 @@ export default defineBackground(() => {
       case "alchemy:cli-check":
       case "alchemy:cli-update":
       case "alchemy:cli-install": {
-        if (message.agent !== undefined && !["codex", "pi"].includes(message.agent)) throw new Error("无效 Agent");
+        if (message.agent !== undefined && !isAgentId(message.agent)) throw new Error("无效 Agent");
         const action = message.type.slice("alchemy:cli-".length);
-        return bridge(`/cli/${action}${message.agent === "pi" ? "?agent=pi" : ""}`, token, {});
+        return bridge(`/cli/${action}${agentQuery(message.agent)}`, token, {});
       }
       case "alchemy:state": {
         let visibleSelection = selection;
@@ -527,7 +346,7 @@ export default defineBackground(() => {
         await savePreferences({ mode: message.mode });
         return;
       case "alchemy:query":
-        if (typeof message.path !== "string" || !/^\/(health|agents|models(?:\?agent=(?:pi|codex))?|cli\/status(?:\?agent=(?:pi|codex))?|jobs(?:\/[\w-]+)?|projects(?:\/[\da-f]{64})?)$/.test(message.path))
+        if (typeof message.path !== "string" || !/^\/(health|agents|models(?:\?agent=[a-z][a-z0-9-]{0,31})?|cli\/status(?:\?agent=[a-z][a-z0-9-]{0,31})?|jobs(?:\/[\w-]+)?|projects(?:\/[\da-f]{64})?)$/.test(message.path))
           throw new Error("无效请求");
         return bridge(`${message.path}${showHiddenProjects && ["/projects", "/jobs", "/health"].includes(message.path) ? "?includeHidden=true" : ""}`, token);
       case "alchemy:gallery": {
@@ -566,16 +385,16 @@ export default defineBackground(() => {
         if (!message.settings || typeof message.settings !== "object" || Array.isArray(message.settings)) throw new Error("无效生图设置");
         return bridge("/image-settings", token, message.settings);
       case "alchemy:agent-select":
-        if (!["codex", "pi"].includes(message.agent)) throw new Error("请选择支持的 Agent");
+        if (!isAgentId(message.agent)) throw new Error("请选择支持的 Agent");
         return bridge("/agents/select", token, { agent: message.agent });
       case "alchemy:models-refresh":
-        if (message.agent !== undefined && !["codex", "pi"].includes(message.agent)) throw new Error("请选择支持的 Agent");
-        return bridge(`/models/refresh${message.agent === "pi" ? "?agent=pi" : ""}`, token, {});
+        if (message.agent !== undefined && !isAgentId(message.agent)) throw new Error("请选择支持的 Agent");
+        return bridge(`/models/refresh${agentQuery(message.agent)}`, token, {});
       case "alchemy:model-verify":
-        if (message.agent !== undefined && !["codex", "pi"].includes(message.agent)) throw new Error("请选择支持的 Agent");
+        if (message.agent !== undefined && !isAgentId(message.agent)) throw new Error("请选择支持的 Agent");
         if (typeof message.model !== "string" || !message.model || message.model.length > 200) throw new Error("请选择有效模型");
         if (message.reasoningEffort !== undefined && (typeof message.reasoningEffort !== "string" || !message.reasoningEffort || message.reasoningEffort.length > 50)) throw new Error("请选择有效推理强度");
-        return bridge(`/models/verify${message.agent === "pi" ? "?agent=pi" : ""}`, token, { model: message.model, reasoningEffort: message.reasoningEffort });
+        return bridge(`/models/verify${agentQuery(message.agent)}`, token, { model: message.model, reasoningEffort: message.reasoningEffort });
       case "alchemy:cancel":
         if (typeof message.id !== "string" || !/^[\w-]+$/.test(message.id)) throw new Error("无效任务");
         return bridge(`/jobs/${message.id}/cancel`, token, {});

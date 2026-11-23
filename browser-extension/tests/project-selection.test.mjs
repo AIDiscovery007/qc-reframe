@@ -1,26 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
-import ts from 'typescript';
 import { creationContext, emptyCreationState, resolveCreation, restoredQuickDraft } from '../lib/creation-context.ts';
-
-const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
-const tree = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const values = {};
-const visit = node => {
-  if (ts.isVariableDeclaration(node)) values[node.name.getText(tree)] = node.initializer?.getText(tree);
-  if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useEffect' && node.arguments[0]?.getText(tree).includes('type: "alchemy:reference"')) values.restoreJobReference = node.arguments[0].getText(tree);
-  if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useEffect' && node.arguments[0]?.getText(tree).includes('if (inputConflict)')) { values.hydrateInput = node.arguments[0].getText(tree); values.hydrateInputDependencies = node.arguments[1].getText(tree); }
-  ts.forEachChild(node, visit);
-};
-visit(tree);
-const evaluate = (names, globals) => {
-  const exports = {};
-  runInNewContext(ts.transpileModule(`${names.map(name => `const ${name} = ${values[name]};`).join('\n')}\nObject.assign(exports, {${names}});`,
-    { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, { ...globals, exports });
-  return exports;
-};
+import { hydrateProjectInput, hydrationDependencies, inputConflict, openProject, restoreJobReference } from '../lib/project-inputs.ts';
 
 test('project, mode and version choices resolve through the public context interface', () => {
   let state = creationContext(emptyCreationState, { type: 'views', views: {
@@ -101,12 +82,10 @@ test('complete recreation loads its historical reference and ignores a late snap
   for (const cancel of [false, true]) {
     const requests = [], restored = [];
     let finish;
-    const ui = evaluate(['restoreJobReference'], {
-      job: { id: 'recreate-old', mode: 'recreate' }, references: {}, referenceErrors: {},
+    const cleanup = restoreJobReference({
       request: message => { requests.push(message); return new Promise(resolve => { finish = resolve; }); },
       setReferences: update => restored.push(update({})), setReferenceErrors: () => assert.fail('unexpected restoration failure'),
-    });
-    const cleanup = ui.restoreJobReference();
+    }, { id: 'recreate-old', mode: 'recreate' }, false);
     assert.equal(requests[0].type, 'alchemy:reference');
     assert.equal(requests[0].id, 'recreate-old');
     if (cancel) cleanup();
@@ -120,19 +99,20 @@ function hydrationFixture(overrides = {}) {
   const state = { selections: [], requests: [], versions: { 'A:style': 'v1', 'B:style': 'B-old' }, inputRevisions: {}, subjects: { 'A:style:v1': 'old draft', 'B:style:new': 'other draft' }, multi: {}, instructions: { 'A:style:v1': 'old instruction' } };
   const selectionRevision = { current: 0 };
   const next = { id: 'input-8', projectId: 'A', inputRevision: 8, inputVersions: { style: 'new' }, inputs: { style: { subjectImage: 'durable subject' } } };
-  const ui = evaluate(['inputConflict', 'hydrateInput'], {
-    activeProject: { id: 'A', inputRevision: 8 }, viewsReady: true, selection: { id: 'input-7', projectId: 'A', inputRevision: 7 }, inputRevisions: state.inputRevisions, selectionRevision,
-    request: async message => { state.requests.push(message); return next; },
+  const { request, ...viewOverrides } = overrides;
+  const view = { project: { id: 'A', inputRevision: 8 }, viewsReady: true, selection: { id: 'input-7', projectId: 'A', inputRevision: 7 },
+    inputRevisions: state.inputRevisions, reload: 0, ...viewOverrides };
+  const env = {
+    selectionRevision,
+    request: request || (async message => { state.requests.push(message); return next; }),
     setSelection: value => state.selections.push(value), setError: value => { state.error = value; },
-    setVersions: fn => { state.versions = fn(state.versions); }, setInputRevisions: fn => { state.inputRevisions = fn(state.inputRevisions); },
-    setSubjectDrafts: fn => { state.subjects = fn(state.subjects); }, setMultiSubjectDrafts: fn => { state.multi = fn(state.multi); }, setInstructions: fn => { state.instructions = fn(state.instructions); },
     dispatchCreation: action => {
       const next = creationContext({ ...emptyCreationState, ...state, subjectDrafts: state.subjects, multiSubjectDrafts: state.multi,
         inputRevisions: overrides.inputRevisions || state.inputRevisions }, action);
       Object.assign(state, next, { subjects: next.subjectDrafts, multi: next.multiSubjectDrafts });
     },
-    ...overrides,
-  });
+  };
+  const ui = { inputConflict: inputConflict(view.selection, view.project), hydrateInput: () => hydrateProjectInput(env, view) };
   return { ...ui, state, next, selectionRevision };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -189,8 +169,8 @@ for (const entry of ['project list', 'sidebar', 'sidebar during hydration']) tes
   const state = { selection: durable, inputReload: 0, versions: { 'A:style': 'v1' }, inputRevisions: { A: 8 }, historyOpen: entry === 'project list', requests: [] };
   const selectionRevision = { current: 0 };
   let finishPending;
-  const render = () => evaluate(['inputConflict', 'hydrateInput', 'hydrateInputDependencies', 'openProject'], {
-    ...state, activeProject: { id: 'A', inputRevision: 8 }, viewsReady: true, selectionRevision,
+  const env = {
+    selectionRevision,
     request: async message => {
       state.requests.push(message.type);
       if (entry === 'sidebar during hydration' && message.type === 'alchemy:project-reference' && !finishPending)
@@ -198,11 +178,13 @@ for (const entry of ['project list', 'sidebar', 'sidebar during hydration']) tes
       return durable;
     },
     setSelection: value => { state.selection = value; }, setInputReload: fn => { state.inputReload = fn(state.inputReload); },
-    setInputRevisions: fn => { state.inputRevisions = fn(state.inputRevisions); }, setVersions: fn => { state.versions = fn(state.versions); },
-    setSubjectDrafts: () => assert.fail('same revision must preserve historical drafts'), setMultiSubjectDrafts: () => assert.fail('same revision must preserve historical drafts'), setInstructions: () => assert.fail('same revision must preserve historical drafts'),
     dispatchCreation: action => Object.assign(state, creationContext({ ...emptyCreationState, ...state }, action)),
     setHistoryOpen: value => { state.historyOpen = value; }, setGalleryOpen() {}, setBusy() {}, setError: value => { assert.equal(value, ''); },
-  });
+  };
+  const render = () => {
+    const view = { project: { id: 'A', inputRevision: 8 }, selection: state.selection, viewsReady: true, inputRevisions: state.inputRevisions, reload: state.inputReload };
+    return { hydrateInput: () => hydrateProjectInput(env, view), hydrateInputDependencies: hydrationDependencies(view), openProject: item => openProject(env, item.id) };
+  };
   let previous = render();
   previous.hydrateInput();
   assert.equal(state.requests.length, 0, 'already hydrated input needs no request');

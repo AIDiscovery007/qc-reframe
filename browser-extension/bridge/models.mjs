@@ -2,7 +2,7 @@ import { readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { withCodex } from "./codex-rpc.mjs";
 import { readModelContext } from "./model-context.mjs";
-import { runCodex } from "./agent.mjs";
+import { runCodex } from "./codex-agent.mjs";
 
 const effortOptions = (item) => item.supportedReasoningEfforts?.length ? item.supportedReasoningEfforts
   : item.reasoningEffort ? [{ reasoningEffort: item.reasoningEffort }] : [];

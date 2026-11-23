@@ -7,9 +7,7 @@
 .workspace-app .loading-placeholder .loading-effect { opacity:.38; }
 .workspace-app .loading-placeholder .loading-label { position:relative;z-index:1;padding:6px 10px;border-radius:6px;background:var(--surface);color:var(--muted); }
 .workspace-app .loading-placeholder:not(:has(.loading-effect)) .loading-label { padding:0;background:none; }
-.workspace-app .empty-prompt.loading-placeholder { flex-direction:column;gap:8px; }
 .workspace-app .loading-action { position:relative;z-index:1; }
-.workspace-app .template-replace > .loading-placeholder { width:100%;height:100%; }
 
 /* Both columns share the same four tracks; the drawer only changes their widths. */
 .workspace-app { --result-drawer-width:50cqw;--canvas-label-height:26px;--canvas-strip-height:56px;--canvas-controls-height:min(270px,38dvh);--canvas-gap:8px;--canvas-half-gap:12px;--drawer-duration:380ms;--drawer-ease:cubic-bezier(.32,.72,0,1); }

@@ -646,6 +646,11 @@ const server = createServer(async (req, res) => {
             projects.unshift(project);touch(project);collected.set(message.target.src,id);
             return {ok:true,value:{projectId:id,created:true}};
           }
+          if(message.type==='alchemy:panel-load'){
+            // Mirrors the background: the panel bundle is injected only when the overlay opens it.
+            await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/page-panel.js';script.onload=resolve;script.onerror=()=>reject(new Error('逆向面板未能加载，请刷新网页后重试'));document.head.append(script);});
+            return {ok:true};
+          }
           if(message.type==='alchemy:select'){
             if(state==='invalidated')throw new Error('Extension context invalidated.');
             listeners.forEach(fn=>fn({type:'alchemy:show'},{},()=>{}));return {ok:true};

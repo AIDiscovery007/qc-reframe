@@ -10,8 +10,8 @@ import ImagePreview from "./ImagePreview";
 import LoadingPlaceholder from "./LoadingPlaceholder";
 import SelectField from "./SelectField";
 import Icon from "./Icon";
+import { modeLabels as modes } from "../../lib/mode-labels";
 
-const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
 
 export default function QuickWorkspace({ pixelSize = false, revealPrompt, targetGeneration, contextKey, selection, title, mode, subject, referenceIndex, onImageOrder, instruction, job, disabled, modeDisabled, reverseDisabled, continuous, submitting, status, stale, cancelling, copied, lang, versions, onMode, onSubject, onAvailability, onInstruction, onReference, onRotateReference, onSwap, onReverse, onGenerate, chainDisabled, onCancel, onCopy, onLanguage, onWorkspace, onUpdate, onGenerationViewUpdate, generationDisabled, generationHint }: {
   pixelSize?: boolean;

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as context from '../bridge/model-context.mjs';
 import { readGenerationSettings } from '../bridge/generation.mjs';
-import { runCodex } from '../bridge/agent.mjs';
+import { runCodex } from '../bridge/codex-agent.mjs';
 
 async function fixture(t, config = {}, pages = [{ data: [] }]) {
   const dir = await mkdtemp(join(tmpdir(), 'reframe-generation-context-'));

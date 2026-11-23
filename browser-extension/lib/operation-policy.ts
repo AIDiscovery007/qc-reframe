@@ -58,6 +58,7 @@ export const uiOperations: Readonly<Record<string, Operation>> = {
   "alchemy:sessions-index": session,
   "alchemy:select": { source: "content", transport: "message" },
   "alchemy:collect": { source: "content", transport: "message" },
+  "alchemy:panel-load": { source: "content", transport: "message" },
 };
 
 export function operationFor(type: unknown): Operation | undefined {

@@ -35,7 +35,6 @@
 .app .empty-canvas svg{width:40px;height:40px;margin-bottom:18px}
 .app .empty-canvas h3{color:var(--ink);font-size:18px;margin-bottom:10px}
 .app .empty-canvas p{font-size:11px;line-height:1.9;max-width:250px;margin:auto}
-.app .result-toolbar-actions { display: flex; align-items: center; }
 .app .result-thumb .thumbnail-loading { inset: 4px; border-radius: 3px; padding: 0; background-size: 14px 14px, 22px 22px; }
 
 .app .generated-pane { height: 100%; }
@@ -59,7 +58,6 @@
 .app .result-dialog .modal-head img { width: 25px; }
 .app .result-dialog .modal-head h2 { font-size: 18px; flex: 1; }
 .app .result-dialog .close-btn { border: 0; background: none; font-size: 21px; padding: 0 5px; }
-.app .result-dialog.zoom-modal { width: min(1050px, calc(100% - 56px)); height: calc(100dvh - 100px); }
 .app .result-dialog .generation-details { padding: 20px 24px; overflow: auto; flex: 1; }
 .app .result-dialog .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; font-size: 10px; border: 0; border-radius: 20px; background: var(--surface-muted); }
 .app .result-dialog .hint { font-size: 10px; line-height: 1.8; color: var(--muted); margin-top: 10px; }
@@ -68,7 +66,7 @@
 .app .result-dialog .negative { border-top: 0; padding: 10px 16px; }
 .app .result-dialog .negative p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; margin: 8px 0; line-height: 1.8; }
 @media (max-width:1100px) { .app .preview-canvas { margin: 0 14px; } .app :is(.result-toolbar,.result-caption,.result-history) { padding-left: 14px; padding-right: 14px; } .app .result-toolbar { flex-wrap: wrap; } .app .result-bottom { flex-wrap: wrap; } }
-@media (max-width:650px) { .app .generated-pane { flex: 1; } .app .result-bottom { padding: 10px; } .app .result-dialog, .app .result-dialog.zoom-modal { width: calc(100% - 24px); height: calc(100dvh - 70px); } .app .result-dialog .modal-head { padding: 16px; } }
+@media (max-width:650px) { .app .generated-pane { flex: 1; } .app .result-bottom { padding: 10px; } .app .result-dialog { width: calc(100% - 24px); height: calc(100dvh - 70px); } .app .result-dialog .modal-head { padding: 16px; } }
 
 
 /* Same result controls, flowing vertically inside the lightweight page panel. */

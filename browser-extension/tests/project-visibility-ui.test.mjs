@@ -9,23 +9,13 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-
-const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
-const tree = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ['setProjectsHidden', 'toggleHiddenProjects'];
-const declarations = new Map();
-function visit(node) {
-  if (ts.isVariableDeclaration(node) && names.includes(node.name.getText(tree))) declarations.set(node.name.getText(tree), node.initializer.getText(tree));
-  ts.forEachChild(node, visit);
-}
-visit(tree);
-const code = ts.transpileModule('exports.render = (selection, project, hiddenProjectIds, showHidden) => {\n' + names.map(name => `const ${name} = ${declarations.get(name)};`).join('\n') + '\nreturn {setProjectsHidden, toggleHiddenProjects}; };', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+import { projectVisibilityActions } from '../lib/project-visibility.ts';
 
 function fixture(overrides = {}) {
   const state = { notice: undefined, error: '', busy: false, refreshed: 0, focus: 0 };
-  const requests = [], exports = {};
+  const requests = [];
   const context = {
-    exports, hiddenProjectIds: ['hidden'], showHidden: false, selection: { projectId: 'visible' }, project: { id: 'visible' },
+    hiddenProjectIds: ['hidden'], showHidden: false, selection: { projectId: 'visible' }, project: { id: 'visible' },
     visibilityPending: { current: false }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, projectRevision: { current: 0 }, deletingProjects: { current: false },
     document: { activeElement: { isConnected: false, matches: selector => selector === ":focus-visible" } }, requestAnimationFrame: callback => callback(),
     visibilityFeedback: { current: { focus: () => state.focus++ } },
@@ -35,13 +25,13 @@ function fixture(overrides = {}) {
     setProject: update => context.project = typeof update === 'function' ? update(context.project) : update,
     setSelection: value => context.selection = value, setHistoryOpen: value => state.historyOpen = value,
     setPreferences: update => { context.showHidden = update({}).showHiddenProjects; },
-    library: { refresh: () => state.refreshed++ }, setRefreshNonce: () => {},
+    refresh: () => state.refreshed++,
     request: async message => { requests.push(message); return message.type === 'alchemy:show-hidden-projects' ? message.show : { updatedIds: message.ids }; },
     ...overrides,
   };
-  runInNewContext(code, context);
   // Capture each render's values, as React does, while refs remain shared across renders.
-  const handlers = Object.fromEntries(names.map(name => [name, (...args) => exports.render(context.selection, context.project, context.hiddenProjectIds, context.showHidden)[name](...args)]));
+  const render = () => projectVisibilityActions(context, context);
+  const handlers = { setProjectsHidden: (...args) => render().setProjectsHidden(...args), toggleHiddenProjects: (...args) => render().toggleHiddenProjects(...args) };
   return { ...handlers, context, state, requests };
 }
 

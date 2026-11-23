@@ -1,3 +1,4 @@
+import type { AgentId } from "./agents";
 export type SessionSummary = { id: string; title: string; updatedAt: number };
 export type SessionIndexIssue = { code: "content_limit" | "response_limit" | "page_limit" | "index_capacity" | "changed" | "timeout" | "read_failed"; count: number };
 export type SessionIndexStatus = { state: "empty" | "stale" | "building" | "partial" | "ready"; indexed: number; processed?: number; total: number; failed: number; issues?: SessionIndexIssue[]; updatedAt: number | null; error?: string };
@@ -49,7 +50,7 @@ export type Result = {
   uncertainties: string[];
 };
 export type Job = {
-  agent?: "codex" | "pi";
+  agent?: AgentId;
   provider?: string;
   autoGeneration?: { submittedImageSize?: ImageSize | null; sizeRule?: string; provider?: ImageProvider; language: "zh" | "en"; aspectRatio?: AspectRatio; imageSize?: ImageSize; status: "pending" | "started" | "failed" | "cancelled"; generationId?: string; error?: string };
   referenceIndex?: number;

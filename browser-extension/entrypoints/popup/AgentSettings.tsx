@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { query, request } from "../../lib/client";
 import ModelSettings from "./ModelSettings";
 import AgentCliSettings from "./AgentCliSettings";
-
-type AgentId = "codex" | "pi";
-type AgentCatalog = { selected: AgentId; agents: { id: AgentId; label: string; model: string | null }[] };
+import { agentLabel, LEGACY_AGENT, type AgentCatalog, type AgentId } from "../../lib/agents";
 
 export default function AgentSettings({ serviceBusy, recoveryAgent, loginCommand, onSelected }: {
   serviceBusy: boolean; recoveryAgent?: AgentId; loginCommand?: string; onSelected(): void;
@@ -19,7 +17,8 @@ export default function AgentSettings({ serviceBusy, recoveryAgent, loginCommand
   const [error, setError] = useState("");
   const mounted = useRef(false);
   const pending = useRef(false);
-  const agent = catalog?.selected || "codex";
+  const agent = catalog?.selected || LEGACY_AGENT;
+  const label = agentLabel(catalog, agent);
   useEffect(() => {
     mounted.current = true;
     let cancelled = false;
@@ -52,10 +51,10 @@ export default function AgentSettings({ serviceBusy, recoveryAgent, loginCommand
     </fieldset>}
     {(loading || serviceBusy || modelBusy || cliBusy) && <p className="fine agent-selection-status" role="status">{loading ? catalog ? "正在保存 Agent…" : "正在读取 Agent…" : "当前操作完成后可切换 Agent。"}</p>}
     {error && <div className="error" role="alert">{error}</div>}
-    {(catalog || legacy) && <ModelSettings key={`${agent}:${modelEpoch}`} agent={agent} serviceBusy={serviceBusy || loading || cliBusy} onBusyChange={setModelBusy} loginCommand={agent === "codex" ? loginCommand : undefined} />}
-    <div className="agent-management-target" ref={management} tabIndex={-1} role="group" aria-label={`${agent === "pi" ? "Pi" : "Codex"} CLI 管理`}>
-      {recoveryAgent && recoveryAgent !== agent && !loading && <p className="settings-info">要检查 {recoveryAgent === "pi" ? "Pi" : "Codex"} CLI，请先选择上方的 {recoveryAgent === "pi" ? "Pi" : "Codex"} 卡片。</p>}
-      <AgentCliSettings key={agent} agent={agent} serviceBusy={serviceBusy || loading || modelBusy} onBusyChange={setCliBusy} onUpdated={() => setModelEpoch(value => value + 1)} />
+    {(catalog || legacy) && <ModelSettings key={`${agent}:${modelEpoch}`} agent={agent} agentLabel={label} serviceBusy={serviceBusy || loading || cliBusy} onBusyChange={setModelBusy} loginCommand={agent === "codex" ? loginCommand : undefined} />}
+    <div className="agent-management-target" ref={management} tabIndex={-1} role="group" aria-label={`${label} CLI 管理`}>
+      {recoveryAgent && recoveryAgent !== agent && !loading && <p className="settings-info">要检查 {agentLabel(catalog, recoveryAgent)} CLI，请先选择上方的 {agentLabel(catalog, recoveryAgent)} 卡片。</p>}
+      <AgentCliSettings key={agent} agent={agent} label={label} serviceBusy={serviceBusy || loading || modelBusy} onBusyChange={setCliBusy} onUpdated={() => setModelEpoch(value => value + 1)} />
     </div>
   </div>;
 }

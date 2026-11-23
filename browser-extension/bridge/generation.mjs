@@ -2,7 +2,7 @@ import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, relative, isAbsolute } from "node:path";
 import { orderedImages } from "./image-order.mjs";
-import { runCodex } from "./agent.mjs";
+import { runCodex } from "./codex-agent.mjs";
 import { withCodex } from "./codex-rpc.mjs";
 import { readGenerationContext, generationContextError } from "./model-context.mjs";
 

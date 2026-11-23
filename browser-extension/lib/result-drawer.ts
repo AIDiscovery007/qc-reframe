@@ -2,14 +2,14 @@ import type { Generation } from "./types";
 
 type Drawer = { open: boolean; pending: boolean; error: string; seen: string };
 export type ResultDrawers = Record<string, Drawer>;
-type Action = { key: string } & (
+export type ResultDrawerAction = { key: string } & (
   | { type: "request" }
   | { type: "settled"; error?: string }
   | { type: "toggle"; open: boolean; seen: string }
 );
 
 // UI preferences are scoped to the selected project/path/version, never to a polling response.
-export function resultDrawers(state: ResultDrawers, action: Action): ResultDrawers {
+export function resultDrawers(state: ResultDrawers, action: ResultDrawerAction): ResultDrawers {
   const previous = state[action.key] || { open: true, pending: false, error: "", seen: "" };
   const next = action.type === "request" ? { ...previous, open: true, pending: true, error: "" }
     : action.type === "settled" ? { ...previous, pending: false, error: action.error || "" }

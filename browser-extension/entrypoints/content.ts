@@ -1,8 +1,6 @@
 import { browser } from "wxt/browser";
 import { getMotion, subscribeMotion } from "../lib/motion-preference";
-import { createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import App from "./popup/App";
+import { registeredPagePanel } from "../lib/page-panel";
 import panelCss from "./popup/style.css?inline";
 import shellCss from "./popup/shell.css?inline";
 import { request } from "../lib/client";
@@ -114,16 +112,34 @@ export default defineContentScript({
     let opening: Animation | undefined;
     let pointerOpening = false;
     let returnFocus: HTMLElement | undefined;
-    let root: Root | undefined;
+    let unmountPanel: (() => void) | undefined;
+    let panelLoading: Promise<void> | undefined;
+    // The React panel is injected on first use so ordinary pages only carry collection code.
+    const mountPanel = () => {
+      if (unmountPanel || panelLoading) return;
+      const body = shadow.querySelector(".panel-body")!;
+      const injected = registeredPagePanel();
+      if (injected) { unmountPanel = injected(body); return; }
+      panelLoading = request({ type: "alchemy:panel-load" }).then(() => {
+        panelLoading = undefined;
+        const mount = registeredPagePanel();
+        if (!mount) throw new Error("逆向面板未能加载，请刷新网页后重试");
+        if (!disposed && !panel.hidden && !unmountPanel) unmountPanel = mount(body);
+      }).catch(error => {
+        panelLoading = undefined;
+        if (disposed || panel.hidden) return;
+        closePanel();
+        retryTarget = undefined;
+        feedback("error", false, error instanceof Error ? error.message : String(error));
+        notice.querySelector("strong")!.textContent = "打开失败";
+      });
+    };
     const showPanel = () => {
       closeMenu();
       const wasHidden = panel.hidden;
-      if (!root) {
-        root = createRoot(shadow.querySelector(".panel-body")!);
-        root.render(createElement(App, { embedded: true }));
-      }
       hideNotice();
       panel.hidden = false;
+      mountPanel();
       position();
       if (wasHidden) {
         returnFocus ||= (shadow.activeElement || document.activeElement) as HTMLElement;
@@ -138,8 +154,8 @@ export default defineContentScript({
     const closePanel = () => {
       opening?.cancel();
       panel.hidden = true;
-      root?.unmount();
-      root = undefined;
+      unmountPanel?.();
+      unmountPanel = undefined;
       position();
       if (returnFocus?.isConnected && returnFocus.getClientRects().length) returnFocus.focus({ preventScroll: true });
       returnFocus = undefined;
@@ -498,7 +514,7 @@ export default defineContentScript({
       opening?.cancel();
       cancelAnimationFrame(positioningFrame);
       liquid?.dispose();
-      root?.unmount();
+      unmountPanel?.();
       host.remove();
       browser.runtime.onMessage.removeListener(geometry);
     });

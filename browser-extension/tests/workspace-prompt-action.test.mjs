@@ -1,36 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
-import ts from 'typescript';
 import { validImageSizeRequest } from '../lib/image-size.mjs';
-import { inheritedGenerationSize } from '../lib/generation-size.ts';
+import { chainTargetSize } from '../lib/generation-size.ts';
 import { validGenerationRatio } from '../lib/generation-session.ts';
 import { creationContext, emptyCreationState, resolveCreation } from '../lib/creation-context.ts';
-import { deriveReverseAction } from '../lib/reverse-action.ts';
+import { deriveReverseAction, reverseSubmission } from '../lib/reverse-action.ts';
 
-// Eligibility uses its public domain interface; the small App adapter still proves
-// that disabled actions do not call start and accepted actions forward the payload.
-const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
-const tree = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const declarations = new Map();
-let actionBinding = "reverseAction";
-function visit(node) {
-  if (ts.isVariableDeclaration(node) && node.initializer && ts.isCallExpression(node.initializer) && node.initializer.expression.getText(tree) === "deriveReverseAction") actionBinding = node.name.getText(tree);
-  if (ts.isVariableDeclaration(node) && ['inheritedSize', 'targetSize', 'reverse'].includes(node.name.getText(tree))) declarations.set(node.name.getText(tree), node.initializer.getText(tree));
-  ts.forEachChild(node, visit);
-}
-visit(tree);
-function evaluate(names, globals) {
-  const exports = {};
-  const script = names.map(name => `const ${name} = ${declarations.get(name)};`).join('\n') + `\nObject.assign(exports, {${names.join(',')}});`;
-  runInNewContext(ts.transpileModule(script, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, { exports, ...globals });
-  return exports;
-}
+// Eligibility, size inheritance and submission use the same modules the App composes.
 function fixture(mode, overrides = {}) {
   const calls = [];
   const values = {
-    workspace: true, magpie: false, chainSize: undefined, targetGeneration: undefined, validImageSizeRequest, inheritedGenerationSize, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, generationBlocked: false, promptDraft: undefined,
+    workspace: true, magpie: false, chainSize: undefined, targetGeneration: undefined, validImageSizeRequest, drawerKey: "project:mode:version", validGenerationRatio, preferences: { mode }, result: undefined, job: undefined, blocked: false, generationBlocked: false, promptDraft: undefined,
     selection: { image: 'reference' }, referenceError: undefined, displayImage: 'reference', subjectUnavailable: {}, subjectKey: mode => `project:${mode}`,
     taskInstruction: () => 'instruction', subjectImage: () => 'subject', selectedSessions: () => [{ id: 'session-A', title: 'Saved conversation', updatedAt: 1 }],
     multiSubjects: [{ id: 'one', subjectImage: 'one' }, { id: 'two', subjectImage: 'two' }], multiPrompt: 'instruction', multiStale: false,
@@ -40,11 +20,16 @@ function fixture(mode, overrides = {}) {
   };
   const context = { ...values.contextFor(mode), image: values.displayImage, subjectImage: values.subjectImage(mode), subjects: values.multiSubjects,
     instruction: mode === 'multi-reenact' ? values.multiPrompt : values.taskInstruction(mode), multiStale: values.multiStale, sessions: values.selectedSessions() };
-  const { targetSize } = evaluate(['inheritedSize', 'targetSize'], values);
+  const targetSize = chainTargetSize({ workspace: values.workspace, pixelSize: values.magpie, chainSize: values.chainSize,
+    drawerKey: values.drawerKey, job: values.job, targetGeneration: values.targetGeneration });
   const reverseAction = deriveReverseAction({ mode, context, hasSelection: !!values.selection, referenceError: values.referenceError,
     subjectUnavailable: !!values.subjectUnavailable[values.subjectKey(mode)], blocked: values.blocked, generationBlocked: values.generationBlocked,
     promptEditing: !!values.promptDraft, sizeValid: values.magpie ? validImageSizeRequest(targetSize) : validGenerationRatio(targetSize) });
-  return { ...reverseAction, ...evaluate(['reverse'], { ...values, [actionBinding]: reverseAction, ...reverseAction }), calls };
+  const reverse = (generate = false) => {
+    const submission = reverseSubmission(reverseAction, generate);
+    if (submission) values.start(values.preferences.mode, submission.reenact, submission.generate);
+  };
+  return { ...reverseAction, reverse, calls };
 }
 
 test('each path submits its intended reference roles through the shared action', () => {

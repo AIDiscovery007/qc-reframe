@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { createModelStore, readModelCatalog, verifyModel } from '../bridge/models.mjs';
-import { runCodex } from '../bridge/agent.mjs';
+import { runCodex } from '../bridge/codex-agent.mjs';
 import { createBridge } from '../bridge/server.mjs';
 import { modelError } from '../bridge/model-context.mjs';
 

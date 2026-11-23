@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { query, request } from "../../lib/client";
 import { cliLabel, compatibilityMessage, type CliStatus } from "../../lib/codex-status";
 import { pollWhileVisible } from "../../lib/visible-poll";
+import { agentQuery, type AgentId } from "../../lib/agents";
 
 const sources = { managed: "Reframe 管理", npm: "npm", homebrew: "Homebrew", standalone: "独立安装版", app: "App 内置", custom: "自定义安装", missing: "未检测到" };
 
-export default function AgentCliSettings({ agent, serviceBusy, onBusyChange, onUpdated }: {
-  agent: "codex" | "pi"; serviceBusy: boolean; onBusyChange(busy: boolean): void; onUpdated(): void;
+export default function AgentCliSettings({ agent, label, serviceBusy, onBusyChange, onUpdated }: {
+  agent: AgentId; label: string; serviceBusy: boolean; onBusyChange(busy: boolean): void; onUpdated(): void;
 }) {
   const [cli, setCli] = useState<CliStatus>();
   const [error, setError] = useState("");
@@ -17,7 +18,6 @@ export default function AgentCliSettings({ agent, serviceBusy, onBusyChange, onU
   const revision = useRef(0);
   const acting = useRef(false);
   const completed = useRef<string | undefined>(undefined);
-  const label = agent === "pi" ? "Pi" : "Codex";
   const updating = cli?.operation?.status === "running";
   const blocked = !!pending || updating || serviceBusy;
   const accept = (value: CliStatus) => {
@@ -31,7 +31,7 @@ export default function AgentCliSettings({ agent, serviceBusy, onBusyChange, onU
       if (acting.current) return 1000;
       const current = revision.current;
       try {
-        const value = await query<CliStatus>(agent === "pi" ? "/cli/status?agent=pi" : "/cli/status");
+        const value = await query<CliStatus>(`/cli/status${agentQuery(agent)}`);
         if (mounted.current && current === revision.current) { accept(value); setLoadError(""); }
       } catch (e) {
         if (mounted.current && current === revision.current) setLoadError((e as Error).message === "Not found" ? "请更新并重启本机服务，以启用 Agent 管理。" : (e as Error).message);

@@ -1,3 +1,4 @@
+import type { AgentId } from "./agents";
 export type RecoverySection = "cli" | "pi-cli" | "models" | "generation" | "connection";
 export type Compatibility = {
   checkedAt?: string | null;
@@ -5,7 +6,7 @@ export type Compatibility = {
   features: Record<string, { status: "supported" | "unsupported" | "unknown"; message?: string }>;
 };
 export type CliStatus = {
-  agent?: "codex" | "pi"; canInstall?: boolean;
+  agent?: AgentId; canInstall?: boolean;
   installed: boolean; version: string | null; latestVersion: string | null; executable?: string | null;
   source: "managed" | "npm" | "homebrew" | "standalone" | "app" | "custom" | "missing";
   canUpdate?: boolean; updateAvailable: boolean; checkedAt?: string | null; detectedAt?: string | null;

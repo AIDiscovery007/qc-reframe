@@ -1,10 +1,6 @@
 /* Motion cases: press feedback, modal, text replacement and async status.
    State changes are immediate; only pointer interactions add spatial feedback. */
-  .app[data-motion="full"][data-motion-input="pointer"] :is(button, .file-picker) {
-    transition: transform 120ms var(--ease-out);
-  }
-  .app[data-motion="full"][data-motion-input="pointer"] button:active:not(:disabled):not([aria-disabled="true"]),
-  .app[data-motion="full"][data-motion-input="pointer"] .file-picker:active:not(:has(input:disabled)) {
+  .app[data-motion="full"][data-motion-input="pointer"] button:active:not(:disabled):not([aria-disabled="true"]) {
     transform: scale(.97);
   }
   .app[data-motion="full"][data-motion-input="pointer"] :is(.primary, .new-project):active:not(:disabled) {
@@ -44,4 +40,4 @@
 .app .copy-path-button { min-width: 132px; }
 .copy-announcement { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .app[data-motion-input="keyboard"] button { transition: none; transform: none; }
-.app[data-motion="reduce"] button:active:not(:disabled), .app[data-motion="reduce"] .file-picker:active { transform: none; }
+.app[data-motion="reduce"] button:active:not(:disabled) { transform: none; }

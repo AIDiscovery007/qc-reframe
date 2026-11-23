@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-import { creationContext, emptyCreationState, restoredQuickDraft } from '../lib/creation-context.ts';
+import { creationContext, emptyCreationState, viewScope } from '../lib/creation-context.ts';
 import { inheritedGenerationSize } from '../lib/generation-size.ts';
 import { createGenerationSession } from '../lib/generation-session.ts';
-import { createEntryReader } from '../lib/creation-entry.ts';
+import { createSurfaceSync } from '../lib/surface-sync.ts';
+import { createWorkspaceOpener, draftSnapshot, projectDraft, workspaceContext } from '../lib/workspace-handoff.ts';
 
 const app = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
 const quick = await readFile(new URL('../entrypoints/popup/QuickWorkspace.tsx', import.meta.url), 'utf8');
@@ -20,41 +21,51 @@ function extract(source, names) {
   return Object.entries(values).map(([name, value]) => `const ${name} = ${value};`).join('\n');
 }
 function evaluate(source, globals, names) {
-  const original = globals;
-  let creation = { ...emptyCreationState, ...Object.fromEntries(Object.keys(emptyCreationState).filter(key => globals[key]).map(key => [key, globals[key]])) };
-  const dispatchCreation = action => {
-    const before = creation;
-    creation = creationContext(creation, action);
-    for (const [key, setter] of Object.entries({ versions: 'setVersions', inputRevisions: 'setInputRevisions', instructions: 'setInstructions', subjectDrafts: 'setSubjectDrafts', multiSubjectDrafts: 'setMultiSubjectDrafts' })) {
-      if (creation[key] === before[key] || !original[setter]) continue;
-      const replaceDraft = action.type === 'restore' && !action.merge && !['versions', 'inputRevisions'].includes(key);
-      original[setter](replaceDraft ? creation[key] : () => creation[key]);
-    }
-  };
-  globals = { createEntryReader, query: async () => assert.fail("Unexpected query in this fixture"), dispatchCreation, restoredQuickDraft, noticeNavigation: { current: undefined }, setNewProjectOpen() {}, setTasksOpen() {}, setViewsReady() {}, setProjectModes() {}, setInputRevisions() {}, ...globals,
-    setProjectMode: original.setProjectMode || ((_id, mode) => original.setPreferences(value => ({ ...value, mode }))),
-    request: async message => message.type === 'alchemy:project-views' ? original.projectViews || {} : original.request(message),
-  };
-  if (globals.selectionRevision) globals.entryReader = createEntryReader({ request: globals.request, query: globals.query, revision: () => globals.selectionRevision.current });
   const exports = {};
   runInNewContext(ts.transpileModule(`${source}\nObject.assign(exports,{${names.join(',')}});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, { exports, ...globals });
   return exports;
 }
 
+// The surface sync module with App-shaped fixtures: creation actions are observed through per-field
+// setters, and any setter a scenario does not expect fails the test.
+const quietSetters = ['setNewProjectOpen', 'setTasksOpen', 'setViewsReady', 'setProjectModes'];
+const strictSetters = ['setPreferences', 'setSelection', 'setProject', 'setPromptDrafts', 'setLang', 'setDraftReady', 'setDraftError', 'setError',
+  'setSettings', 'setSettingsSection', 'setHistoryOpen', 'setGalleryOpen', 'setTargetGeneration', 'setTargetPrompt', 'dispatchDrawer'];
+function surface(globals) {
+  let creation = { ...emptyCreationState, ...Object.fromEntries(Object.keys(emptyCreationState).filter(key => globals[key]).map(key => [key, globals[key]])) };
+  const dispatchCreation = action => {
+    const before = creation;
+    creation = creationContext(creation, action);
+    for (const [key, setter] of Object.entries({ versions: 'setVersions', inputRevisions: 'setInputRevisions', instructions: 'setInstructions', subjectDrafts: 'setSubjectDrafts', multiSubjectDrafts: 'setMultiSubjectDrafts' })) {
+      if (creation[key] === before[key] || !globals[setter]) continue;
+      const replaceDraft = action.type === 'restore' && !action.merge && !['versions', 'inputRevisions'].includes(key);
+      globals[setter](replaceDraft ? creation[key] : () => creation[key]);
+    }
+  };
+  return createSurfaceSync({
+    query: async () => assert.fail('Unexpected query in this fixture'), readState: async () => assert.fail('Unexpected poll in this fixture'),
+    pollWhileVisible: () => () => {}, location: { search: '', hash: '', pathname: '/' }, history: { replaceState() {} },
+    window: { addEventListener() {}, removeEventListener() {} },
+    modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, deletingProjects: { current: false },
+    ...Object.fromEntries(quietSetters.map(name => [name, () => {}])),
+    ...Object.fromEntries(strictSetters.map(name => [name, () => assert.fail(`unexpected ${name}`)])),
+    ...globals, dispatchCreation,
+    setProjectMode: globals.setProjectMode || ((_id, mode) => globals.setPreferences(value => ({ ...value, mode }))),
+    request: async message => message.type === 'alchemy:project-views' ? globals.projectViews || {} : globals.request(message),
+  });
+}
+
 test('quick handoff captures the displayed version, keeps draft edits and blocks pending inputs', async () => {
-  const names = ['draftSnapshot', 'workspaceContext', 'openWorkspace'];
-  const script = extract(app, names);
   for (const job of [{ id: 'old' }, { id: 'latest' }, undefined]) {
-    const sent = [], errors = [], pending = { current: false };
-    const globals = {
-      workspace: false, job, activeProject: { jobs: [{ id: 'old' }] }, selection: { id: 'selected', projectId: 'A', inputRevision: 7, image: 'large-image', sourceUrl: '' },
-      preferences: { mode: 'style' }, subjectKey: () => 'A:style', versions: {}, instructions: { 'A:style:old': 'unsaved', 'B:style:new': 'other project' },
-      subjectDrafts: { 'A:style': 'subject' }, multiSubjectDrafts: {}, promptDrafts: { old: { promptZh: 'edited' }, unrelated: {} }, lang: 'en',
-      handoffPending: pending, busy: false, savingMode: false, subjectUnavailable: {}, reading: false, connected: true, loadingProject: false,
-      setBusy() {}, setError: value => errors.push(value), request: async message => { sent.push(message); },
-    };
-    const ui = evaluate(script, globals, ['openWorkspace']);
-    await ui.openWorkspace();
+    const sent = [], errors = [];
+    let request = async message => { sent.push(message); };
+    const opener = createWorkspaceOpener({ request: message => request(message), setBusy() {}, setError: value => errors.push(value) });
+    const selection = { id: 'selected', projectId: 'A', inputRevision: 7, image: 'large-image', sourceUrl: '' };
+    const creation = { ...emptyCreationState, instructions: { 'A:style:old': 'unsaved', 'B:style:new': 'other project' }, subjectDrafts: { 'A:style': 'subject' } };
+    const promptDrafts = { old: { promptZh: 'edited' }, unrelated: {} };
+    const open = (blocked = false) => opener({ blocked, context: workspaceContext('style', selection),
+      draft: projectDraft(draftSnapshot(creation, { promptDrafts, lang: 'en', shown: { key: 'A:style', version: job?.id || 'new' } }), selection.projectId, ['old']) });
+    await open();
     assert.equal(sent[0].context.selection.projectId, 'A');
     assert.equal(sent[0].context.selection.image, undefined);
     assert.equal(sent[0].context.selection.inputRevision, 7);
@@ -62,23 +73,23 @@ test('quick handoff captures the displayed version, keeps draft edits and blocks
     assert.equal(sent[0].draft.instructions['A:style:old'], 'unsaved');
     assert.equal(sent[0].draft.instructions['B:style:new'], undefined);
     assert.equal(sent[0].draft.promptDrafts.unrelated, undefined);
-    for (const condition of [{ busy: true }, { savingMode: true }, { reading: true }, { subjectUnavailable: { 'A:style': true } }, { loadingProject: true }]) {
-      await evaluate(script, { ...globals, ...condition }, ['openWorkspace']).openWorkspace();
-      assert.equal(sent.length, 1, JSON.stringify(condition));
-    }
-    await evaluate(script, { ...globals, request: async () => { throw new Error('tab failed'); } }, ['openWorkspace']).openWorkspace();
+    assert.equal(sent[0].draft.lang, 'en');
+    await open(true);
+    assert.equal(sent.length, 1, 'a blocked surface must not hand off');
+    assert.match(errors.at(-1), /正在处理当前输入/);
+    let release;
+    request = message => new Promise(resolve => { sent.push(message); release = resolve; });
+    const first = open(); await open();
+    assert.equal(sent.length, 2, 'a second click while opening is dropped');
+    release(); await first;
+    request = async () => { throw new Error('tab failed'); };
+    await open();
     assert.equal(errors.at(-1), 'tab failed');
-    assert.equal(pending.current, false);
+    request = async message => { sent.push(message); };
+    await open();
+    assert.equal(sent.length, 3, 'a failed handoff releases its lock');
   }
 });
-
-const tree = ts.createSourceFile('App.tsx', app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let initialize;
-const visit = node => {
-  if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useEffect' && node.arguments[0]?.getText(tree).includes('const initialize = async')) initialize = node.arguments[0].getText(tree);
-  ts.forEachChild(node, visit);
-};
-visit(tree);
 
 test('quick reopen keeps durable project choices while restoring inputs; explicit handoff and legacy drafts retain their choices', async () => {
   for (const scenario of ['saved-project', 'legacy-draft', 'explicit-handoff']) {
@@ -98,7 +109,7 @@ test('quick reopen keeps durable project choices while restoring inputs; explici
       },
       window: { addEventListener() {}, removeEventListener() {} },
       location: { search: scenario === 'explicit-handoff' ? '?handoff=test' : '', hash: '', pathname: '/popup.html' },
-      history: { replaceState() {} }, URLSearchParams,
+      history: { replaceState() {} },
       modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, deletingProjects: { current: false },
       request: async message => message.type === 'alchemy:project-reference' ? { ...source, image: 'reference' } : saved,
       readState: async () => ({ preferences: { paired: true, mode: 'reenact' }, selection: source }),
@@ -109,7 +120,7 @@ test('quick reopen keeps durable project choices while restoring inputs; explici
       setMultiSubjectDrafts() {}, setPromptDrafts() {}, setLang() {}, setSettings() {}, setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {},
       setError: value => { if (value) assert.fail(value); }, setDraftError: value => assert.fail(value),
     };
-    evaluate(`const start = ${initialize};`, context, ['start']).start();
+    surface(context).start();
     await new Promise(resolve => setImmediate(resolve));
     await refresh();
     assert.equal(state.modes.A, scenario === 'saved-project' ? 'recreate' : 'style', scenario);
@@ -127,7 +138,7 @@ test('workspace handoff restores its own source and mode without polling back to
   let refresh;
   const source = { id: 'A', projectId: 'A-project', sourceUrl: '', inputRevision: 8 };
   const context = {
-    workspace: true, window: { addEventListener() {}, removeEventListener() {} }, location: { search: '?handoff=test', hash: '', pathname: '/workspace.html' }, history: { replaceState() {} }, URLSearchParams,
+    workspace: true, window: { addEventListener() {}, removeEventListener() {} }, location: { search: '?handoff=test', hash: '', pathname: '/workspace.html' }, history: { replaceState() {} },
     modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, deletingProjects: { current: false },
     request: async message => message.type === 'alchemy:workspace-handoff' ? { selection: source, mode: 'reenact', draft: { instructions: { key: 'unsaved' }, versions: { key: 'new' } } } : { ...source, id: 'A-current', inputRevision: 8, image: 'A-image' },
     readState: async () => ({ preferences: { paired: true, mode: 'recreate' }, selection: { id: 'B', image: 'B-image' } }),
@@ -136,7 +147,7 @@ test('workspace handoff restores its own source and mode without polling back to
     setSelection: value => state.selections.push(value), setInstructions: value => { state.drafts = value; },
     setSubjectDrafts() {}, setMultiSubjectDrafts() {}, setPromptDrafts() {}, setVersions() {}, setLang() {}, setSettings() {}, setNewProjectOpen() {}, setTasksOpen() {}, setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {}, setError: value => { if (value) assert.fail(value); },
   };
-  evaluate(`const start = ${initialize};`, context, ['start']).start();
+  surface(context).start();
   await new Promise(resolve => setImmediate(resolve));
   await refresh(); await refresh();
   assert.equal(state.preferences.mode, 'reenact');
@@ -148,14 +159,13 @@ test('workspace handoff restores its own source and mode without polling back to
 });
 
 test('live reminder navigation switches versions without reinitializing and ignores stale results', async () => {
-  const script = extract(app, ['navigateReminder', 'onReminderNavigation']);
   const state = { preferences: {}, versions: {}, selections: [], drawers: [], tasks: false, history: true, gallery: true };
   const revision = { current: 0 }, location = { hash: '', pathname: '/workspace.html', search: '?preview=yes' };
   let resolveSlow;
   const jobId = '11111111-1111-4111-8111-111111111111', imageId = '22222222-2222-4222-8222-222222222222';
   const target = { id: jobId, projectId: 'project', mode: 'reenact', generations: [{ id: imageId }] };
-  const ui = evaluate(`let cancelled = false, ownContext = false, previous;\n${script}`, {
-    workspace: true, selectionRevision: revision, URLSearchParams, Date, location,
+  const ui = surface({
+    workspace: true, selectionRevision: revision, location,
     history: { replaceState(_state, _title, url) { state.url = url; location.hash = ''; } },
     query: async path => path.endsWith('33333333-3333-4333-8333-333333333333') ? new Promise(resolve => { resolveSlow = resolve; }) : target,
     request: async () => ({ id: 'reference', projectId: 'project', image: 'image' }),
@@ -165,9 +175,9 @@ test('live reminder navigation switches versions without reinitializing and igno
     setSettings() {}, setNewProjectOpen() {}, setError: value => { if (value) assert.fail(value); },
     setTargetGeneration: value => { state.generation = value; }, setTargetPrompt: value => { state.prompt = value; },
     dispatchDrawer: value => state.drawers.push(value),
-  }, ['navigateReminder', 'onReminderNavigation']);
+  });
   location.hash = `#reminder=task=${jobId}&generation=${imageId}`;
-  ui.onReminderNavigation(); await new Promise(resolve => setImmediate(resolve));
+  ui.onHashChange(); await new Promise(resolve => setImmediate(resolve));
   assert.equal(state.url, '/workspace.html?preview=yes');
   assert.equal(state.selections.length, 1); assert.equal(state.preferences.mode, 'reenact');
   assert.equal(state.versions['project:reenact'], jobId); assert.equal(state.generation.id, imageId);
@@ -191,8 +201,8 @@ for (const delayed of ['handoff', 'reference']) for (const kind of ['single', 'b
     const state = { preferences: {}, versions: {}, selections: [], tasks: false, requests: [] }, listeners = new Map();
     const location = new URL('https://example.test/workspace.html?handoff=test&keep=value');
     const handoff = { selection: source, mode: 'reenact', draft: { instructions: { draft: 'unsaved' }, subjectDrafts: { draft: 'subject-image' }, versions: { draft: 'new' } } };
-    const cleanup = evaluate(`const start = ${initialize};`, {
-      workspace: true, location, URLSearchParams,
+    const sync = surface({
+      workspace: true, location,
       window: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) },
       history: { replaceState(_state, _title, url) { location.href = new URL(url, location).href; } },
       modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, deletingProjects: { current: false },
@@ -211,7 +221,8 @@ for (const delayed of ['handoff', 'reference']) for (const kind of ['single', 'b
       setTargetPrompt: value => { state.prompt = value; }, dispatchDrawer: value => { state.drawer = value; },
       setMultiSubjectDrafts() {}, setPromptDrafts() {}, setLang() {}, setSettings() {}, setNewProjectOpen() {},
       setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {}, setError: value => { if (value) assert.fail(value); },
-    }, ['start']).start();
+    });
+    sync.start();
     await tick();
     if (kind === 'latest') {
       location.hash = '#reminder=tasks=unread&request=first';
@@ -230,7 +241,7 @@ for (const delayed of ['handoff', 'reference']) for (const kind of ['single', 'b
       assert.equal(state.versions['target-project:style'], jobId); assert.equal(state.drawer.open, true);
       assert.deepEqual(state.requests, [`/jobs/${jobId}`], 'only the latest reminder is consumed');
     }
-    cleanup(); assert.equal(listeners.has('hashchange'), false);
+    sync.dispose(); assert.equal(listeners.has('hashchange'), false);
   });
 }
 
@@ -240,8 +251,8 @@ test('live workspace handoff merges drafts, routes settings/tasks, and ignores s
   const revision = { current: 0 }, pending = new Map();
   const setter = key => value => { state[key] = typeof value === 'function' ? value(state[key] || {}) : value; };
   const handoff = { selection: { id: 'source', projectId: 'project' }, mode: 'reenact', draft: { instructions: { 'project:reenact:new': 'incoming' }, versions: { 'project:reenact': 'new' } } };
-  const ui = evaluate(`let cancelled = false, ownContext = false, previous;\n${extract(app, ['restoreDraft', 'navigateHandoff', 'navigateReminder'])}`, {
-    ...state, subjectDrafts: state.subjects, selectionRevision: revision, workspace: true, URLSearchParams,
+  const ui = surface({
+    ...state, subjectDrafts: state.subjects, selectionRevision: revision, workspace: true,
     request: message => {
       if (message.id === 'slow-handoff' || message.id === 'slow-project') return new Promise(resolve => pending.set(message.id, resolve));
       return Promise.resolve(message.type === 'alchemy:workspace-handoff' ? handoff : { id: 'reference', projectId: message.id, image: 'reference-image' });
@@ -250,7 +261,7 @@ test('live workspace handoff merges drafts, routes settings/tasks, and ignores s
     setInputRevisions: setter('inputRevisions'), setInstructions: setter('instructions'), setVersions: setter('versions'), setSubjectDrafts: setter('subjects'), setMultiSubjectDrafts: setter('multi'), setPromptDrafts: setter('prompts'), setLang() {},
     setSettings: setter('settings'), setSettingsSection: setter('section'), setTasksOpen: setter('tasks'), setNewProjectOpen() {}, setHistoryOpen() {}, setGalleryOpen() {},
     setError: value => { if (value) assert.fail(value); },
-  }, ['navigateHandoff', 'navigateReminder']);
+  });
   await ui.navigateHandoff(new URLSearchParams({ handoff: 'one', view: 'settings', section: 'models' }));
   assert.equal(state.settings, true); assert.equal(state.section, 'models'); assert.equal(state.tasks, false); assert.equal(state.mode, 'reenact');
   assert.equal(state.selections.at(-1).image, 'reference-image');
@@ -280,14 +291,14 @@ test('stale handoff opens the latest reference without restoring outdated drafts
   } };
   const reference = { id: 'latest-source', projectId: 'project', image: 'latest-reference', inputRevision: 8, inputs: { style: { subjectImage: 'latest subject' } } };
   const setter = key => value => { state[key] = typeof value === 'function' ? value(state[key] || {}) : value; };
-  const ui = evaluate(`let cancelled = false, ownContext = false, previous;\n${extract(app, ['restoreDraft', 'navigateHandoff'])}`, {
+  const ui = surface({
     selectionRevision: { current: 0 }, workspace: true,
     request: async message => message.type === 'alchemy:workspace-handoff' ? handoff : reference,
     setSelection: value => state.selections.push(value), setProject() {}, setProjectMode() {},
     setInputRevisions: setter('inputRevisions'), setInstructions: setter('instructions'), setVersions: setter('versions'), setSubjectDrafts: setter('subjects'),
     setMultiSubjectDrafts: () => assert.fail('stale multi drafts must not restore'), setPromptDrafts: () => assert.fail('stale prompt drafts must not restore'), setLang() {},
     setSettings() {}, setTasksOpen() {}, setNewProjectOpen() {}, setHistoryOpen() {}, setGalleryOpen() {}, setError: value => state.errors.push(value),
-  }, ['navigateHandoff']);
+  });
   await ui.navigateHandoff(new URLSearchParams({ handoff: 'stale' }));
   const selected = state.selections.at(-1);
   assert.equal(selected.id, 'latest-source');
@@ -313,10 +324,10 @@ for (const draftRevision of [7, 8]) test(`ordinary quick initialization validate
     multiSubjectDrafts: { 'A:multi-reenact:new': [{ id: 'quick multi' }] },
     promptDrafts: { historicalJob: { promptZh: 'unsaved historical prompt' } },
   } };
-  const cleanup = evaluate(`const start = ${initialize};`, {
+  const sync = surface({
     workspace: false, projectViews: { A: { mode: 'style', versions: { style: 'new' }, inputRevision: 8 } },
     window: { addEventListener() {}, removeEventListener() {} }, location: { search: '', hash: '', pathname: '/popup.html' },
-    history: { replaceState() {} }, URLSearchParams,
+    history: { replaceState() {} },
     modeRevision: { current: 0 }, visibilityRevision: { current: 0 }, selectionRevision: { current: 0 }, deletingProjects: { current: false },
     request: async message => message.type === 'alchemy:project-reference' ? { ...selection, inputs: { style: { instruction: 'workspace instruction' } } } : saved,
     readState: async () => ({ preferences: { paired: true, mode: 'style' }, selection }),
@@ -325,7 +336,8 @@ for (const draftRevision of [7, 8]) test(`ordinary quick initialization validate
     setInstructions: setter('instructions'), setSubjectDrafts: setter('subjects'), setMultiSubjectDrafts: setter('multi'), setPromptDrafts: setter('prompts'),
     setLang() {}, setSettings() {}, setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {},
     setError: value => { if (value) assert.fail(value); }, setDraftError: value => assert.fail(value),
-  }, ['start']).start();
+  });
+  sync.start();
   await new Promise(resolve => setImmediate(resolve));
   await refresh();
   const fresh = draftRevision === 8;
@@ -336,23 +348,42 @@ for (const draftRevision of [7, 8]) test(`ordinary quick initialization validate
   assert.equal(state.subjects['B:style:new'], 'other subject');
   assert.equal(state.prompts.historicalJob.promptZh, 'unsaved historical prompt', 'prompt edits belong to immutable jobs, not the current input revision');
   assert.equal(state.versions['A:style'], 'new');
-  cleanup();
+  sync.dispose();
 });
 
 
 test('toast and unread entries route inside every Reframe surface without calling the background or changing the host URL', async () => {
-  const script = extract(app, ['openNotice']);
-  for (const surface of [{ workspace: true }, { workspace: false }, { workspace: false, embedded: true }]) {
-    const routes = [], errors = [];
-    const noticeNavigation = { current: async params => routes.push(Object.fromEntries(params)) };
-    const ui = evaluate(script, { ...surface, noticeNavigation, URLSearchParams,
-      request: () => assert.fail('must not open a tab'), location: new Proxy({}, { set() { assert.fail('must not change host URL'); } }),
-      setError: error => errors.push(error) }, ['openNotice']);
-    ui.openNotice({ id: 'image', jobId: 'job', generationId: 'image' });
-    ui.openNotice({ id: 'prompt', jobId: 'job' }); ui.openNotice();
-    assert.deepEqual(routes, [{ task: 'job', generation: 'image' }, { task: 'job' }, { tasks: 'unread' }]);
-    noticeNavigation.current = undefined; ui.openNotice();
-    assert.match(errors[0], /正在恢复界面/);
+  const jobId = '11111111-1111-4111-8111-111111111111', imageId = '22222222-2222-4222-8222-222222222222';
+  const target = { id: jobId, projectId: 'project', mode: 'style', generations: [{ id: imageId }] };
+  for (const workspace of [true, false]) {
+    const reads = [], errors = [], state = {};
+    const sync = surface({ workspace,
+      request: async message => {
+        if (message.type === 'alchemy:quick-draft') return undefined;
+        if (message.type === 'alchemy:project-reference') return { id: 'reference', projectId: message.id, image: 'image' };
+        assert.fail(`must not ask the background for ${message.type}`);
+      },
+      query: async path => { reads.push(path); return target; },
+      location: new Proxy({ search: '', hash: '', pathname: '/' }, { set() { assert.fail('must not change host URL'); } }),
+      history: { replaceState() { assert.fail('must not change host URL'); } },
+      setError: error => { if (error) errors.push(error); }, setTasksOpen: value => { state.tasks = value; },
+      setTargetGeneration: value => { state.generation = value; }, setTargetPrompt: value => { state.prompt = value; },
+      setSelection() {}, setPreferences() {}, setSettings() {}, setHistoryOpen() {}, setGalleryOpen() {}, dispatchDrawer() {},
+    });
+    await sync.openNotice();
+    assert.match(errors[0], /正在恢复界面/, 'a notice before restoration reports instead of navigating');
+    sync.start(); await new Promise(resolve => setImmediate(resolve));
+    await sync.openNotice({ jobId, generationId: imageId });
+    assert.deepEqual(state.generation, { jobId, id: imageId });
+    await sync.openNotice({ jobId });
+    assert.equal(state.prompt.jobId, jobId); assert.equal(state.generation, undefined);
+    await sync.openNotice();
+    assert.equal(state.tasks, true);
+    assert.deepEqual(reads, [`/jobs/${jobId}`, `/jobs/${jobId}`]);
+    assert.equal(errors.length, 1);
+    sync.dispose();
+    await sync.openNotice();
+    assert.match(errors.at(-1), /正在恢复界面/, 'a disposed surface no longer navigates');
   }
 });
 
@@ -361,10 +392,10 @@ test('lightweight reminder navigation keeps its local version through polling, p
   const setter = key => value => { state[key] = typeof value === 'function' ? value(state[key]) : value; };
   let refresh, finishRead, delayRead = false, globalSelection = { id: 'A', projectId: 'A', image: 'A-image' };
   const jobId = '11111111-1111-4111-8111-111111111111', generationId = '22222222-2222-4222-8222-222222222222';
-  const noticeNavigation = { current: undefined }, revision = { current: 0 };
+  const revision = { current: 0 };
   const target = { id: jobId, projectId: 'B', mode: 'recreate', generations: [{ id: generationId }, { id: 'newer' }] };
-  const cleanup = evaluate(`const start = ${initialize};`, {
-    workspace: false, noticeNavigation, URLSearchParams, Date,
+  const sync = surface({
+    workspace: false,
     location: { search: '?website=yes', hash: '#pinterest-section', pathname: '/pin/123' },
     history: { replaceState() { assert.fail('must not rewrite the website URL'); } },
     window: { addEventListener() { assert.fail('must not listen to the website hash'); }, removeEventListener() {} },
@@ -385,9 +416,10 @@ test('lightweight reminder navigation keeps its local version through polling, p
     setTargetGeneration: setter('generation'), setTargetPrompt: setter('prompt'), setTasksOpen: setter('tasks'),
     setLang() {}, setSettings() {}, setDraftReady() {}, setProject() {}, setHistoryOpen() {}, setGalleryOpen() {}, dispatchDrawer() {},
     setError: value => { if (value) state.errors.push(value); }, setDraftError: value => assert.fail(value),
-  }, ['start']).start();
+  });
+  sync.start();
   await new Promise(resolve => setImmediate(resolve)); await refresh();
-  await noticeNavigation.current(new URLSearchParams({ task: jobId, generation: generationId }));
+  await sync.navigateReminder(new URLSearchParams({ task: jobId, generation: generationId }));
   assert.equal(state.selection.projectId, 'B'); assert.equal(state.versions['B:recreate'], jobId);
   assert.equal(state.generation.id, generationId); assert.equal(state.prompt, undefined);
   await refresh(); await refresh();
@@ -395,20 +427,21 @@ test('lightweight reminder navigation keeps its local version through polling, p
   assert.equal(state.selection.projectId, 'B', 'unchanged global A must not override locally selected B');
   assert.equal(state.instructions['A:style:new'], 'keep A'); assert.equal(state.instructions['B:recreate:new'], 'keep B');
   assert.equal(state.prompts.edited.promptZh, 'unsaved');
-  await noticeNavigation.current(new URLSearchParams({ task: jobId }));
+  await sync.navigateReminder(new URLSearchParams({ task: jobId }));
   const first = state.prompt.request;
-  await noticeNavigation.current(new URLSearchParams({ task: jobId }));
+  await sync.navigateReminder(new URLSearchParams({ task: jobId }));
   assert.ok(state.prompt.request > first); assert.equal(state.generation, undefined);
-  await noticeNavigation.current(new URLSearchParams({ tasks: 'unread' })); assert.equal(state.tasks, true);
+  await sync.navigateReminder(new URLSearchParams({ tasks: 'unread' })); assert.equal(state.tasks, true);
   delayRead = true;
   const stalePoll = refresh();
-  await noticeNavigation.current(new URLSearchParams({ task: jobId }));
+  await sync.navigateReminder(new URLSearchParams({ task: jobId }));
   globalSelection = { id: 'C', projectId: 'C', image: 'C-image' };
   finishRead(); await stalePoll;
   assert.equal(state.selection.projectId, 'B', 'a stale poll must not override newer local navigation');
   delayRead = false; await refresh();
   assert.equal(state.selection.projectId, 'C', 'a new image collection must still reach the panel');
-  assert.deepEqual(state.errors, []); cleanup(); assert.equal(noticeNavigation.current, undefined);
+  assert.deepEqual(state.errors, []); sync.dispose();
+  await sync.openNotice(); assert.match(state.errors.at(-1), /正在恢复界面/);
 });
 
 test('quick result honors a reminded historical generation before running/latest fallbacks', () => {
@@ -437,7 +470,7 @@ function callbackProps(source, component, names) {
 
 function quickGenerationCallbacks(globals, job) {
   const names = ['pixelSize', 'onUpdate', 'onGenerationViewUpdate'];
-  const workspace = evaluate(`${extract(app, ['generationView', 'revealGeneratedImage'])}\nconst props = ${callbackProps(app, 'QuickWorkspace', names)};`, { magpie: false, ...globals }, ['props']).props;
+  const workspace = evaluate(`${extract(app, ['generationView', 'revealGeneratedImage'])}\nconst props = ${callbackProps(app, 'QuickWorkspace', names)};`, { magpie: false, viewScope, ...globals }, ['props']).props;
   const result = evaluate(`const props = ${callbackProps(quick, 'QuickResult', names)};`, workspace, ['props']).props;
   const ast = ts.createSourceFile('QuickWorkspace.tsx', quick, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let options;
@@ -509,7 +542,7 @@ test('user cannot change modes before restored inputs are ready and can change t
   // Given delayed initialization, When either UI renders its mode picker, Then it is disabled until draft restoration completes.
   for (const component of ['QuickWorkspace', 'CanvasWorkspace']) {
     const props = callbackProps(app, component, ['modeDisabled']);
-    const read = state => evaluate(`const props = ${props};`, { savingMode: false, busy: false, draftReady: false, selectedModel: null, ...state }, ['props']).props.modeDisabled;
+    const read = state => evaluate(`const props = ${props};`, { busy: false, draftReady: false, selectedModel: null, ...state }, ['props']).props.modeDisabled;
     assert.equal(read({}), true);
     // Given restored inputs without a text model, When selecting an existing mode, Then the picker remains available.
     assert.equal(read({ draftReady: true }), false);

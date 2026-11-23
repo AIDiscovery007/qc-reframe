@@ -22,8 +22,6 @@
 .app:not(.workspace-app) .prompt-save { justify-content:flex-end;padding:8px 12px; }
 .app:not(.workspace-app) .prompt-save .outline-button { background:var(--surface); }
 .app:not(.workspace-app) .hint { margin:8px 12px;font-size:11px;color:var(--muted); }
-.app:not(.workspace-app) .empty-prompt { display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;min-height:92px;padding:20px 14px;border-radius:10px;background:var(--surface-muted);color:var(--muted);text-align:center;font-size:12px; }
-.app:not(.workspace-app) .empty-prompt .quiet-button { background:var(--surface); }
 
 /* The two quick surfaces share the workspace's canvas, filmstrip and compact actions. */
 .app:not(.workspace-app) { min-height:100%; }

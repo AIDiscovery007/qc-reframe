@@ -12,8 +12,8 @@ import LoadingPlaceholder from "../popup/LoadingPlaceholder";
 import ImagePreview from "../popup/ImagePreview";
 import PromptSheet from "./PromptSheet";
 import useEditorExpansion from "./useEditorExpansion";
+import { modeLabels as modes } from "../../lib/mode-labels";
 
-const modes: Record<Mode, string> = { style: "提取风格", recreate: "完整复刻", reenact: "主体重演", "multi-reenact": "多图重演", session: "会话创作" };
 export default function CanvasWorkspace({ revealPrompt, onPromptRevealed, contextKey, mode, image, subjectImage, subjects, referenceIndex, onImageOrder, selected, onSelect, instruction, disabled, modeDisabled, reverseDisabled, running, continuous, submitting, cancelling, status, error, errorTaskId, stale, hasPrompt, promptEditing, reduced, versions, prompt, actionsTarget, onMode, onInstruction, onSubject, onAvailability, onSubjects, onReference, onReferenceRotate, onSwap, onReverse, onGenerate, chainDisabled, onCancel, onRetryReference, sessionTitle, onSessions }: {
   revealPrompt?: number; onPromptRevealed?(): void; contextKey: string; mode: Mode; image?: string; subjectImage: string; subjects: MultiSubject[]; selected: string; onSelect(id: string): void;
   referenceIndex: number; onImageOrder(referenceIndex: number, subjects: MultiSubject[]): Promise<void>;

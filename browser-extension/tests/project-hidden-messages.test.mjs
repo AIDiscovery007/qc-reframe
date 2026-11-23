@@ -12,9 +12,18 @@ runInNewContext(ts.transpileModule(await readFile(new URL("../lib/bridge.ts", im
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText, { exports: bridgeModule, require: () => operationPolicy });
 
-const compiled = ts.transpileModule(await readFile(new URL("../entrypoints/background.ts", import.meta.url), "utf8"), {
+const transpile = async path => ts.transpileModule(await readFile(new URL(path, import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
+const compiled = await transpile("../entrypoints/background.ts");
+// Background-owned modules run for real against each fake browser; only the network edge is replaced.
+const ownedModules = Object.fromEntries(await Promise.all(["service-connection", "session-drafts", "message-validation", "page-panel"]
+  .map(async name => [`../lib/${name}`, await transpile(`../lib/${name}.ts`)])));
+const instantiate = (source, modules) => {
+  const exports = {};
+  runInNewContext(source, { exports, require: name => modules[name], AbortController, setTimeout, clearTimeout, TextEncoder, Date, Symbol });
+  return exports;
+};
 const projectId = "a".repeat(64), image = "data:image/png;base64,AAAA";
 const sender = { id: "test", url: "chrome-extension://test/workspace.html" };
 const contentSender = { id: "test", frameId: 0, tab: { id: 1, windowId: 1, url: "https://example.com/" } };
@@ -49,7 +58,7 @@ function background(local = { preferences: { token: "private-token" } }) {
   runInNewContext(compiled, {
     exports: {}, defineBackground: fn => fn(), crypto, URLSearchParams, TextEncoder, console,
     AbortController, AbortSignal, setTimeout, clearTimeout,
-    require: name => ({
+    require: name => (name in ownedModules ? instantiate(ownedModules[name], { "wxt/browser": { browser }, "./bridge": { ...bridgeModule, bridge } }) : undefined) ?? ({
       "../lib/reminder-background": { startReminderService: () => ({ wake: async () => {}, projectsChanged: async () => {} }) },
       "wxt/browser": { browser }, "../lib/bridge": { ...bridgeModule, bridge },
       "../lib/operation-policy": operationPolicy,

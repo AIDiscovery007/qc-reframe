@@ -1,36 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
-import ts from 'typescript';
+import { createReverseCancellation } from '../lib/reverse-action.ts';
 
-// Exercise App's callback with separate render closures, as when switching paths.
-const source = await readFile(new URL('../entrypoints/popup/App.tsx', import.meta.url), 'utf8');
-const tree = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let callback;
-function visit(node) {
-  if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'cancel') callback = node.initializer.getText(tree);
-  ts.forEachChild(node, visit);
-}
-visit(tree);
-assert.ok(callback);
-const compiled = ts.transpileModule(`exports.cancel = ${callback}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+// One canceller serves every render; each click passes the job shown at that moment, as when switching paths.
 function fixture() {
-  const requests = [], updates = [], errors = [], pendingCancellations = { current: new Set() };
+  const requests = [], updates = [], errors = [];
   let pending = [];
+  const cancel = createReverseCancellation({
+    request: message => new Promise((resolve, reject) => requests.push({ ...message, resolve, reject })),
+    onUpdate: value => updates.push(value), onError: value => errors.push(value), onPending: value => { pending = [...value]; },
+  });
   return {
     requests, updates, errors,
     get pending() { return pending; },
-    render(job) {
-      const exports = {};
-      runInNewContext(compiled, {
-        exports, job, running: job?.status === 'running', pendingCancellations,
-        setCancellingJobs: value => { pending = [...value]; }, setError: value => errors.push(value),
-        updateJob: value => updates.push(value),
-        request: message => new Promise((resolve, reject) => requests.push({ ...message, resolve, reject })),
-      });
-      return exports.cancel;
-    },
+    render: job => () => cancel(job),
   };
 }
 

@@ -38,4 +38,6 @@ export function browserDomain(files) {
 // N9 Standards audit: hash-verified copies strip only required/optional nativeMessaging;
 // 17 checks reject old reports and require copy cleanup. Preview remains synthetic;
 // production assets, actual dependency edges and conservative Node policy are unchanged.
-export const reviewedBrowserDomain = "5c6d4c7265ba414ce11e0e94e1f45f034d847b0ca379c03605c059461881fa19";
+// Architecture audit: the preview adds only a synthetic `alchemy:panel-load` that injects its own
+// page-panel bundle; no fixture or preview path reaches the bridge.
+export const reviewedBrowserDomain = "107e3278be562574407b916854e8b8073c43494656b9385c12638c2f97ef192f";

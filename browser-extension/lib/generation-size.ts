@@ -26,3 +26,18 @@ export function generationSizeDescription(generation: Generation) {
   const submitted = generation.sizeRule ? generation.submittedImageSize ? ` · 提交尺寸：${generation.submittedImageSize.width} × ${generation.submittedImageSize.height} px` : " · 提交尺寸：自动（网关默认）" : "";
   return `${requested}${submitted}${generation.outputSize ? ` · 实际图片：${generation.outputSize.width} × ${generation.outputSize.height} px` : ""}`;
 }
+
+/**
+ * The size a chained reverse+generate submission uses: the workspace's explicit choice for this exact
+ * project/path/version and size profile, otherwise the size inherited from the shown or latest generation.
+ */
+export function chainTargetSize({ workspace, pixelSize, chainSize, drawerKey, job, targetGeneration }: {
+  workspace: boolean; pixelSize: boolean; drawerKey: string;
+  chainSize?: { key: string; pixelSize: boolean; size?: AspectRatio };
+  job?: { id: string; generations?: Generation[]; autoGeneration?: SizeSource };
+  targetGeneration?: { jobId: string; id: string };
+}) {
+  const shown = targetGeneration?.jobId === job?.id ? job?.generations?.find(item => item.id === targetGeneration?.id) : undefined;
+  const inherited = inheritedGenerationSize(pixelSize, shown || job?.generations?.at(-1) || job?.autoGeneration);
+  return workspace && chainSize?.key === drawerKey && chainSize.pixelSize === pixelSize ? chainSize.size : inherited;
+}

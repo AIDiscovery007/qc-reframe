@@ -36,7 +36,7 @@ export function createBatchAdmission({
     if (agents.busy) throw bad("正在验证模型，请稍候", 409);
     const modelSettings = agents.selection();
     const { modelSettings: generationModelSettings, sizeSnapshot } = await generation.prepare(body, { signal });
-    await Promise.all([...(agents.selected === "codex" ? [requireFeature("reverse")] : []), generation.check(generationModelSettings, signal), readFile(skillPath)]);
+    await Promise.all([...(agents.get().compatibility ? [requireFeature("reverse")] : []), generation.check(generationModelSettings, signal), readFile(skillPath)]);
     const items = [];
     for (const selectedItem of selected) {
       const title = projects.summary(selectedItem.projectId)?.title || "项目不存在";

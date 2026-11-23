@@ -187,6 +187,12 @@ export async function readPiCatalog(cwd, dataDir) {
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
+export async function verifyPiModel({ cwd, dataDir, selection, signal }) {
+  const result = await runPi({ cwd, dataDir, signal, modelSettings: selection, probe: true,
+    instructions: "仅按用户要求回复文字，不调用工具。", input: [{ type: "text", text: "仅回复 OK。" }] });
+  if (!result.text.trim()) throw new Error("Pi 未返回有效响应，请重新验证。");
+}
+
 // Candidate verification loads only our extension and requests metadata; it never sends a prompt.
 export async function verifyPiInstallation({ executable, node, env, dir, signal }) {
   const manifest = join(dir, 'verification.json'), system = join(dir, 'verification-system.txt');

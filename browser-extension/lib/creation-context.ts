@@ -10,7 +10,7 @@ export const emptyCreationState: CreationState = {
   instructions: {}, versions: {}, subjectDrafts: {}, multiSubjectDrafts: {}, inputRevisions: {},
 };
 type ProjectViews = Record<string, { versions: Record<string, string>; inputRevision?: number }>;
-type CreationAction =
+export type CreationAction =
   | { type: "restore"; draft: WorkspaceDraft; merge?: boolean }
   | { type: "views"; views: ProjectViews }
   | { type: "revision"; projectId: string; revision: number }
@@ -137,4 +137,10 @@ export function createInputWriter(send: (message: Record<string, unknown>) => Pr
       } finally { pending = false; }
     },
   };
+}
+
+/** Captures the visible creation context; the check fails once the user navigates or the context key changes. */
+export function viewScope(context: { readonly current: object }, revision: { readonly current: number }) {
+  const shown = context.current, seen = revision.current;
+  return () => shown === context.current && seen === revision.current;
 }

@@ -12,15 +12,51 @@ test("shared component styles ship inside the shadow-root bundle instead of the 
   const content = await readFile(new URL("content-scripts/content.js", build), "utf8");
   const manifest = JSON.parse(await readFile(new URL("manifest.json", build), "utf8"));
   const pageStyles = (await Promise.all((manifest.content_scripts || []).flatMap(rule => rule.css || []).map(path => readFile(new URL(path, build), "utf8")))).join("\n");
-  for (const selector of [".multi-subject-form", ".subject-filmstrip", ".image-viewer-stage", ".generation-ratio", ".image-file-actions", ".task-center"]) {
+  for (const selector of [".fusion-board", ".image-viewer-stage", ".generation-ratio", ".image-file-notice", ".task-center"]) {
     assert.ok(content.includes(selector), `${selector} must be in the inline panel stylesheet`);
     assert.ok(!pageStyles.includes(selector), `${selector} must not leak onto visited pages`);
   }
 });
 
+test("user browsing ordinary pages loads only the collection overlay until the panel is opened", async () => {
+  // Given the built extension, When a page loads, Then the React panel is a separate on-demand bundle.
+  const manifest = JSON.parse(await readFile(new URL("manifest.json", build), "utf8"));
+  const content = await readFile(new URL("content-scripts/content.js", build), "utf8");
+  const panel = await readFile(new URL("page-panel.js", build), "utf8");
+  assert.ok(manifest.permissions.includes("scripting"));
+  assert.deepEqual(manifest.content_scripts.flatMap(rule => rule.js), ["content-scripts/content.js"]);
+  assert.ok(!JSON.stringify(manifest.web_accessible_resources || []).includes("page-panel"), "pages cannot load the panel bundle themselves");
+  const panelOnly = "选择用于逆向提示词的 Agent 和模型";
+  assert.ok(!content.includes(panelOnly), "panel screens stay out of the script injected into every page");
+  assert.ok(panel.includes(panelOnly) && panel.includes("qc-reframe.page-panel"));
+  assert.ok(Buffer.byteLength(content) < 380_000, `content script is ${Buffer.byteLength(content)} bytes`);
+});
+
+test("user opening the page panel injects it only into the requesting top frame", async () => {
+  // Given a content request, When the panel loads, Then only that tab's top-frame isolated world receives it;
+  // other frames, extension pages and injection failures do not.
+  const injections = [];
+  let failInjection = false;
+  const { handlers } = await background(undefined, {}, chrome => {
+    chrome.scripting = { executeScript: async options => { if (failInjection) throw new Error("Cannot access contents of the page"); injections.push(options); return []; } };
+  });
+  const send = (sender, message = { type: "alchemy:panel-load" }) => new Promise(resolve => {
+    if (handlers.message(message, sender, resolve) !== true) resolve(undefined);
+  });
+  const content = { id: "test", frameId: 0, url: "https://pinterest.com/", tab: { id: 4 } };
+  assert.equal((await send(content)).ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(injections)), [{ target: { tabId: 4, frameIds: [0] }, files: ["/page-panel.js"] }]);
+  assert.equal(await send({ ...content, frameId: 3 }), undefined, "embedded frames cannot request the panel");
+  assert.equal(await send({ id: "test", url: "chrome-extension://test/popup.html" }), undefined, "extension pages already bundle the panel");
+  assert.equal(injections.length, 1);
+  failInjection = true;
+  assert.match((await send(content)).error, /刷新网页/);
+});
+
 test("WebGL generation engine is split out of injected content and initial UI bundles", async () => {
   const content = await readFile(new URL("content-scripts/content.js", build), "utf8");
   assert.ok(!content.includes("THREE.WebGLRenderer"), "every visited page must not load Three.js");
+  assert.ok(!(await readFile(new URL("page-panel.js", build), "utf8")).includes("THREE.WebGLRenderer"), "the page panel must not load Three.js");
   const files = await readdir(new URL("chunks/", build));
   const chunks = await Promise.all(files.filter(name => name.endsWith('.js')).map(async name => ({ name, text: await readFile(new URL(`chunks/${name}`, build), 'utf8') })));
   const engines = chunks.filter(chunk => chunk.text.includes('THREE.WebGLRenderer'));
@@ -701,8 +737,9 @@ test("CLI management messages expose only fixed authenticated endpoints and neve
   assert.ok(calls.at(-1).url.endsWith("/connection"), "failed handshake must not start the requested operation");
 });
 
-test("user manages Pi through fixed authenticated messages without forwarding arbitrary commands", async () => {
-  // Given a paired workspace, When Pi management is requested, Then only the explicit target reaches fixed routes.
+test("user manages Pi and other registered Agents through fixed authenticated messages without forwarding arbitrary commands", async () => {
+  // Given a paired workspace, When Agent management is requested, Then only a well-formed explicit target reaches fixed routes;
+  // the bridge registry, not the extension, decides which Agent ids exist.
   const calls = [];
   const { handlers } = await background(async (url, options) => {
     calls.push({ url, options }); return { ok: true, json: async () => ({ agent: "pi" }) };
@@ -715,11 +752,13 @@ test("user manages Pi through fixed authenticated messages without forwarding ar
   assert.deepEqual(calls.map(call => call.url), ["status", "check", "install", "update"].map(action => `http://127.0.0.1:43187/cli/${action}?agent=pi`));
   assert.ok(calls.every(call => call.options.headers.Authorization === "Bearer test"));
   for (const call of calls.slice(1)) assert.deepEqual(JSON.parse(call.options.body), {});
-  for (const agent of ["unknown", "", null, {}, "pi&command=unsafe"])
+  for (const agent of ["", null, {}, "pi&command=unsafe", "Pi", "../pi", "a".repeat(33)])
     assert.match((await send({ type: "alchemy:cli-install", agent })).error, /Agent/);
-  for (const path of ["/cli/status?agent=pi&agent=codex", "/cli/install?agent=pi", "/cli/status?agent=other"])
+  for (const path of ["/cli/status?agent=pi&agent=codex", "/cli/install?agent=pi", "/cli/status?agent=Other", "/cli/status?agent=pi%26x", "/models?agent=../pi"])
     assert.ok((await send({ type: "alchemy:query", path })).error);
   assert.equal(calls.length, 4);
+  assert.equal((await send({ type: "alchemy:cli-install", agent: "local-cli" })).ok, true);
+  assert.equal(calls.at(-1).url, "http://127.0.0.1:43187/cli/install?agent=local-cli");
 });
 
 test("generation comparison references validate both IDs and retain authentication in the background", async () => {

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { runAgent } from "../bridge/agent.mjs";
+import { runCodex } from "../bridge/codex-agent.mjs";
 import { runGeneration } from "../bridge/generation.mjs";
 import { readModelCatalog } from "../bridge/models.mjs";
 
@@ -52,7 +53,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
   process.env.CODEX_BIN = executable;
   const catalog = await readModelCatalog(dir);
   const modelSettings = { ...catalog.models[0], accountKey: catalog.accountKey, provider: catalog.provider };
-  const common = { imagePath, skillPath, cwd: dir, modelSettings, instruction: "按图号融合", prompt: "确认的提示词", negativePrompt: "" };
+  const common = { run: runCodex, imagePath, skillPath, cwd: dir, modelSettings, instruction: "按图号融合", prompt: "确认的提示词", negativePrompt: "" };
   const cases = [
     { mode: "reenact", subjectImagePath, referenceIndex: 0, paths: [imagePath, subjectImagePath], firstPixel: [0, 0, 255] },
     { mode: "style", subjectImagePath, referenceIndex: 1, paths: [subjectImagePath, imagePath], firstPixel: [255, 0, 0] },

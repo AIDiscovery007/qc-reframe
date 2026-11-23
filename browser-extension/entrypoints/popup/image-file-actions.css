@@ -1,5 +1,3 @@
-.image-file-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.image-file-actions button { flex: 1 1 130px; width: auto; margin: 0; white-space: nowrap; }
 .image-file-notice { flex-basis: 100%; margin: 0; order: 1; }
 .workspace-app .generated-pane .result-bottom { height: auto; min-height: var(--workspace-footer-height); flex-wrap: wrap; }
 .workspace-app .generated-pane .result-bottom button { flex: 1 1 130px; width: auto; margin: 0; white-space: nowrap; }

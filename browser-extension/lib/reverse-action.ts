@@ -1,5 +1,5 @@
 import type { resolveCreation } from "./creation-context";
-import type { Mode, SubjectInput } from "./types";
+import type { Job, Mode, SubjectInput } from "./types";
 
 export function deriveReverseAction({ mode, context, hasSelection, referenceError, subjectUnavailable,
   blocked, generationBlocked, promptEditing, sizeValid }: {
@@ -32,4 +32,37 @@ export function deriveReverseAction({ mode, context, hasSelection, referenceErro
   if (mode === "multi-reenact") reenact = { subjects, basePrompt: instruction };
   else if ((mode === "style" || mode === "reenact") && subjectImage) reenact = { subjectImage, basePrompt: instruction };
   return { instructionStale, genericPrompt, needsPrompt, subjectError, genericHint, reverseHint, reverseDisabled, chainDisabled, reenact };
+}
+
+/** The reverse request an accepted click submits, or nothing when the chosen action is disabled. */
+export function reverseSubmission(action: ReturnType<typeof deriveReverseAction>, generate: boolean) {
+  if (generate ? action.chainDisabled : action.reverseDisabled) return;
+  return { reenact: action.reenact, generate };
+}
+
+export const reverseRunning = (job?: Job) => job?.status === "running" || job?.autoGeneration?.status === "pending";
+
+/**
+ * Cancels the reverse step of the job captured at click time. The per-task lock is synchronous, so a
+ * repeated click before the response cannot send a second request, and other tasks stay cancellable.
+ */
+export function createReverseCancellation(io: {
+  request<T>(message: Record<string, unknown>): Promise<T>;
+  onUpdate(job: Job): void;
+  onError(message: string): void;
+  onPending(ids: string[]): void;
+}) {
+  const pending = new Set<string>();
+  return async (job?: Job) => {
+    if (!job || !reverseRunning(job) || pending.has(job.id)) return;
+    pending.add(job.id);
+    io.onPending([...pending]);
+    io.onError("");
+    try { io.onUpdate(await io.request<Job>({ type: "alchemy:cancel", id: job.id })); }
+    catch (e) { io.onError((e as Error).message); }
+    finally {
+      pending.delete(job.id);
+      io.onPending([...pending]);
+    }
+  };
 }

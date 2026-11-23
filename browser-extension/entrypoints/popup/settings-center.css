@@ -18,7 +18,6 @@
 .settings-center-content .select-field { margin: 18px 0; }
 .settings-center-content .select-control select { background: var(--surface); }
 .settings-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; padding: 4px 10px; font-size: 10px; background: var(--surface); white-space: nowrap; }
-.settings-chip.good::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #829949; }
 .settings-chip.attention { background: var(--yellow); }
 .settings-update-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .settings-update-top strong { font-size: 13px; }
@@ -29,12 +28,10 @@
 .settings-update-card p { font-size: 11px; color: #786b51; line-height: 1.8; }
 .settings-center-content .settings-update-card .primary { background: var(--ink); color: #fff; margin-top: 16px; box-shadow: none; max-width: 220px; }
 .settings-center-content .settings-update-card .primary:disabled { background: #ded8c5; color: #847b69; }
-.settings-command { display: block; overflow-wrap: anywhere; padding: 10px; border-radius: 8px; background: var(--surface-muted); margin-top: 8px; font-size: 10px; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 0; font-size: 12px; }
 .settings-row .settings-label { color: var(--muted); font-size: 11px; }
 .settings-row button { padding: 2px 0; border: 0; background: none; font-size: 11px; text-decoration: underline; text-underline-offset: 4px; }
 .settings-row code { font-size: 10px; overflow-wrap: anywhere; }
-.settings-service-row { margin-top: 18px; }
 .settings-detail { margin-top: 20px; font-size: 10px; color: var(--muted); }
 .settings-detail summary { cursor: pointer; }
 .settings-detail code { display: block; overflow-wrap: anywhere; padding: 10px; border-radius: 8px; background: var(--surface-muted); margin-top: 8px; }

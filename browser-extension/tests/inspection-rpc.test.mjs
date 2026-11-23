@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { withCodex } from "../bridge/codex-rpc.mjs";
-import { runAgent, runCodex } from "../bridge/agent.mjs";
+import { runAgent } from "../bridge/agent.mjs";
+import { runCodex } from "../bridge/codex-agent.mjs";
 import { readModelCatalog } from "../bridge/models.mjs";
 import { runGeneration } from "../bridge/generation.mjs";
 
@@ -68,7 +69,7 @@ test("runAgent registers input-scoped inspection and RPC delivers actual ordered
   const catalog = await readModelCatalog(dir);
   const modelSettings = { ...catalog.models[0], accountKey: catalog.accountKey, provider: catalog.provider };
   const stages = [];
-  const result = await runAgent({ mode: "reenact", imagePath, subjectImagePath, basePrompt: "保留主体", skillPath, cwd: dir, modelSettings, onProgress: ({ stage }) => stages.push(stage) });
+  const result = await runAgent({ run: runCodex, mode: "reenact", imagePath, subjectImagePath, basePrompt: "保留主体", skillPath, cwd: dir, modelSettings, onProgress: ({ stage }) => stages.push(stage) });
   assert.equal(result.promptEn, "cat");
   assert.ok(stages.includes("正在查看图 1整体…"));
   assert.ok(stages.includes("正在检查图 2局部 · 目标放大 3 倍…"));

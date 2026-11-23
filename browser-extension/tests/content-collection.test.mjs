@@ -81,9 +81,7 @@ function setup(t, { reducedMotion = true, allowPanel = false, realPlacement = fa
       },
     },
     "wxt/browser": { browser: { runtime: { onMessage: { addListener(fn) { messageHandler = fn; }, removeListener() {} } } } },
-    "react": { createElement() { assert.ok(allowPanel, "collection must not render the panel"); return {}; } },
-    "react-dom/client": { createRoot() { assert.ok(allowPanel, "collection must not open the panel"); return { render() {}, unmount() {} }; } },
-    "./popup/App": { default: null },
+    "../lib/page-panel": { registeredPagePanel() { assert.ok(allowPanel, "collection must not open the panel"); return pagePanel.mount; } },
     "./popup/style.css?inline": { default: "" },
     "./popup/shell.css?inline": { default: "" },
     "../lib/collection-liquid": { liquidTiming: { duration: 240, ease: "ease-out" }, mountCollectionLiquid: () => ({ update(state) { liquidStates.push({ ...state }); }, dispose() { liquidDisposed = true; } }) },
@@ -95,6 +93,9 @@ function setup(t, { reducedMotion = true, allowPanel = false, realPlacement = fa
       placeImageAction: realPlacement ? placeImageAction : bounds => ({ left: bounds.left + 10, top: bounds.top + 10, right: bounds.left + 50, bottom: bounds.top + 50, compact: false }),
     },
   };
+  // Tests opening the panel start with the bundle already injected unless they model lazy loading.
+  const pagePanel = { mounts: 0, unmounts: 0, mount: undefined };
+  pagePanel.mount = container => { assert.equal(container, shadow.querySelector(".panel-body")); pagePanel.mounts++; return () => { pagePanel.unmounts++; }; };
   const exports = {};
   runInNewContext(compiled, {
     exports, require: name => { assert.ok(name in modules, `unexpected import: ${name}`); return modules[name]; },
@@ -113,7 +114,7 @@ function setup(t, { reducedMotion = true, allowPanel = false, realPlacement = fa
   t.after(() => invalidate());
   return {
     tick() { intervals.forEach(fn => fn()); const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); },
-    liquidStates, get liquidDisposed() { return liquidDisposed; },
+    liquidStates, pagePanel, get liquidDisposed() { return liquidDisposed; },
     requests, notice, retry, timers, document, shadow, host, menu, trigger, openButton, collectButton, workspaceButton: shadow.querySelector(".pick-workspace"), motion, dispose: () => invalidate(),
     hover(image) { hit = image; document.emit("pointermove", { composedPath: () => [], clientX: image.bounds.x + 5, clientY: image.bounds.y + 5 }); },
     click(detail = 1) { trigger.emit("click", { detail }); collectButton.emit("click", { detail }); },
@@ -376,6 +377,36 @@ test("closing the reverse panel keeps the liquid root available for the next men
   assert.equal(ui.liquidStates.at(-1).open, true);
 });
 
+
+test("user opening the panel loads it on demand and keeps the page usable when loading fails", async t => {
+  // Given a page without the panel bundle, When the panel opens, Then it requests the bundle once and mounts after it registers.
+  const ui = setup(t, { allowPanel: true });
+  const mount = ui.pagePanel.mount;
+  ui.pagePanel.mount = undefined;
+  ui.geometry({ type: "alchemy:show" });
+  ui.geometry({ type: "alchemy:show" });
+  assert.deepEqual(ui.requests.map(item => item.message.type), ["alchemy:panel-load"]);
+  assert.equal(ui.shadow.querySelector(".panel").hidden, false);
+  ui.pagePanel.mount = mount;
+  ui.requests[0].resolve(); await settle();
+  assert.equal(ui.pagePanel.mounts, 1);
+  ui.shadow.querySelector(".close").emit("click");
+  assert.equal(ui.pagePanel.unmounts, 1);
+  ui.geometry({ type: "alchemy:show" });
+  assert.equal(ui.requests.length, 1, "an injected bundle is reused without another request");
+  assert.equal(ui.pagePanel.mounts, 2);
+
+  // When injection fails, Then the panel closes and the notice offers a page refresh without a retry.
+  const failing = setup(t, { allowPanel: true });
+  failing.pagePanel.mount = undefined;
+  failing.geometry({ type: "alchemy:show" });
+  failing.requests[0].reject(new Error("逆向面板未能加载，请刷新网页后重试")); await settle(); await settle();
+  assert.equal(failing.shadow.querySelector(".panel").hidden, true);
+  assert.equal(failing.notice.querySelector("strong").textContent, "打开失败");
+  assert.equal(failing.shadow.querySelector(".refresh").hidden, false);
+  assert.equal(failing.retry.hidden, true);
+  assert.equal(failing.pagePanel.mounts, 0);
+});
 
 test("position polling keeps the menu open when CSS rounds fractional coordinates", t => {
   const ui = setup(t, { reducedMotion: false });

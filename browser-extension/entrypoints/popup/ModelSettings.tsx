@@ -4,14 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { query, request } from "../../lib/client";
 import type { ModelCatalog } from "../../lib/types";
 import SelectField from "./SelectField";
+import { agentQuery, type AgentId } from "../../lib/agents";
 
-export default function ModelSettings({ serviceBusy, loginCommand, agent, onBusyChange }: {
-  agent: "codex" | "pi"; onBusyChange(busy: boolean): void; loginCommand?: string; serviceBusy: boolean;
+export default function ModelSettings({ serviceBusy, loginCommand, agent, agentLabel, onBusyChange }: {
+  agent: AgentId; agentLabel: string; onBusyChange(busy: boolean): void; loginCommand?: string; serviceBusy: boolean;
 }) {
   const mounted = useRef(false);
   const pending = useRef(false);
-  const modelPath = agent === "pi" ? "/models?agent=pi" : "/models";
-  const agentLabel = agent === "pi" ? "Pi" : "Codex";
+  const modelPath = `/models${agentQuery(agent)}`;
   const [catalog, setCatalog] = useState<ModelCatalog>();
   const [draft, setDraft] = useState({ model: "", reasoningEffort: "" });
   const [loading, setLoading] = useState(true);
@@ -93,7 +93,7 @@ export default function ModelSettings({ serviceBusy, loginCommand, agent, onBusy
       {efforts.map((option) => <option key={option.reasoningEffort} value={option.reasoningEffort}>{option.reasoningEffort}{option.reasoningEffort === model?.defaultReasoningEffort ? " · 推荐" : ""}</option>)}
     </SelectField>
     </div>
-    {!loading && model && !efforts.length && <p className="fine">{agent === "pi" ? "此模型使用默认推理强度。" : "当前服务未提供可选档位，请重启本机服务或检查 Codex 版本。"}</p>}
+    {!loading && model && !efforts.length && <p className="fine">{agent === "codex" ? "当前服务未提供可选档位，请重启本机服务或检查 Codex 版本。" : "此模型使用默认推理强度。"}</p>}
     <button className="primary" disabled={serviceBusy || !draft.model} aria-disabled={loading || verifying || serviceBusy || !draft.model} onClick={() => void act("alchemy:model-verify")}>
       {verifying ? "正在验证…" : verified ? <><span aria-hidden="true">✓ </span>已验证</> : "验证并使用"}
     </button>

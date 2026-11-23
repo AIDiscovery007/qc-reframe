@@ -31,7 +31,7 @@
 .gallery-empty>.ui-icon{width:36px;height:36px;color:#aaa38f}
 .gallery-empty h2{font-size:19px}
 .gallery-empty p{color:var(--muted);font-size:13px}
-.gallery-empty button,.gallery-main .back-gallery{padding:10px 16px;border:0;border-radius:10px;background:var(--surface-muted)}
+.gallery-empty button{padding:10px 16px;border:0;border-radius:10px;background:var(--surface-muted)}
 .gallery-preview{padding:0;border:0;border-radius:18px;width:min(1120px,94vw);max-width:none;height:min(760px,90dvh);max-height:none;overflow:hidden;background:var(--surface)}
 .gallery-preview::backdrop{background:rgb(30 27 21 / .56)}
 .gallery-preview .preview-layout{display:grid;grid-template-columns:minmax(0,1fr) 270px;height:100%;position:relative}
