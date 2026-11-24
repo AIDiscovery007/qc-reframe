@@ -82,7 +82,7 @@ async function probe(signal) {
   let response;
   try {
     const timeout = AbortSignal.timeout(1500);
-    response = await fetch(`${url}/health`, { headers: { Authorization: `Bearer ${await token()}` }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, redirect: "error" });
+    response = await fetch(`${url}/health`, { headers: { Authorization: `Bearer ${await token()}`, "X-Reframe-Probe": "passive" }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, redirect: "error" });
   } catch (error) {
     signal?.throwIfAborted();
     if (error.cause?.code === "ECONNREFUSED") return null;
