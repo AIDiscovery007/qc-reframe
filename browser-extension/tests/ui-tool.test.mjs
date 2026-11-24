@@ -139,8 +139,8 @@ test('fingerprints are location-independent and detect same-size edits, renames 
 
 test('user（开发者）预览与采集依赖变化会更新fixture指纹', async t => {
   const directory = await temporary(t);
-  // Given an isolated copy of every declared preview/coverage dependency.
-  const files = ['agent-tool/test-impact.mjs', 'agent-tool/test-policy.mjs', 'agent-tool/test-run.mjs', 'agent-tool/ui.mjs', 'agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs',
+  // Given an isolated copy of every declared preview dependency.
+  const files = ['agent-tool/ui.mjs', 'agent-tool/preview.mjs', 'agent-tool/gallery-preview.mjs',
     'browser-extension/bridge/image-order.mjs', 'browser-extension/tests/example.browser.js', 'browser-extension/docs/gallery/example/result.png'];
   for (const file of files) {
     await mkdir(join(directory, file, '..'), { recursive: true });

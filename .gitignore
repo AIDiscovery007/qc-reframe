@@ -25,4 +25,4 @@
 !/.github/workflows/
 /.github/workflows/*
 !/.github/workflows/uiux.yml
-!/.github/workflows/test-full.yml
+!/.github/workflows/release.yml

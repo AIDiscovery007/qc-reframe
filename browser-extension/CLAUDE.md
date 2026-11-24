@@ -15,8 +15,8 @@ QC-Reframe：Chrome MV3 扩展（WXT + React 19 + TypeScript）+ 本机 Node bri
 | `../AGENTS.md` → `../docs/standards/{code,frontend,backend,review}.md` | 改代码前读 code.md；按工作类型补读前端/后端规则；审查读 review.md |
 | `AGENTS.md`（本目录） | 产品决策与兼容约束：五模式职责、图片顺序、项目/快照、生图渠道、UI 与动效约定 |
 | `docs/architecture.md` | 模块所有权、提交时序、改动对应的测试 interface |
-| `../Contribution.md` | BDD 验收、选测/完整回归、Git 与发布流程 |
-| `../agent-tool/README.md` | `preview`、`ui.mjs`、`test-run` 等工具的命令、前置条件与副作用 |
+| `../Contribution.md` | BDD 验收、完整回归、Git 与发布流程 |
+| `../agent-tool/README.md` | `preview`、`ui.mjs` 等工具与完整回归的命令、前置条件与副作用 |
 | `docs/uiux/README.md` | 改 UI 前定位设计来源、组件与场景 |
 | `../GLOSSARY.md` | 领域术语 |
 
@@ -42,7 +42,7 @@ UI 门禁与回归（从仓库根执行；浏览器检查首次需在本目录 `
 node agent-tool/ui.mjs check --changed                 # 静态 UI 规则
 node agent-tool/ui.mjs verify --scenarios ID … [--no-build]   # 定向场景
 node agent-tool/ui.mjs gate --tier browser             # 全部登记场景 + 隔离真实扩展
-node agent-tool/test-run.mjs run --full --base REF --output /abs/new-dir   # 完整回归
+# 完整回归步骤见 ../agent-tool/README.md#完整回归（与 CI 相同）
 ```
 
 `tests/*.browser.js` 不由 `npm test` 运行，而是 `ui.mjs` 场景经 preview 加载的浏览器回归脚本。`prepare/verify/gate/extension/evidence` 共用 `.output/ui-validation.lock`；验证期间不要另行 `npm run build` 或修改受检源码。
