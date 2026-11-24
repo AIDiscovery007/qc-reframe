@@ -9,6 +9,9 @@ export async function serviceRoutes(request, app) {
   const { root, version, dataDir, skillPath, generationSkillPath, instanceId, restartId, allowShutdown, restart, server, state, agents, codexHost, compatibility, requireFeature, cliBusy, codexBusy, imageSettings, magpieInspector, sessions, projects, batches, runtime, taskFeed } = app;
   if (req.method === "GET" && path === "/health") {
     validateQuery(["includeHidden"]);
+    // The service manager polls readiness passively; only client health checks refresh CLI state.
+    // A header keeps older services, which reject unknown query keys, compatible with newer managers.
+    const passive = req.headers["x-reframe-probe"] === "passive";
     const showHidden = includeHidden();
     let skill;
     try {
@@ -16,8 +19,10 @@ export async function serviceRoutes(request, app) {
         .match(/^name:\s*(.+)$/m)?.[1]
         ?.trim();
     } catch {}
-    void codexHost.cli.status?.().catch(() => {});
-    if (!cliBusy()) void compatibility.getCompatibility().catch(() => {});
+    if (!passive) {
+      void codexHost.cli.status?.().catch(() => {});
+      if (!cliBusy()) void compatibility.getCompatibility().catch(() => {});
+    }
     const cliState = codexHost.cli.peek?.();
     const cliSummary = cliState ? Object.fromEntries(["installed", "version", "source", "updateAvailable", "latestVersion", "checkError", "reason", "comparisonReference"].map(key => [key, cliState[key]])) : null;
     json(200, {
