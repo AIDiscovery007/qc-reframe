@@ -19,7 +19,7 @@
 
 `--base REF`指定增量基准，默认HEAD并包含工作区与未跟踪文件。CI使用PR base SHA；无可用基准时使用Git空树比较，不能静默退回HEAD漏检；browser/full门禁始终覆盖全部登记场景，部分结果不能充当完整门禁。错误退出1、参数错误退出2；所有报告记录具体失败和证据路径。
 
-CI经文档分类后运行完整回归，按基线/require_visual一次选择browser或full，full已包含browser，不串联重跑；同一构建用于类型、产品与工具验证。CI首次运行上传Linux候选且明确标出视觉待审阅。下载artifact后先看候选HTML、来源与环境，再依次执行三个明确场景的`accept`，基线目录使用`browser-extension/docs/uiux/visual-baselines/linux`。任一Linux manifest入库后CI自动启用完整视觉检查，另可手动require_visual强制检查；不能只接受一个场景就宣称全部通过。macOS基线放`visual-baselines/darwin`，本地full显式传`--baseline-dir`。CI/操作系统升级导致环境不兼容时重新审阅，不放宽阈值。
+CI的`full`档运行完整回归，按基线/require_visual一次选择browser或full，full已包含browser，不串联重跑；同一构建用于类型、产品与工具验证。CI首次运行上传Linux候选且明确标出视觉待审阅。下载artifact后先看候选HTML、来源与环境，再依次执行三个明确场景的`accept`，基线目录使用`browser-extension/docs/uiux/visual-baselines/linux`。任一Linux manifest入库后CI自动启用完整视觉检查，另可手动require_visual强制检查；不能只接受一个场景就宣称全部通过。macOS基线放`visual-baselines/darwin`，本地full显式传`--baseline-dir`。CI/操作系统升级导致环境不兼容时重新审阅，不放宽阈值。
 
 CI任务需在远端实际运行后才能认定CI通过；分支保护/必需检查设置由仓库维护者配置。该实施不自动推送、发布或更改远端策略。
 

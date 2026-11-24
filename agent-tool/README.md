@@ -19,17 +19,19 @@
 
 ## CI 差异与文档检查
 
-`ci.mjs` 仅依赖 Node 内置模块与 Git，不需要安装扩展依赖。从仓库根目录运行，读取 `GITHUB_EVENT_NAME`、`GITHUB_EVENT_PATH`（事件 JSON）及 push 的 `GITHUB_SHA`。`classify` 输出 `docs` 或 `full`、理由、提交与路径；设置 `GITHUB_OUTPUT` / `GITHUB_STEP_SUMMARY` 时追加分类输出和摘要。`docs` 重新验证分类、执行 `git diff --check` 和仓库链接检查，失败非零退出。
+`ci.mjs` 仅依赖 Node 内置模块与 Git，不需要安装扩展依赖。从仓库根目录运行，读取 `GITHUB_EVENT_NAME`、`GITHUB_EVENT_PATH`（事件 JSON）及 push 的 `GITHUB_SHA`。`classify` 输出 `docs`、`backend` 或 `full`、理由、提交与路径；设置 `GITHUB_OUTPUT` / `GITHUB_STEP_SUMMARY` 时追加分类输出和摘要。`docs` 重新验证分类、执行 `git diff --check` 和仓库链接检查，失败非零退出。
 
-- 轻量白名单：根 `README.md`、`GLOSSARY.md`、`AGENTS.md`、`Contribution.md`；插件根 `README.md`、`AGENTS.md`；`browser-extension/docs/` 下的 `FEATURES.md`、`architecture.md`、`INSTALL_WITH_CODEX.md`；`browser-extension/docs/releases/` 的直属 `.md` 普通非执行文件。其他路径进入统一代码验证入口，包括工具说明、UIUX规范/基线、画廊、源码、依赖与CI自身。
-- PR比较 merge-base→head 的累计差异；push比较 before→sha。改名检查两端，删除仍参与分类；空差异、未知事件、基准不可读、非普通文件或Git错误均回退代码验证，手动触发始终完整。这里的 `full` 只是“非 docs”分类，代码路径运行下述完整回归；视觉层级由既有基线/手动参数决定。
+- 按改动路径分三档，取全部改动中最重的一档：
+  - `docs`：仓库内任意 `.md` 与 `.gitignore`；插件目录下仅插件根 `.md` 和 `docs/`（不含 `docs/uiux/`、`docs/gallery/`）。产品、预览或 UI 工具会读取的 Markdown（`.agents/` 技能、`public/`、UIUX 契约、画廊 fixture）按代码处理。只做 `git diff --check` 与仓库链接检查。
+  - `backend`：`bridge/`（`image-order.mjs` 除外，预览会导入）、`scripts/manage.mjs`、`scripts/native-host.mjs` 及 `tests/*.test.mjs`。构建、类型检查、全部产品测试，跳过工具自测与 UI 门禁。
+  - `full`：其余一切，包括前端、工具、依赖与工作流，运行下述完整回归。
+- PR比较 merge-base→head 的累计差异；push比较 before→sha。改名检查两端，删除仍参与分类；空差异、未知事件、基准不可读、非普通文件或Git错误均回退代码验证，手动触发始终完整。视觉层级由既有基线/手动参数决定。
 - 文档检查读取提交中的文件，不读取未跟踪工作区文件作为有效目标。检查变更文档内的相对文件/目录链接及图片路径，也扫描其他白名单文档中因删除/改名新失效的入链；未修改文档原有断链不追溯阻断。支持仓库常用行内链接和引用定义、角括号及URL编码路径；忽略代码示例、协议URL、绝对机器路径及纯锚点，不联网、不验证标题锚点或完整CommonMark/HTML语法。
-- 轻量路径只执行checkout、Node准备、分类和文档检查，不恢复npm缓存、不安装依赖/Chromium、不构建、不启动UI门禁、不上传UI产物。代码路径保留缓存、构建、类型、静态、产品/工具与浏览器验证；已准备报告目录时上传证据。
 - 副作用：脚本启动只读Git子进程，只向stdout及显式GitHub输出文件写入；不访问账户、真实项目数据、模型或网络，不启动服务器/浏览器。`node --test agent-tool/ci.test.mjs` 在OS临时目录创建、提交、改名和删除合成Git文件，结束自动清理；无需产品构建。
 
 ## 完整回归
 
-CI 的代码路径（PR、push 到 main、每日兜底、发布标签）每次运行同一套完整回归，不做选测。本地复现按相同顺序从仓库根执行：
+`full` 档（以及每日兜底、手动触发与发布标签）运行完整回归。本地复现按相同顺序从仓库根执行：
 
 ```bash
 node agent-tool/ui.mjs prepare                       # 构建一次，写入 UI 工具使用的构建指纹
@@ -139,7 +141,7 @@ node agent-tool/ui.mjs evidence --report /absolute/gate.json --sha256 DIGEST --r
 
 新命令沿用exit0成功、exit1失败/未覆盖、exit2参数错误。候选生成成功表示材料可审阅，不代表视觉验收通过；`gate browser`也不包含视觉批准。OS临时目录统一保存报告，CI设置TMPDIR后归档，扩展profile正常清理但证据保留。
 
-[GitHub workflow](../.github/workflows/uiux.yml)在PR、main push、每日兜底和发布标签上保留同一个 `UIUX infrastructure / uiux` 检查，先按文档白名单分流。纯说明文档只做轻量检查，其他改动运行上方完整回归。初始Linux基线缺失时明确列出待审阅并上传候选；指定workflow_dispatch的require_visual或存在Linux基线manifest后运行视觉full层级，缺少任一核心场景即失败。仓库分支保护须由维护者将此job设为必需检查；本地文件存在不能证明远端CI执行或分支保护已启用。Mac与Linux基线分目录，不能互相冒用。
+[GitHub workflow](../.github/workflows/ci.yml)在PR、main push、每日兜底和发布标签上保留同一个必需检查 `CI / ci`，按上述三档分流。初始Linux基线缺失时明确列出待审阅并上传候选；指定workflow_dispatch的require_visual或存在Linux基线manifest后运行视觉full层级，缺少任一核心场景即失败。本地文件存在不能证明远端CI执行或分支保护已启用。Mac与Linux基线分目录，不能互相冒用。
 
 详细设计变更、到期例外与首次基线流程见[维护指南](../browser-extension/docs/uiux/maintenance.md)。
 

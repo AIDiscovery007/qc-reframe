@@ -12,7 +12,7 @@ concurrency:
 jobs:
   verify:
     # The exact tagged commit must pass the complete regression before anything is published.
-    uses: ./.github/workflows/uiux.yml
+    uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
       issues: write

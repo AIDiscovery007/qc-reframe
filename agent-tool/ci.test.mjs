@@ -47,11 +47,29 @@ test('PR examines cumulative branch diff and excludes unrelated base advancement
   assert.equal(result.base, f.base);
 });
 
-test('mixed, unknown Markdown, UI contracts/baselines, tools, dependencies and workflow require full', t => {
+test('Markdown outside product inputs and .gitignore stay lightweight', t => {
   const f = fixture(t);
-  for (const name of ['unknown.md', '.agents/roles/executor.md', 'agent-logs/session.md', 'docs/standards/code.md', 'browser-extension/docs/uiux/README.md', 'browser-extension/docs/uiux/visual-baselines/linux/manifest.json', 'agent-tool/README.md', 'browser-extension/package-lock.json', '.github/workflows/uiux.yml', 'source.js']) {
+  for (const name of ['unknown.md', '.claude/skills/example/SKILL.md', 'docs/standards/code.md', 'agent-tool/README.md', 'browser-extension/CLAUDE.md', 'browser-extension/docs/plans/next.md', '.gitignore']) {
+    f.git('reset', '--hard', f.base);
+    f.write(name, 'change\n');
+    assert.equal(f.push(f.commit()).mode, 'docs', name);
+  }
+});
+
+test('bridge, service scripts and product tests run the backend lane, alone or with docs', t => {
+  const f = fixture(t);
+  for (const name of ['browser-extension/bridge/server.mjs', 'browser-extension/bridge/routes/service.mjs', 'browser-extension/scripts/manage.mjs', 'browser-extension/tests/install.test.mjs']) {
     f.git('reset', '--hard', f.base);
     f.write('README.md', 'docs\n'); f.write(name, 'change\n');
+    assert.equal(f.push(f.commit()).mode, 'backend', name);
+  }
+});
+
+test('product-read Markdown, preview inputs, frontend, tools, dependencies and workflows require full', t => {
+  const f = fixture(t);
+  for (const name of ['browser-extension/.agents/skills/alchemy/SKILL.md', 'browser-extension/docs/uiux/README.md', 'browser-extension/docs/gallery/README.md', 'browser-extension/public/sounds/README.md', 'browser-extension/docs/uiux/visual-baselines/linux/manifest.json', 'browser-extension/bridge/image-order.mjs', 'browser-extension/scripts/icons.mjs', 'browser-extension/tests/end-to-end.browser.js', 'browser-extension/lib/client.ts', 'agent-tool/ci.mjs', 'browser-extension/package-lock.json', '.github/workflows/ci.yml', 'source.js']) {
+    f.git('reset', '--hard', f.base);
+    f.write('browser-extension/bridge/server.mjs', 'backend\n'); f.write(name, 'change\n');
     assert.equal(f.push(f.commit()).mode, 'full', name);
   }
 });
@@ -81,7 +99,9 @@ test('deletion checks incoming links; rename considers both names', t => {
   assert.equal(f.push(f.commit(), base).mode, 'full');
   f.git('reset', '--hard', base);
   renameSync(path.join(f.cwd, 'browser-extension/docs/releases/old.md'), path.join(f.cwd, 'unknown.md'));
-  assert.equal(f.push(f.commit(), base).mode, 'full');
+  result = f.push(f.commit(), base);
+  assert.equal(result.mode, 'docs');
+  assert.throws(() => checkDocs(result, f.cwd), /链接失效/);
 });
 
 test('ordinary unreferenced document deletion passes', t => {

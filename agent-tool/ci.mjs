@@ -4,14 +4,16 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const exactDocs = new Set([
-  'README.md', 'GLOSSARY.md', 'AGENTS.md', 'Contribution.md',
-  'browser-extension/README.md', 'browser-extension/AGENTS.md',
-  'browser-extension/docs/FEATURES.md', 'browser-extension/docs/architecture.md',
-  'browser-extension/docs/INSTALL_WITH_CODEX.md',
-]);
-export const isDoc = file => exactDocs.has(file)
-  || /^browser-extension\/docs\/releases\/[^/]+\.md$/.test(file);
+// Documentation: any Markdown outside the extension, plus the extension's own docs.
+// Markdown the product, preview or UI tools read (agent skills, shipped assets,
+// UIUX contracts, gallery fixtures) is code. .gitignore never changes a commit's tracked content.
+const extensionDoc = /^browser-extension\/(?:[^/]+\.md|docs\/(?!uiux\/|gallery\/)[\s\S]+\.md)$/;
+export const isDoc = file => file === '.gitignore'
+  || (file.endsWith('.md') && (!file.startsWith('browser-extension/') || extensionDoc.test(file)));
+// Bridge and service scripts run only in product tests; the UI preview and gate never load them,
+// except image-order.mjs, which the preview imports.
+export const isBackend = file => file !== 'browser-extension/bridge/image-order.mjs'
+  && /^browser-extension\/(?:bridge\/.+|scripts\/(?:manage|native-host)\.mjs|tests\/[^/]+\.test\.mjs)$/.test(file);
 const decode = buffer => new TextDecoder('utf-8', { fatal: true }).decode(buffer);
 function git(cwd, ...args) {
   return decode(execFileSync('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }));
@@ -56,7 +58,11 @@ export function classify({ cwd = process.cwd(), eventName, event, sha } = {}) {
     }
     if (!files.size) throw Error('空差异');
     const result = { base, head, files: [...files] };
-    if ([...files].some(file => !isDoc(file))) return { ...result, mode: 'full', reason: '包含白名单之外路径' };
+    if ([...files].some(file => !isDoc(file))) {
+      return [...files].every(file => isDoc(file) || isBackend(file))
+        ? { ...result, mode: 'backend', reason: '仅后端代码、产品测试与文档' }
+        : { ...result, mode: 'full', reason: '包含前端、工具、依赖或工作流路径' };
+    }
     const before = tree(cwd, base), after = tree(cwd, head);
     for (const file of files) {
       for (const entry of [before.get(file), after.get(file)].filter(Boolean)) {

@@ -1,4 +1,4 @@
-name: UIUX infrastructure
+name: CI
 on:
   pull_request:
   push:
@@ -17,10 +17,11 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: uiux-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  uiux:
+  # Lanes by changed paths: docs (links only), backend (product tests), full (adds tool tests and UI gate).
+  ci:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -40,14 +41,14 @@ jobs:
         if: steps.scope.outputs.mode == 'docs'
         run: node agent-tool/ci.mjs docs
       - name: Enable npm cache
-        if: steps.scope.outputs.mode == 'full'
+        if: steps.scope.outputs.mode != 'docs'
         uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: browser-extension/package-lock.json
       - name: Install dependencies and Chromium
-        if: steps.scope.outputs.mode == 'full'
+        if: steps.scope.outputs.mode != 'docs'
         working-directory: browser-extension
         run: |
           npm ci
@@ -55,12 +56,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/reframe-ui"
           echo "TMPDIR=$RUNNER_TEMP/reframe-ui" >> "$GITHUB_ENV"
       - name: Build once (fingerprinted for UI tools) and type check
-        if: steps.scope.outputs.mode == 'full'
+        if: steps.scope.outputs.mode != 'docs'
         run: |
           node agent-tool/ui.mjs prepare
           npm --prefix browser-extension run compile
       - name: Product tests
-        if: steps.scope.outputs.mode == 'full'
+        if: steps.scope.outputs.mode != 'docs'
         working-directory: browser-extension
         run: npm test
       - name: Tool tests
@@ -79,15 +80,15 @@ jobs:
           node agent-tool/ui.mjs gate --tier "$TIER" --no-build --base "$BASE" --baseline-dir "$BASELINES" --reason ci
           if [ "$TIER" = browser ]; then echo 'Visual acceptance is pending human review of the uploaded Linux candidates.' >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Reports, candidates, screenshots and failure traces
-        if: always() && steps.scope.outputs.mode == 'full'
+        if: always() && steps.scope.outputs.mode != 'docs'
         uses: actions/upload-artifact@v4
         with:
-          name: uiux-evidence-attempt-${{ github.run_attempt }}
+          name: ci-evidence-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/reframe-ui
           if-no-files-found: ignore
           retention-days: 14
   alert:
-    needs: uiux
+    needs: ci
     if: failure() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     permissions:

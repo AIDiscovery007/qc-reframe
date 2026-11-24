@@ -9,6 +9,11 @@
 !/browser-extension/
 !/agent-tool/
 
+# Track repository skills only; local Claude settings stay ignored.
+!/.claude/
+/.claude/*
+!/.claude/skills/
+
 # Track only the four engineering standards.
 !/docs/
 /docs/*
@@ -24,5 +29,5 @@
 /.github/*
 !/.github/workflows/
 /.github/workflows/*
-!/.github/workflows/uiux.yml
+!/.github/workflows/ci.yml
 !/.github/workflows/release.yml
