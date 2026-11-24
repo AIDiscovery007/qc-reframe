@@ -5,7 +5,7 @@ import { root, syncCatalog } from './inventory.mjs';
 import { checkStyles } from './static.mjs';
 import { maintain } from './maintenance.mjs';
 import { validationWindow } from './build.mjs';
-import { evidenceState, evidenceEnvironment, sealArtifacts } from './evidence.mjs';
+import { evidenceState, evidenceEnvironment, sealArtifacts, validateCoverage } from './evidence.mjs';
 
 export async function check({ changed = true, base = 'HEAD' } = {}) {
   const result = await checkStyles({ root, changed, base });
@@ -67,6 +67,8 @@ async function runGate({ tier = 'quick', base = 'HEAD', build = true, baselineDi
       result.artifacts = await sealArtifacts(result);
     }
     result.status = result.steps.every(step => step.status === 'passed') ? 'passed' : 'failed';
+    // A scene can pass with a skipped assertion; only the declared capability skips may pass the gate.
+    if (result.status === 'passed' && tier !== 'quick') result.skippedChecks = validateCoverage(result);
   } catch (error) { result.status = 'failed'; result.error = error.message; }
   result.finishedAt = new Date().toISOString();
   result.timing.durationMs = Date.parse(result.finishedAt) - Date.parse(result.startedAt);
