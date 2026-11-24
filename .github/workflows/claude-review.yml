@@ -1,0 +1,47 @@
+name: Claude PR review
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  actions: read
+  id-token: write
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Review with repository rules
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: true
+          use_sticky_comment: true
+          prompt: |
+            仓库：${{ github.repository }}
+            PR：#${{ github.event.pull_request.number }}
+            受审 head：${{ github.event.pull_request.head.sha }}
+            base：${{ github.event.pull_request.base.ref }}
+
+            你是本仓库的 PR 审查者。先读 AGENTS.md 与 docs/standards/review.md，
+            再按改动涉及的领域读取 docs/standards/ 下对应规则和 browser-extension/AGENTS.md。
+            严格按 Review 规则 R1–R6 执行：
+            - 用 `gh pr diff` 与 `gh pr view` 固定受审范围，沿调用链读取必要上下文。
+            - 每个确认问题用行内评论标在最小相关行段，写明触发条件、实际与预期、影响和严重程度（P0–P3）；未运行验证的标注“静态推导”。
+            - 用 `gh pr checks` 读取 CI 状态，只引用实际结果，不自行运行测试，也不把未完成或失败的检查写成通过。
+            - 总评论依次写：受审范围与 head SHA、按严重程度排序的问题、验证与限制、结论（通过 / 需修改 / 待验证）。
+            - 只做审查：不修改文件、不提交、不推送、不批准或合并 PR。
+            使用简体中文。
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh pr comment:*)"

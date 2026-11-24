@@ -104,6 +104,8 @@ UI 改动用 `npm run preview` 检查相关状态，再按任务需要验收实�
 
 由具备权限的维护者连接仓库，并在 Codex 的仓库设置中启用 Automatic review，核对个人偏好和触发条件；操作以 [OpenAI 官方说明](https://learn.chatgpt.com/docs/third-party/github)为准。审查遵循适用的 AGENTS，采用 [Review 规则](docs/standards/review.md)，保留 PR、受审提交与实际审查记录链接；规则文件存在不证明服务已启用或审查已完成。审查发现按已有授权修复，保留现有 CI、独立复核、人工验收及合并/发布权限；GitHub 报告可供审阅，但不能作为本地 Mac 的同机 `evidence` 复用，亦不能跨 Mac/Linux 冒用验证结果。
 
+`.github/workflows/claude-review.yml` 在非草稿 PR 打开、更新或重新打开时调用 Claude，按同一份 Review 规则只读审查：行内标注问题、读取 CI 状态，并在单条置顶评论中给出结论；它不修改代码、不批准或合并。启用前由仓库管理员安装 [Claude GitHub App](https://github.com/apps/claude)，并在仓库 Secrets 中配置 `CLAUDE_CODE_OAUTH_TOKEN`（本机 `claude setup-token` 生成）或 `ANTHROPIC_API_KEY`。该工作流须先合入默认分支，之后的 PR 才能通过 action 的工作流一致性校验。它与 Codex 自动审查并存时各自独立，结论不互相替代。
+
 ## 发布新版本：先提交，再发布
 
 1. 确定目标版本，更新 `package.json` 和 `package-lock.json` 中的根版本。WXT 从包版本生成 manifest；同步 README 当前版本、安装 Prompt、克隆标签、下载链接和安装指引，不复制旧版功能日志到首页。
