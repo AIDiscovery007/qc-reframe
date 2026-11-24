@@ -29,5 +29,5 @@
 /.github/*
 !/.github/workflows/
 /.github/workflows/*
-!/.github/workflows/uiux.yml
+!/.github/workflows/ci.yml
 !/.github/workflows/release.yml
