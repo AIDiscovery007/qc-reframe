@@ -2,6 +2,8 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Rehearsal on main: same regression, packaging and checks, no Release is created.
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -22,6 +24,7 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.ref_name }}
+      REHEARSAL: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -36,6 +39,7 @@ jobs:
         run: |
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$TAG is not on main"; exit 1; }
           VERSION=$(node -p "require('./browser-extension/package.json').version")
+          if [ "$REHEARSAL" = true ]; then TAG="v$VERSION"; echo "TAG=$TAG" >> "$GITHUB_ENV"; fi
           [ "v$VERSION" = "$TAG" ] || { echo "::error::package.json is $VERSION, tag is $TAG"; exit 1; }
           test -f "browser-extension/docs/releases/$TAG.md" || { echo "::error::missing browser-extension/docs/releases/$TAG.md"; exit 1; }
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
@@ -58,4 +62,8 @@ jobs:
           case "$TAG" in *-*) FLAGS+=(--prerelease);; esac
           NOTES="browser-extension/docs/releases/$TAG.md"
           TITLE=$(sed -n '1s/^# //p' "$NOTES")
+          if [ "$REHEARSAL" = true ]; then
+            echo "Rehearsal: would publish $TAG ($TITLE) with $ZIP and SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           gh release create "$TAG" --verify-tag --title "${TITLE:-$TAG}" --notes-file "$NOTES" "${FLAGS[@]}" "$ZIP" browser-extension/.output/SHA256SUMS
