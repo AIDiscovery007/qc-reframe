@@ -47,7 +47,7 @@ node agent-tool/ui.mjs gate --tier browser             # 全部登记场景 + �
 
 `tests/*.browser.js` 不由 `npm test` 运行，而是 `ui.mjs` 场景经 preview 加载的浏览器回归脚本。`prepare/verify/gate/extension/evidence` 共用 `.output/ui-validation.lock`；验证期间不要另行 `npm run build` 或修改受检源码。
 
-本机服务：`npm run setup | start | stop | status | doctor | pair`；`setup` 为 macOS 上已安装的 Chrome、Codex 注册原生按需启动器（尚待真实浏览器验证），也可 `npm run launcher:install -- chrome|codex` 单独注册。`npm run package:runtime` 在构建后生成 Release 运行包，`scripts/install.sh` 是对应的一键安装器。扩展 ID 由 manifest key 固定。只管理自己启动的服务，不杀不明进程、不绕过端口冲突。
+本机服务：`npm run setup | start | stop | status | doctor | pair`；`setup` 为 macOS 上已安装的 Chrome、Codex 注册原生按需启动器（2026-11-26 已在 macOS 真机验证：Chrome 与 Codex 内置浏览器打开 Reframe 时各自都能唤醒已停止的服务），也可 `npm run launcher:install -- chrome|codex` 单独注册。`npm run package:runtime` 在构建后生成 Release 运行包，`scripts/install.sh` 是对应的一键安装器。扩展 ID 由 manifest key 固定。只管理自己启动的服务，不杀不明进程、不绕过端口冲突。
 
 ## 架构要点
 
