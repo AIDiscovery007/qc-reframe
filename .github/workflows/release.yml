@@ -43,7 +43,7 @@ jobs:
           [ "v$VERSION" = "$TAG" ] || { echo "::error::package.json is $VERSION, tag is $TAG"; exit 1; }
           test -f "browser-extension/docs/releases/$TAG.md" || { echo "::error::missing browser-extension/docs/releases/$TAG.md"; exit 1; }
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-      - name: Build release ZIP and checksums
+      - name: Build release ZIP, runtime package, installer and checksums
         working-directory: browser-extension
         run: |
           npm ci
@@ -51,7 +51,10 @@ jobs:
           ZIP=".output/qc-reframe-extension-$VERSION-chrome.zip"
           test -f "$ZIP" || { ls .output; echo "::error::expected $ZIP"; exit 1; }
           [ "$(unzip -p "$ZIP" manifest.json | node -p 'JSON.parse(require("fs").readFileSync(0)).version')" = "$VERSION" ] || { echo '::error::ZIP manifest version mismatch'; exit 1; }
-          (cd .output && sha256sum "$(basename "$ZIP")" > SHA256SUMS)
+          # The runtime package and installer keep fixed names so releases/latest/download/ always resolves.
+          npm run package:runtime
+          cp scripts/install.sh .output/install.sh
+          (cd .output && sha256sum "$(basename "$ZIP")" qc-reframe-runtime.tar.gz install.sh > SHA256SUMS)
           echo "ZIP=browser-extension/$ZIP" >> "$GITHUB_ENV"
       - name: Publish GitHub release
         env:
@@ -63,7 +66,9 @@ jobs:
           NOTES="browser-extension/docs/releases/$TAG.md"
           TITLE=$(sed -n '1s/^# //p' "$NOTES")
           if [ "$REHEARSAL" = true ]; then
-            echo "Rehearsal: would publish $TAG ($TITLE) with $ZIP and SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
+            echo "Rehearsal: would publish $TAG ($TITLE) with $ZIP, qc-reframe-runtime.tar.gz, install.sh and SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          gh release create "$TAG" --verify-tag --title "${TITLE:-$TAG}" --notes-file "$NOTES" "${FLAGS[@]}" "$ZIP" browser-extension/.output/SHA256SUMS
+          OUT=browser-extension/.output
+          gh release create "$TAG" --verify-tag --title "${TITLE:-$TAG}" --notes-file "$NOTES" "${FLAGS[@]}" \
+            "$ZIP" "$OUT/qc-reframe-runtime.tar.gz" "$OUT/install.sh" "$OUT/SHA256SUMS"

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { query, request } from "../../lib/client";
 import { pollWhileVisible } from "../../lib/visible-poll";
 import { waitForServiceRestart, type RestartTicket, type ServiceHealth } from "../../lib/service-restart";
+import StartCommand from "./StartCommand";
 
 export default function ServiceRestart({ connected, busy, onConnected }: { connected: boolean; busy: boolean; onConnected(): void }) {
   const [health, setHealth] = useState<ServiceHealth>();
@@ -54,6 +55,7 @@ export default function ServiceRestart({ connected, busy, onConnected }: { conne
   return <section className="settings-update-card" aria-label="重启本机服务" aria-busy={running}>
     <div className="settings-update-top"><strong>本机服务{health?.version ? ` · ${health.version}` : ""}</strong></div>
     <p className="settings-operation-status" role="status">{message}</p>
+    {(!connected || unreachable) && !running && <StartCommand />}
     {error && <div className="settings-info settings-error" role="alert">{error}</div>}
     <button className="primary" disabled={running || !connected || !health?.canRestart || serviceBusy} onClick={() => void restart()}>
       {phase === "requesting" ? "正在重启…" : phase === "waiting" ? "等待重新连接…" : "重启本机服务"}

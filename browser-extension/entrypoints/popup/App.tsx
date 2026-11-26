@@ -14,6 +14,7 @@ import { createWorkspaceOpener, draftSnapshot, projectDraft, workspaceContext, t
 import { resultDrawers, resultDrawerView } from "../../lib/result-drawer";
 import { createGenerationSettings, initialGenerationChannel } from "../../lib/generation-settings";
 import { initialServiceStatus, pollServiceHealth } from "../../lib/service-health";
+import StartCommand from "./StartCommand";
 import { createSurfaceSync, type SurfaceSync } from "../../lib/surface-sync";
 import { hydrateProjectInput, hydrationDependencies, inputConflict, openProject as openProjectInputs, restoreJobReference } from "../../lib/project-inputs";
 import { projectVisibilityActions, type VisibilityNotice } from "../../lib/project-visibility";
@@ -566,6 +567,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
       {!settings && (!connected || connectionText === "未找到图片逆向技能") && (
         <div className="error" role="alert">{connectionText} <RecoveryAction error={connectionText} /></div>
       )}
+      {!settings && !embedded && !connected && connectionText !== initialServiceStatus.connectionText && <StartCommand />}
       {connected && (!selectedModel || reverseAgent === "codex" && cliStatus && !cliStatus.installed) && !settings && <div className="model-notice">
         <span>{reverseAgent === "codex" && cliStatus && !cliStatus.installed ? "未找到 Codex CLI，请先完成安装" : "先为 QC-Reframe 选择并验证模型"}</span>
         <button className="text-button" onClick={() => openRecovery(reverseAgent === "codex" && cliStatus && !cliStatus.installed ? "cli" : "models")}>{reverseAgent === "codex" && cliStatus && !cliStatus.installed ? "检查 Codex" : "选择模型"}</button>

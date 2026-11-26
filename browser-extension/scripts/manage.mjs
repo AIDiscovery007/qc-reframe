@@ -1,4 +1,5 @@
-// Local lifecycle commands. No model calls, browser-profile edits, or global config writes.
+// Local lifecycle commands. No model calls, browser-profile edits, or global config writes;
+// setup only registers this installation's launcher in browsers' NativeMessagingHosts folders.
 import { access, mkdir, open, readFile, rmdir, writeFile, rename } from "node:fs/promises";
 import { constants } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
@@ -8,10 +9,10 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { storagePaths, ensureStorage, migrateStorage, moveLegacyFile, readStoredConfig, rotateServiceLog } from "../bridge/storage.mjs";
 import { connectionOrigins } from "../bridge/connection.mjs";
-import { registerLauncher, serveNative } from "./native-host.mjs";
+import { registerInstalledLaunchers, registerLauncher, serveNative } from "./native-host.mjs";
 
-// Preserve the installer's path spelling: Chromium derives the extension ID
-// from that path, including macOS /var versus /private/var aliases.
+// Preserve the installer's path spelling: the launcher records it as its owner,
+// including macOS /var versus /private/var aliases.
 const root = resolve(dirname(process.argv[1]), "..");
 const dataDir = resolve(process.env.ALCHEMY_DATA_DIR || join(root, ".local"));
 const paths = storagePaths(dataDir);
@@ -98,23 +99,50 @@ function connectionInfo() {
   console.log(`\n服务：${url}\n扩展目录：${join(root, ".output/chrome-mv3")}\n数据目录：${dataDir}\n连接：从上述目录加载的扩展会自动连接，无需填写配对码。\n首次加载说明：${join(root, "docs/INSTALL_WITH_CODEX.md")}\n检查：npm run status　停止：npm stop`);
 }
 
+// A service that answered probe() holds this installation's token. Same version: reuse it.
+// Older managed version: replace it after preflight, so a failed check leaves it running.
+function runningService(existing) {
+  if (!existing) return "absent";
+  if (existing.version !== version) {
+    if (!existing.managed) throw new Error(`已运行 ${existing.version}，当前文件为 ${version}。此服务由原终端启动，请在原终端按 Ctrl+C 停止后再运行 npm start。`);
+    return "outdated";
+  }
+  if (!existing.ready) throw new Error("服务已运行，但 Alchemy skill 未就绪。请先停止服务并运行 npm run doctor。");
+  return "current";
+}
+
 async function start(env, { signal, automatic = false } = {}) {
-  const reuse = existing => {
-    if (!existing) return false;
-    if (existing.version !== version) throw new Error(`已运行 ${existing.version}，当前文件为 ${version}。请先停止旧服务，再运行 npm start。`);
-    if (!existing.ready) throw new Error("服务已运行，但 Alchemy skill 未就绪。请先停止服务并运行 npm run doctor。");
-    if (!automatic) {
-      console.log("本机服务已运行，复用现有服务和配对码。");
-      connectionInfo();
-    }
-    return true;
+  const reuse = () => {
+    if (automatic) return;
+    console.log("本机服务已运行，复用现有服务和配对码。");
+    connectionInfo();
   };
-  if (reuse(await probe(signal))) return;
+  if (runningService(await probe(signal)) === "current") return reuse();
   const release = await prepareStart(env, !automatic, signal);
   try {
     // Another manager may have completed startup between the first probe and lock.
-    if (!reuse(await probe(signal))) await launch(env, { signal, quiet: automatic });
+    const existing = await probe(signal);
+    const state = runningService(existing);
+    if (state === "current") return reuse();
+    if (state === "outdated") {
+      if (!automatic) console.log(`停止旧版本服务 ${existing.version}，启动 ${version}…`);
+      // The service refuses to stop while tasks run, so an upgrade never interrupts work.
+      try { await stopService(signal); }
+      catch (error) { throw new Error(`旧版本服务 ${existing.version} 未停止，未启动 ${version}：${error.message}`); }
+    }
+    await launch(env, { signal, quiet: automatic });
   } finally { await release(); }
+}
+
+async function stopService(signal) {
+  const timeout = AbortSignal.timeout(5000);
+  const response = await fetch(`${url}/shutdown`, {
+    method: "POST", headers: { Authorization: `Bearer ${await token()}` }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+  });
+  const value = await response.json();
+  if (!response.ok) throw new Error(value.error || "停止失败");
+  for (let i = 0; i < 20; i++) { if (!await probe(signal)) return; await sleep(100, signal); }
+  throw new Error("停止请求已发送，但服务尚未退出，请检查 npm run status。");
 }
 
 // Hold the startup lock from preflight through handoff; neither path reacquires it.
@@ -181,13 +209,13 @@ async function main() {
   if (command === "native-host") return serveNative(signal => start({ ...process.env }, { signal, automatic: true }));
   const env = await environment();
   if (command === "native-install" || command === "native-uninstall") {
-    if (process.argv.length !== 4) throw new Error("请运行 npm run launcher:install -- codex 或 npm run launcher:uninstall -- codex。");
+    if (process.argv.length !== 4) throw new Error("请运行 npm run launcher:install -- chrome（或 codex），撤销用 npm run launcher:uninstall -- chrome。");
     await registerLauncher({ root, dataDir, port, env, uninstall: command === "native-uninstall", browser: process.argv[3] });
-    console.log(command === "native-install" ? "Codex 本机启动器已注册；打开 Reframe 时按需启动，不配置开机自启。" : "本安装的启动器已撤销，现有服务与数据保留。");
+    console.log(command === "native-install" ? "本机启动器已注册；打开 Reframe 时按需启动，不配置开机自启。" : "本安装的启动器已撤销，现有服务与数据保留。");
     return;
   }
   if (["setup", "start", "run", "restart-after"].includes(command))
-    connectionOrigins(join(root, ".output/chrome-mv3"), env.ALCHEMY_EXTENSION_ID);
+    connectionOrigins(env.ALCHEMY_EXTENSION_ID);
   if (command === "restart-after") {
     if (!process.send || !process.argv[3] || !process.env.ALCHEMY_RESTART_ID) throw new Error("重启必须从已连接的插件发起。");
     const cancelled = new AbortController();
@@ -237,19 +265,17 @@ async function main() {
     const health = await probe();
     if (!health) { console.log("本机服务已停止。"); return; }
     if (!health.managed) throw new Error("此服务由原终端启动，请在原终端按 Ctrl+C 停止。");
-    const response = await fetch(`${url}/shutdown`, {
-      method: "POST", headers: { Authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(5000),
-    });
-    const value = await response.json();
-    if (!response.ok) throw new Error(value.error || "停止失败");
-    for (let i = 0; i < 20; i++) { if (!await probe()) { console.log("本机服务已停止，配对码和项目数据保留。"); return; } await sleep(100); }
-    throw new Error("停止请求已发送，但服务尚未退出，请检查 npm run status。");
+    await stopService();
+    console.log("本机服务已停止，配对码和项目数据保留。");
+    return;
   }
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   if (command === "setup") {
     await doctor(env, true);
     if (!process.env.npm_execpath) throw new Error("请使用 npm run setup 执行初始化。");
-    for (const args of [["ci"], ["run", "build"]]) {
+    // A release runtime package already carries the built extension; it installs runtime dependencies only.
+    const prebuilt = await readable(join(root, "runtime-package.json"));
+    for (const args of prebuilt ? [["ci", "--omit=dev", "--ignore-scripts"]] : [["ci"], ["run", "build"]]) {
       const run = spawnSync(process.execPath, [process.env.npm_execpath, ...args], { cwd: root, env, stdio: "inherit" });
       if (run.status !== 0) throw new Error(`npm ${args.join(" ")} 失败，请修复后重试。`);
     }
@@ -257,7 +283,9 @@ async function main() {
     await moveLegacyFile(join(dataDir, "runtime.json"), configFile);
     await writeFile(`${configFile}.tmp`, JSON.stringify(Object.fromEntries(runtimeKeys.map(key => [key, env[key]])), null, 2) + "\n", { mode: 0o600 });
     await rename(`${configFile}.tmp`, configFile);
-    console.log("初始化完成。运行 npm start 启动；首次在浏览器加载扩展后会自动连接。");
+    for (const launcher of await registerInstalledLaunchers({ root, dataDir, port, env }))
+      console.log(launcher.ok ? `${launcher.label} 本机启动器已注册：打开扩展时按需启动服务。` : `${launcher.label} 本机启动器未注册：${launcher.error}`);
+    console.log(`初始化完成。运行 npm start 启动；在浏览器加载 ${join(root, ".output/chrome-mv3")} 后会自动连接。`);
     return;
   }
   if (command === "start") return start(env);

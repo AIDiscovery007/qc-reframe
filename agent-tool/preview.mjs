@@ -474,6 +474,7 @@ const server = createServer(async (req, res) => {
           if(message.type==='alchemy:cli-check'){cli.detectedAt=new Date().toISOString();if(cli.installed)cli.checkedAt=cli.detectedAt;cli.operation=null;return {ok:true,value:structuredClone(cli)};}
           if(message.type==='alchemy:cli-update'){cli.operation={status:'running',stage:'正在升级（预览）'};setTimeout(()=>{cli.version=cli.latestVersion;cli.updateAvailable=false;cli.operation={status:'completed',stage:'升级完成（预览）',finishedAt:new Date().toISOString()};models.selected=null;},2500);return {ok:true,value:structuredClone(cli)};}
           if(message.type==='alchemy:connect'){data.preferences.token='preview';return {ok:true,value:{ready:true}};}
+          if(message.type==='alchemy:start-command')return {ok:true,value:{command:"cd '/Users/example/QC-Reframe' && npm start"}};
           if(message.type==='alchemy:project-views')return {ok:true,value:JSON.parse(localStorage.getItem('preview-project-views')||'{}')};
           if(message.type==='alchemy:save-project-view'){const views=JSON.parse(localStorage.getItem('preview-project-views')||'{}');views[message.projectId]=message.view;localStorage.setItem('preview-project-views',JSON.stringify(views));return {ok:true};}
           if(message.type==='alchemy:state')return {ok:true,value:structuredClone({preferences:{paired:!!data.preferences.token,mode:data.preferences.mode,showHiddenProjects},selection:!showHiddenProjects&&projects.find(p=>p.id===data.selection?.projectId)?.hidden?undefined:data.selection})};

@@ -217,7 +217,7 @@
 | --shadow-floating | 0 16px 48px rgb(40 34 24 / .12), 0 2px 8px rgb(40 34 24 / .04) | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):22 |
 | --ease-out | cubic-bezier(.23, 1, .32, 1) | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):23 |
 | --font | "Space Grotesk", "Trebuchet MS", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif | :root, :host | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):24 |
-| --select-inset | 12px | .select-control | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):103 |
+| --select-inset | 12px | .select-control | [browser-extension/entrypoints/popup/style.css](../../../browser-extension/entrypoints/popup/style.css):108 |
 | --prompt-editor-height | max(240px,min(56dvh,calc(100dvh - 420px),600px)) | .workspace-app | [browser-extension/entrypoints/workspace/canvas-workspace.css](../../../browser-extension/entrypoints/workspace/canvas-workspace.css):112 |
 | --result-drawer-width | 50cqw | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):13 |
 | --canvas-label-height | 26px | .workspace-app | [browser-extension/entrypoints/workspace/results.css](../../../browser-extension/entrypoints/workspace/results.css):13 |

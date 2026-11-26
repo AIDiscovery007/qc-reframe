@@ -8,12 +8,16 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { request as httpRequest } from "node:http";
 import { createBridge } from "../bridge/server.mjs";
-import { connectionOrigins, extensionOrigin } from "../bridge/connection.mjs";
+import { connectionOrigins } from "../bridge/connection.mjs";
+import { EXTENSION_ID, EXTENSION_PUBLIC_KEY } from "../lib/extension-identity.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const id = path => createHash("sha256").update(path, process.platform === "win32" ? "utf16le" : "utf8")
+// Chromium's extension ID: the first 128 bits of SHA-256(public key DER), written with letters a-p.
+const idFromKey = key => createHash("sha256").update(Buffer.from(key, "base64"))
   .digest("hex").slice(0, 32).replace(/[0-9a-f]/g, value => String.fromCharCode(97 + parseInt(value, 16)));
-const origin = `chrome-extension://${id(join(root, ".output/chrome-mv3").replace(/^[a-z]:/, value => value.toUpperCase()))}`;
+const origin = `chrome-extension://${EXTENSION_ID}`;
+const pathDerivedOrigin = "chrome-extension://" + createHash("sha256").update(join(root, ".output/chrome-mv3"))
+  .digest("hex").slice(0, 32).replace(/[0-9a-f]/g, value => String.fromCharCode(97 + parseInt(value, 16)));
 
 async function setup(t, options = {}) {
   const dir = await mkdtemp(join(tmpdir(), "reframe-connection-"));
@@ -50,7 +54,11 @@ test("user opens their installed extension and connects automatically without CL
   assert.equal(await readFile(join(dir, "preserved-note.txt"), "utf8"), "user data");
   const health = await fetch(url + "/health", { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(health.status, 200);
-  assert.equal((await health.json()).ready, false);
+  const status = await health.json();
+  assert.equal(status.ready, false);
+  // And health names this installation and its separate data folder, so the offline start command reopens the same data.
+  assert.equal(status.installDir, root);
+  assert.equal(status.dataDir, dir);
   for (const agent of ["codex", "pi"]) {
     const selected = await fetch(url + "/agents/select", { method: "POST", headers: {
       Authorization: `Bearer ${token}`, "Content-Type": "application/json",
@@ -87,13 +95,27 @@ test("user browsing webpages or another extension cannot disclose local connecti
   assert.equal((await connect({}, "/connection", "OPTIONS")).status, 204);
 });
 
-test("connection allowlist follows Chromium native-path IDs and rejects invalid installer configuration", () => {
-  assert.equal(extensionOrigin("/tmp/Reframe/.output/chrome-mv3", "darwin"), "chrome-extension://ijmgcjhkdnlbghhnkknoigbncehabgeb");
-  for (const drive of ["C", "c"])
-    assert.equal(extensionOrigin(`${drive}:\\Reframe\\.output\\chrome-mv3`, "win32"), "chrome-extension://leamincedapbjdlhfjhmlhemaeeaachl");
-  assert.equal(extensionOrigin("C:\\测试\\.output\\chrome-mv3", "win32"), "chrome-extension://ikgmmmpopmcchmaogcobcnaebchmidhc");
+test("user loads the extension from any folder and the service recognises its fixed ID", async () => {
+  // Given the published public key, when Chromium derives the ID of any unpacked copy.
+  assert.equal(idFromKey(EXTENSION_PUBLIC_KEY), EXTENSION_ID);
+  // Then the built manifest carries that key, so the folder path no longer decides the ID.
+  const manifest = JSON.parse(await readFile(join(root, ".output/chrome-mv3/manifest.json"), "utf8"));
+  assert.equal(manifest.key, EXTENSION_PUBLIC_KEY);
+  // And the default allowlist is exactly the fixed ID; an optional approval only adds one more.
+  assert.deepEqual(connectionOrigins(), new Set([origin]));
+  assert.deepEqual(connectionOrigins("b".repeat(32)), new Set([origin, `chrome-extension://${"b".repeat(32)}`]));
   for (const invalid of ["*", "a".repeat(31), "chrome-extension://" + "a".repeat(32), "a".repeat(32) + "," + "b".repeat(32)])
-    assert.throws(() => connectionOrigins("/tmp/reframe", invalid), /ALCHEMY_EXTENSION_ID/);
+    assert.throws(() => connectionOrigins(invalid), /ALCHEMY_EXTENSION_ID/);
+});
+
+test("user still running an older keyless build is refused until loading the current build", async t => {
+  // Given a service whose installation path once produced a path-derived ID.
+  const { token, connect } = await setup(t);
+  // When an extension with that old path-derived ID asks for the connection.
+  const response = await connect({ Origin: pathDerivedOrigin });
+  // Then it is refused without the token; only the fixed-ID build connects.
+  assert.equal(response.status, 403);
+  assert.ok(!(await response.text()).includes(token));
 });
 
 test("user loads a separately installed ZIP after its exact extension ID was approved locally", async t => {

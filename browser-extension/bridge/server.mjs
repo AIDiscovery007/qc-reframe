@@ -13,7 +13,7 @@ import { createTaskRuntime } from "./task-runtime.mjs";
 import { createGenerationOutputs } from "./generation-output.mjs";
 import { createServer } from "node:http";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, realpath, writeFile } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAgent } from "./agent.mjs";
@@ -64,9 +64,14 @@ export async function createBridge({
   sessions,
   sessionReadTimeoutMs = 120_000,
 } = {}) {
-  const trustedConnections = connectionOrigins(join(root, ".output/chrome-mv3"), extensionId);
+  const trustedConnections = connectionOrigins(extensionId);
   const instanceId = randomUUID();
   const paths = await migrateStorage(dataDir);
+  // `npm start` in this installation opens <root>/.local; any other data folder must travel with the offline start command.
+  // An unresolvable folder is reported, since naming the data folder explicitly is always correct.
+  const physical = path => realpath(path).catch(() => null);
+  const ownData = await physical(join(root, ".local"));
+  const startDataDir = ownData && ownData === await physical(dataDir) ? undefined : dataDir;
   sessions ||= createSessionStore({ cwd: root, dataDir: paths.records });
   const agents = await createAgentRegistry({ dataDir: paths.config, adapters: await builtinAgents({
     cwd: root, dataDir, configDir: paths.config, compatibility, resetSessions: () => sessions.resetReader?.(),
@@ -399,7 +404,7 @@ export async function createBridge({
   await imageCollection.collect();
 
   // Everything the route modules may use; `server` is attached once created.
-  const app = { agents, allowShutdown, batchAdmission, batches, cancelJob, cliBusy, codexBusy, codexHost, compatibility, dataDir, gallery, generationOutputs, generationSkillPath, imageAction, imageCollection, imageSettings, images, instanceId, jobs, magpieInspector, projects, publicBatch, requireFeature, restart, restartId, restoreSubjects, root, runtime, save, saveSubjects, sessions, skillPath, startGeneration, state, storedImage, taskFeed, thumbnails, version };
+  const app = { agents, allowShutdown, batchAdmission, batches, cancelJob, cliBusy, codexBusy, codexHost, compatibility, dataDir, gallery, generationOutputs, generationSkillPath, imageAction, imageCollection, imageSettings, images, instanceId, jobs, magpieInspector, projects, publicBatch, requireFeature, restart, restartId, restoreSubjects, root, runtime, startDataDir, save, saveSubjects, sessions, skillPath, startGeneration, state, storedImage, taskFeed, thumbnails, version };
   const server = createServer(async (req, res) => {
     const submission = new AbortController();
     const abortSubmission = () => submission.abort(bad("请求已取消", 499));

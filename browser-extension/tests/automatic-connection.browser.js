@@ -13,6 +13,10 @@ try {
   await waitFor(() => document.querySelector('.error')?.textContent.includes('启动后将自动连接'));
   assert(!document.querySelector('.settings-center, .settings.card'), '首次缺少凭据不应强制打开设置');
   assert(!document.querySelector('#pair-token, .settings-pair-label'), '不应显示配对表单');
+  // Then the offline notice offers this installation's exact start command, ready to copy.
+  await waitFor(() => document.querySelector('.start-command code'));
+  assert(document.querySelector('.start-command code').textContent === "cd '/Users/example/QC-Reframe' && npm start", '离线时显示本安装的启动命令');
+  assert([...document.querySelectorAll('.start-command button')].some(button => button.textContent === '复制命令'), '启动命令可一键复制');
   document.querySelector(workspace ? '[aria-label="设置中心"]' : '[aria-label="设置"]').click();
   if (workspace) {
     await waitFor(() => document.querySelector('.settings-center'));
@@ -23,6 +27,7 @@ try {
   await waitFor(() => document.querySelector(workspace ? '.connection-state' : '.connection')?.textContent.includes('本机服务已连接'));
   if (workspace) assert(document.querySelector('.settings-center-nav [aria-current="page"]')?.textContent === '界面与动效', '恢复连接不得切走用户当前设置');
   assert(!document.querySelector('#pair-token'), '恢复连接后不出现重新配对入口');
+  assert(!document.querySelector('.start-command'), '恢复连接后不再显示启动命令');
   assert(!document.body.textContent.includes('如何获取配对码'), '轻量端也移除启动说明');
   document.documentElement.dataset.connectionRegression = 'passed';
   document.querySelector('#preview-notice').textContent = '自动连接回归：PASS · 首次断开 / 自动恢复 / 设置保留 / 无配对表单';
