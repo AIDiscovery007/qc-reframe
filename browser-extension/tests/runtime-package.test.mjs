@@ -59,6 +59,10 @@ const args = process.argv.slice(2), command = args[0] === "run" ? args[1] : args
 const run = require("node:child_process").spawnSync(process.execPath, ["scripts/manage.mjs", command], { stdio: "inherit", env: { ...process.env, npm_execpath: ${JSON.stringify(npmExec)} } });
 process.exit(run.status ?? 1);
 `, { mode: 0o755 });
+  // A copy that stops after package.json, as when the disk fills or the terminal closes mid-install.
+  const interrupted = join(dir, "interrupted-bin");
+  await mkdir(interrupted);
+  await writeFile(join(interrupted, "cp"), '#!/bin/sh\n/bin/cp "${2%.}package.json" "$3"\nexit 1\n', { mode: 0o755 });
   const codex = join(dir, "codex-test");
   await writeFile(codex, '#!/usr/bin/env node\nconsole.log("codex-cli test");\n', { mode: 0o700 });
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: join(dir, "home"), TMPDIR: dir,
@@ -75,8 +79,9 @@ process.exit(run.status ?? 1);
     await rm(dir, { recursive: true, force: true });
   });
   // Feed the script through stdin, exactly as `curl … | bash` does.
-  const install = async () => {
-    const child = spawn("bash", [], { env, cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
+  const install = async ({ interruptCopy = false } = {}) => {
+    const runEnv = interruptCopy ? { ...env, PATH: `${interrupted}:${env.PATH}` } : env;
+    const child = spawn("bash", [], { env: runEnv, cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     child.stdout.on("data", data => { stdout += data; });
     child.stderr.on("data", data => { stderr += data; });
@@ -157,6 +162,36 @@ test("user reruns the installer to upgrade and keeps projects, pairing and their
   assert.equal(await readFile(join(m.installDir, ".local/records/kept.json"), "utf8"), "{}\n");
   assert.equal(await readFile(join(m.installDir, "my-notes.txt"), "utf8"), "mine\n");
   await assert.rejects(stat(join(m.installDir, "bridge/removed-in-new-version.mjs")), { code: "ENOENT" });
+});
+
+test("user whose first install was interrupted mid-copy reruns the installer and finishes", { skip, timeout: 90000 }, async t => {
+  // Given a first install whose copy stopped after one file.
+  const m = await machine(t);
+  const interrupted = await m.install({ interruptCopy: true });
+  assert.notEqual(interrupted.code, 0);
+  assert.match(interrupted.stderr, /重新运行安装命令即可/);
+  // When the user reruns the installer, Then it recognises its own partial folder and completes.
+  const result = await m.install();
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal((await m.health()).ready, true);
+  await assert.rejects(stat(join(m.installDir, ".qc-reframe-install-pending")), { code: "ENOENT" });
+});
+
+test("user whose upgrade was interrupted mid-copy reruns the installer and keeps their data", { skip, timeout: 120000 }, async t => {
+  // Given a working installation whose upgrade stopped mid-copy, after its service was stopped and its files removed.
+  const m = await machine(t);
+  assert.equal((await m.install()).code, 0);
+  const token = await readFile(join(m.installDir, ".local/config/token"), "utf8");
+  await writeFile(join(m.installDir, "my-notes.txt"), "mine\n");
+  const interrupted = await m.install({ interruptCopy: true });
+  assert.notEqual(interrupted.code, 0);
+  await assert.rejects(stat(join(m.installDir, "runtime-package.json")), { code: "ENOENT" });
+  // When the user reruns the installer, Then it completes the upgrade and the service runs with the same data.
+  const result = await m.install();
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal((await m.health()).ready, true);
+  assert.equal(await readFile(join(m.installDir, ".local/config/token"), "utf8"), token);
+  assert.equal(await readFile(join(m.installDir, "my-notes.txt"), "utf8"), "mine\n");
 });
 
 test("user's download fails verification and nothing is installed", { skip, timeout: 60000 }, async t => {

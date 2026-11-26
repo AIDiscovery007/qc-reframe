@@ -181,4 +181,4 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 
 `/health` 返回安装目录 `installDir`；后台把它从健康数据中剥离，单独存入 trusted local storage，仅经 `alchemy:start-command`（扩展页面、message transport）生成 `cd '<目录>' && npm start`，content 与网页面板不能读取。服务离线且启动器不可用时，工作台、轻量端和「本机连接」显示这条可复制命令；旧服务未返回目录时退回通用说明。
 
-`npm run setup` 对已存在配置目录的浏览器（macOS 的 Chrome 与 Codex）注册 `com.qc.reframe` 按需启动器，共用数据目录下的 `runtime/native-launcher`；其他安装已占用的注册只报告跳过，不覆盖。`scripts/package-runtime.mjs` 把已构建扩展、bridge、服务脚本与 Alchemy skill 打成带 `runtime-package.json` 标记的 Release 运行包；`setup` 识别该标记后只执行 `npm ci --omit=dev --ignore-scripts`，不重新构建。`scripts/install.sh` 下载运行包并按 `SHA256SUMS` 校验，只写入空目录或已有运行包安装，升级时先停止本安装服务、只替换运行包所含条目，保留 `.local/` 与其他文件。
+`npm run setup` 对已存在配置目录的浏览器（macOS 的 Chrome 与 Codex）注册 `com.qc.reframe` 按需启动器，共用数据目录下的 `runtime/native-launcher`；其他安装已占用的注册只报告跳过，不覆盖。`scripts/package-runtime.mjs` 把已构建扩展、bridge、服务脚本与 Alchemy skill 打成带 `runtime-package.json` 标记的 Release 运行包；`setup` 识别该标记后只执行 `npm ci --omit=dev --ignore-scripts`，不重新构建。`scripts/install.sh` 下载运行包并按 `SHA256SUMS` 校验，只写入空目录、已有运行包安装或带 `.qc-reframe-install-pending` 标记的未完成替换（标记在复制完成前一直保留，中断后可重跑），升级时先停止本安装服务、只替换运行包所含条目，保留 `.local/` 与其他文件。

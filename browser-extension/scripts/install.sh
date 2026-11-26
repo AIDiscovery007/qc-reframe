@@ -11,6 +11,8 @@ set -euo pipefail
 
 main() {
   local repo="https://github.com/AIDiscovery007/qc-reframe" archive="qc-reframe-runtime.tar.gz"
+  # Marks the folder as ours while its files are being replaced, so an interrupted copy can be retried.
+  local pending=".qc-reframe-install-pending"
   say() { printf '%s\n' "$*"; }
   fail() { printf 'QC-Reframe 安装失败：%s\n' "$*" >&2; exit 1; }
   sha256() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi | awk '{print $1}'; }
@@ -27,8 +29,8 @@ main() {
   while [ "$dir" != "/" ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
   if [ "$dir" = "/" ] || [ "$dir" = "${HOME%/}" ]; then fail "安装目录不能是根目录或主目录，请用 QC_REFRAME_DIR 指定专用目录。"; fi
   if [ -e "$dir" ] && [ ! -d "$dir" ]; then fail "$dir 已存在且不是目录，未改动任何文件。"; fi
-  # Only an empty folder or an earlier runtime-package installation may be written to.
-  if [ -d "$dir" ] && [ ! -f "$dir/runtime-package.json" ] && [ -n "$(ls -A "$dir")" ]; then
+  # Only an empty folder, an earlier runtime-package installation or one this installer was replacing may be written to.
+  if [ -d "$dir" ] && [ ! -f "$dir/runtime-package.json" ] && [ ! -f "$dir/$pending" ] && [ -n "$(ls -A "$dir")" ]; then
     fail "$dir 已存在且不是 QC-Reframe 运行包安装目录，未改动任何文件。请用 QC_REFRAME_DIR 指定空目录。"
   fi
 
@@ -52,12 +54,13 @@ main() {
   local version
   version="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version' "$new/runtime-package.json")"
 
-  # An interrupted earlier copy may lack the manager; its service was already stopped then.
-  if [ -f "$dir/runtime-package.json" ] && [ -f "$dir/scripts/manage.mjs" ]; then
+  # A pending marker means an earlier run already stopped the service before replacing files.
+  if [ -f "$dir/runtime-package.json" ] && [ ! -f "$dir/$pending" ] && [ -f "$dir/scripts/manage.mjs" ]; then
     say "停止 $dir 的现有服务…"
     (cd "$dir" && node scripts/manage.mjs stop </dev/null) || fail "无法停止现有服务，未改动安装文件。"
   fi
   mkdir -p "$dir"
+  : > "$dir/$pending" || fail "无法写入 $dir，未改动安装文件。"
   # Replace only what the package owns; .local stays, and dependencies are reinstalled for the new lockfile.
   local path name
   for path in "$new"/* "$new"/.[!.]* "$dir/node_modules"; do
@@ -65,6 +68,7 @@ main() {
     if [ "$name" != ".local" ] && { [ -e "$path" ] || [ -L "$path" ]; }; then rm -rf "${dir:?}/$name"; fi
   done
   cp -R "$new/." "$dir/" || fail "复制文件到 $dir 失败；重新运行安装命令即可，数据目录 .local 未改动。"
+  rm -f "$dir/$pending"
 
   cd "$dir"
   say "初始化：安装运行依赖、检查 Codex、注册浏览器启动器…"
