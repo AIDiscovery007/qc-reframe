@@ -73,7 +73,7 @@ The app's labels are in Chinese, so each step shows the Chinese text in brackets
 - **Update:** run the install command again, then click reload on QC-Reframe in `chrome://extensions` and refresh open pages. Your projects stay.
 - **Installed v0.6.0 or earlier from source?** Update that copy instead: give your agent the prompt above, or follow the [upgrade steps](browser-extension/docs/INSTALL_WITH_CODEX.md#日常启动升级和排错). The extension now has a fixed ID, so remove the old QC-Reframe extension once and load the new `.output/chrome-mv3`. Your projects are kept.
 - **Stop the service:** `cd ~/QC-Reframe && npm stop`. Nothing is deleted.
-- **Privacy:** only the images you choose are sent to the agent or image service you picked. Projects, prompts and images are stored on your computer. Reversing gives a close prompt, not the original one.
+- **Privacy:** projects, prompts and images are stored on your computer, but the model does not run offline. What you choose to send goes to the agent or image service you picked: the images, your own photos and your instructions, and in session creation (会话创作) the user messages and assistant replies of the conversations you select. Reversing gives a close prompt, not the original one. [Data details →](browser-extension/README.md#图片与数据)
 
 ## More
 

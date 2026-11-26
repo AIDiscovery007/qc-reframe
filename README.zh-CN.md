@@ -71,7 +71,7 @@ curl -fsSL https://github.com/AIDiscovery007/qc-reframe/releases/latest/download
 - **更新：** 再运行一次安装命令，然后在 `chrome://extensions` 点 QC-Reframe 的重新加载按钮，并刷新已打开的网页。项目都会保留。
 - **以前用源码装过 v0.6.0 或更早版本？** 请升级原来那份：把上面的提示词交给 Agent，或按[升级步骤](browser-extension/docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)操作。扩展 ID 现在是固定的，所以要先移除旧的 QC-Reframe 扩展，再加载新的 `.output/chrome-mv3`，只需一次。项目都会保留。
 - **停止服务：** `cd ~/QC-Reframe && npm stop`，不会删除任何内容。
-- **隐私：** 只有你选的图片会发给你选的 Agent 或生图服务。项目、提示词和图片都存在你的电脑上。逆向得到的是相近的提示词，不是原始提示词。
+- **隐私：** 项目、提示词和图片都存在你的电脑上，但模型并不离线运行。你选择发送的内容会交给你选的 Agent 或生图服务：选中的图片、你上传的照片和任务指令；使用会话创作时，还包括所选会话中的用户文本和助手回复。逆向得到的是相近的提示词，不是原始提示词。[数据说明 →](browser-extension/README.md#图片与数据)
 
 ## 更多
 
