@@ -1,15 +1,16 @@
 # 更新日志
 
-[← 项目首页](../../../README.md) · [使用说明](../../README.md) · [GitHub Releases](https://github.com/AIDiscovery007/qc-reframe/releases)
+[← 项目首页](../../../README.zh-CN.md) · [使用说明](../../README.md) · [GitHub Releases](https://github.com/AIDiscovery007/qc-reframe/releases)
 
 功能变化、修复、升级说明和版本截图集中记录在这里。首页 README 保留产品介绍与安装使用方法。
 
 后续待发布改动见 [unreleased](unreleased.md)。
 
-最新版本：[v0.6.0 · 按需启动与 Agent 架构地基](v0.6.0.md)。
+最新版本：[v0.7.0 · 一条命令安装，打开即用](v0.7.0.md)。
 
 | 版本 | 更新内容 | 详情 |
 | --- | --- | --- |
+| 0.7.0 | 一条命令安装与运行包、固定扩展 ID 自动连接、macOS Chrome 与 Codex 打开即启动、旧服务与失效启动器自动替换、中英文首页 | [版本说明](v0.7.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.7.0) |
 | 0.6.0 | macOS Codex 按需启动本机服务、网页面板按需加载、本机服务 Agent 适配器与路由重构、扩展模块化瘦身 | [版本说明](v0.6.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.6.0) |
 | 0.5.0 | Codex/Pi 逆向与 CLI 管理、自动连接、独立生图渠道、Magpie 工作流与尺寸适配、保存恢复 | [版本说明](v0.5.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.5.0) |
 | 0.4.4 | 批量逆向并生图、持久队列与任务进度、操作栏响应式修复、CI 分级验证 | [版本说明](v0.4.4.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.4.4) |
