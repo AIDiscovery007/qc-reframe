@@ -8,7 +8,7 @@ import { operationFor, allowsOperation, messageSource, PORT_KEEP_ALIVE } from ".
 import { pagePanelFile } from "../lib/page-panel";
 import { captureImage } from "../lib/capture";
 import { validImageSizeRequest } from "../lib/image-size.mjs";
-import { installDirKey, splitInstallDir, startCommand } from "../lib/start-command";
+import { splitStartLocation, startCommand, startLocationKey } from "../lib/start-command";
 import { validGenerationRatio } from "../lib/generation-session";
 import { agentQuery, isAgentId } from "../lib/agents";
 import type {
@@ -30,11 +30,11 @@ export default defineBackground(() => {
   const bridge = connection.request;
   const savePreferences = connection.savePreferences;
   const reminders = startReminderService(bridge);
-  // Health is the one place the installation path arrives; keep it here for the offline hint.
+  // Health is the one place the installation and data folders arrive; keep them here for the offline hint.
   const openingHealth = async () => {
-    const { health, installDir } = splitInstallDir(await connection.open(async () => `/health${await showsHiddenProjects() ? "?includeHidden=true" : ""}`));
-    if (installDir && (await browser.storage.local.get(installDirKey))[installDirKey] !== installDir)
-      await browser.storage.local.set({ [installDirKey]: installDir }).catch(() => {});
+    const { health, location } = splitStartLocation(await connection.open(async () => `/health${await showsHiddenProjects() ? "?includeHidden=true" : ""}`));
+    if (location && startCommand((await browser.storage.local.get(startLocationKey))[startLocationKey]) !== startCommand(location))
+      await browser.storage.local.set({ [startLocationKey]: location }).catch(() => {});
     return health;
   };
   void browser.storage.local.setAccessLevel({
@@ -184,7 +184,7 @@ export default defineBackground(() => {
   const drafts = createDraftStore();
   const uiMessage = async (message: Record<string, any>, source = "popup", sourceTab?: number, signal?: AbortSignal) => {
     if (message.type === "alchemy:connect" || message.type === "alchemy:query" && message.path === "/health") return openingHealth();
-    if (message.type === "alchemy:start-command") return { command: startCommand((await browser.storage.local.get(installDirKey))[installDirKey]) };
+    if (message.type === "alchemy:start-command") return { command: startCommand((await browser.storage.local.get(startLocationKey))[startLocationKey]) };
     if (message.type === "alchemy:panel-load") {
       // Inject only into the requesting top frame's isolated world, never into the page world.
       if (sourceTab == null) throw new Error("无效请求");

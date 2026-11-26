@@ -56,8 +56,9 @@ test("user opens their installed extension and connects automatically without CL
   assert.equal(health.status, 200);
   const status = await health.json();
   assert.equal(status.ready, false);
-  // And health names this installation, so the extension can show the offline start command.
+  // And health names this installation and its separate data folder, so the offline start command reopens the same data.
   assert.equal(status.installDir, root);
+  assert.equal(status.dataDir, dir);
   for (const agent of ["codex", "pi"]) {
     const selected = await fetch(url + "/agents/select", { method: "POST", headers: {
       Authorization: `Bearer ${token}`, "Content-Type": "application/json",

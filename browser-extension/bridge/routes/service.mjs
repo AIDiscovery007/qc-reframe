@@ -6,7 +6,7 @@ import { LEGACY_AGENT } from "../agents.mjs";
 /** Service status, sessions, Agent/model/CLI management, image settings and service lifecycle routes. Returns true when the request was handled. */
 export async function serviceRoutes(request, app) {
   const { req, res, path, query, json, validateQuery, includeHidden, submission, readSessions, assertSessionRequestActive } = request;
-  const { root, version, dataDir, skillPath, generationSkillPath, instanceId, restartId, allowShutdown, restart, server, state, agents, codexHost, compatibility, requireFeature, cliBusy, codexBusy, imageSettings, magpieInspector, sessions, projects, batches, runtime, taskFeed } = app;
+  const { root, version, dataDir, startDataDir, skillPath, generationSkillPath, instanceId, restartId, allowShutdown, restart, server, state, agents, codexHost, compatibility, requireFeature, cliBusy, codexBusy, imageSettings, magpieInspector, sessions, projects, batches, runtime, taskFeed } = app;
   if (req.method === "GET" && path === "/health") {
     validateQuery(["includeHidden"]);
     // The service manager polls readiness passively; only client health checks refresh CLI state.
@@ -28,8 +28,10 @@ export async function serviceRoutes(request, app) {
     json(200, {
       service: "qc-alchemy",
       version,
-      // Lets the extension offer `cd <installDir> && npm start` while the service is offline.
+      // Lets the extension offer `cd <installDir> && npm start` while the service is offline. dataDir appears only when
+      // this service uses a folder other than the installation's own .local, so that command reopens the same data.
       installDir: root,
+      dataDir: startDataDir,
       projectsRevision: projects.revision,
       managed: allowShutdown,
       instanceId, restartId, canRestart: allowShutdown && !!restart,

@@ -132,6 +132,9 @@ test("user installs with one command and only has to load the extension", { skip
   const health = await m.health();
   assert.equal(health.ready, true);
   assert.equal(health.version, version);
+  // And its offline start command needs no data-folder override, because it uses the installation's own .local.
+  assert.equal(health.installDir, await realpath(m.installDir));
+  assert.equal(health.dataDir, undefined);
   const registration = JSON.parse(await readFile(join(m.env.ALCHEMY_APP_SUPPORT_DIR, "Google/Chrome/NativeMessagingHosts/com.qc.reframe.json"), "utf8"));
   // npm runs scripts from the physical folder, so the launcher records that spelling.
   assert.ok(registration.path.startsWith(join(await realpath(m.installDir), ".local")));

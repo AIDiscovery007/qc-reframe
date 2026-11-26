@@ -179,6 +179,6 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 
 扩展后台按业务需要连接，并把凭据仅保存在 trusted local storage。并发请求共用一次握手，偏好写入串行合并，避免连接覆盖模式选择；收到明确 401 时最多恢复一次，网络失败和业务错误不重放请求。界面可见时轮询健康状态，首次未配对也会连接，关闭或切换设置不改变进行中的任务。Codex 与 Pi 共用此连接，安装/登录/模型验证仍由各自渠道管理；连接不依赖 Codex 技能或模型就绪。
 
-`/health` 返回安装目录 `installDir`；后台把它从健康数据中剥离，单独存入 trusted local storage，仅经 `alchemy:start-command`（扩展页面、message transport）生成 `cd '<目录>' && npm start`，content 与网页面板不能读取。服务离线且启动器不可用时，工作台、轻量端和「本机连接」显示这条可复制命令；旧服务未返回目录时退回通用说明。
+`/health` 返回安装目录 `installDir`；服务使用的数据目录不是该安装自己的 `.local`（如经 `ALCHEMY_DATA_DIR` 指定）时，另返回 `dataDir`。后台把两者从健康数据中剥离，单独存入 trusted local storage，仅经 `alchemy:start-command`（扩展页面、message transport）生成 `cd '<目录>' && npm start`；有 `dataDir` 时命令带 `ALCHEMY_DATA_DIR='<数据目录>'`，在新终端粘贴也会打开同一份数据，数据目录无法安全显示时不给命令。content 与网页面板不能读取。服务离线且启动器不可用时，工作台、轻量端和「本机连接」显示这条可复制命令；旧服务未返回目录时退回通用说明。
 
 `npm run setup` 对已存在配置目录的浏览器（macOS 的 Chrome 与 Codex）注册 `com.qc.reframe` 按需启动器，共用数据目录下的 `runtime/native-launcher`；其他安装已占用的注册只报告跳过，不覆盖；注册指向的启动器文件已不存在时视为失效安装，注册（不含撤销）可替换。`start` 与启动器共用 `manage.mjs` 的启动流程：`/health` 接受本安装令牌即视为本安装服务，同版本复用，托管的旧版本在预检和启动锁之后经 `/shutdown` 停止再启动，服务忙时 `/shutdown` 拒绝，旧服务保持运行。`scripts/package-runtime.mjs` 把已构建扩展、bridge、服务脚本与 Alchemy skill 打成带 `runtime-package.json` 标记的 Release 运行包；`setup` 识别该标记后只执行 `npm ci --omit=dev --ignore-scripts`，不重新构建。`scripts/install.sh` 下载运行包并按 `SHA256SUMS` 校验，只写入空目录、已有运行包安装或带 `.qc-reframe-install-pending` 标记的未完成替换（标记在复制完成前一直保留，中断后可重跑），升级时先停止本安装服务、只替换运行包所含条目，保留 `.local/` 与其他文件。
