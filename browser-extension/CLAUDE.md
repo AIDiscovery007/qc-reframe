@@ -85,4 +85,4 @@ node agent-tool/ui.mjs gate --tier browser             # 全部登记场景 + �
 - 预览只证明合成界面，不能证明扩展权限、跨域取图或真实模型可用。真实逆向/生图会消耗额度，仅在任务明确要求时执行。
 - 构建后已打开的网页仍运行旧脚本：重新加载扩展再刷新网页；不要把「已构建」报告成「已安装」。
 - `.local/`、`design-extract-output/`、`.output/` 等保持忽略；不运行 `git clean -fdx`，不用用户真实项目做删除测试，不把真实数据放进 fixture。
-- Git：新分支用 `codex/简短主题`；提交信息用 `feat:`/`fix:`/`docs:`/`test:` 前缀，按路径暂存，提交前执行 `git diff --check`；只推送目标分支与指定标签，不强推。发布流程见 `../Contribution.md#发布新版本先提交再发布`。
+- Git：新分支用 `agent/简短主题`；提交信息用 `feat:`/`fix:`/`docs:`/`test:` 前缀，按路径暂存，提交前执行 `git diff --check`；只推送目标分支与指定标签，不强推。发布流程见 `../Contribution.md#发布新版本先提交再发布`。
