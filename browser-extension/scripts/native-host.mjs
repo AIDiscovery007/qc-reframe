@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { endianness, homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { connectionOrigins } from "../bridge/connection.mjs";
 
 const hostName = "com.qc.reframe";
@@ -37,6 +37,14 @@ const supportRoot = () => resolve(process.env.ALCHEMY_APP_SUPPORT_DIR || join(ho
 const supported = () => process.platform !== "win32" && (!!process.env.ALCHEMY_APP_SUPPORT_DIR || process.platform === "darwin");
 const registrationPath = browser => join(supportRoot(), launcherBrowsers[browser].profile, "NativeMessagingHosts", `${hostName}.json`);
 
+// A QC-Reframe registration whose launcher file is gone belongs to a deleted or moved installation
+// and can start nothing, so registering this installation may replace it.
+async function abandonedRegistration(manifest) {
+  if (manifest?.name !== hostName || manifest.type !== "stdio" || typeof manifest.path !== "string" || !isAbsolute(manifest.path)) return false;
+  try { await lstat(manifest.path); return false; }
+  catch (error) { if (error.code === "ENOENT" || error.code === "ENOTDIR") return true; throw error; }
+}
+
 async function ownedRegistration(path, executable) {
   const text = await existingFile(path);
   if (text === undefined) return false;
@@ -56,7 +64,9 @@ export async function registerLauncher({ root, dataDir, port, env, uninstall, br
   if (current !== undefined) {
     let manifest;
     try { manifest = JSON.parse(current); } catch { /* Invalid registrations belong to someone else. */ }
-    if (manifest?.name !== hostName || manifest.type !== "stdio" || manifest.path !== executable || !launcher?.startsWith(`#!/bin/sh\n${owner}`))
+    const owned = manifest?.name === hostName && manifest.type === "stdio" && manifest.path === executable && launcher?.startsWith(`#!/bin/sh\n${owner}`);
+    // Uninstall removes only this installation's own registration; an abandoned foreign one stays.
+    if (!owned && (uninstall || !await abandonedRegistration(manifest)))
       throw new Error("本机启动器注册属于另一份安装或存在冲突，未覆盖或删除。请从原安装目录撤销。");
   }
   if (launcher !== undefined && !launcher.startsWith(`#!/bin/sh\n${owner}`))

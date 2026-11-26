@@ -82,6 +82,13 @@ async function nativeRequest(installationState, { origin = `chrome-extension://$
     return JSON.parse(buffer.subarray(4).toString("utf8"));
   } finally { clearTimeout(timer); if (child.exitCode === null) child.kill(); }
 }
+// Another installation that still exists: its registered launcher file is on disk.
+async function liveForeignRegistration(f) {
+  const launcher = join(f.dir, "another install/runtime/native-launcher");
+  await mkdir(dirname(launcher), { recursive: true });
+  await writeFile(launcher, "#!/bin/sh\n# QC-Reframe installation: \"/another-install\"\n", { mode: 0o700 });
+  return JSON.stringify({ name: nativeHostName, type: "stdio", path: launcher, allowed_origins: [] });
+}
 
 test("user registers and removes only their own Codex launcher without touching project data", { skip: process.platform === "win32" }, async t => {
   // Given a spaced installation path, When installing twice, Then the host has exact allowed origins and a runnable path.
@@ -135,7 +142,7 @@ for (const registration of ["foreign", "empty", "invalid"]) test(`user cannot ov
   const f = await installation(t, true);
   const path = registrationPath(f.env, "codex");
   await mkdir(dirname(path), { recursive: true });
-  const foreign = registration === "empty" ? "" : registration === "invalid" ? "{" : JSON.stringify({ name: nativeHostName, type: "stdio", path: "/another-install/launcher", allowed_origins: [] });
+  const foreign = registration === "empty" ? "" : registration === "invalid" ? "{" : await liveForeignRegistration(f);
   await writeFile(path, foreign);
   for (const command of ["native-install", "native-uninstall"]) {
     await assert.rejects(f.run(command, "codex"), error => /其他|另一|属于|冲突/.test(error.stderr));
@@ -198,6 +205,54 @@ test("user receives a bounded error for an occupied port or held startup lock wi
   await assert.rejects(f.run("status"), error => /未运行/.test(error.stdout));
 });
 
+for (const via of ["start", "launcher"]) test(`user upgrades in place and ${via === "start" ? "npm start" : "opening Reframe"} replaces the older running service`, { skip: process.platform === "win32" }, async t => {
+  // Given this installation's managed service is running when its files are upgraded to a newer version.
+  const f = await registeredLauncher(t);
+  await f.run("start");
+  const before = JSON.parse((await f.run("status")).stdout);
+  const token = (await readFile(join(f.dir, "config/token"), "utf8")).trim();
+  const newer = "99.0.0";
+  for (const file of ["package.json", ".output/chrome-mv3/manifest.json"]) {
+    const path = join(f.installRoot, file);
+    await writeFile(path, JSON.stringify({ ...JSON.parse(await readFile(path, "utf8")), version: newer }, null, 2) + "\n");
+  }
+  // When the user starts the service again, or opens Reframe and the launcher wakes it.
+  if (via === "start") assert.match((await f.run("start")).stdout, new RegExp(`停止旧版本服务 ${before.version.replaceAll(".", "\\.")}`));
+  else assert.deepEqual(await nativeRequest(f), { ok: true });
+  // Then the new version runs as a fresh managed instance and keeps the pairing.
+  const after = JSON.parse((await f.run("status")).stdout);
+  assert.equal(after.version, newer);
+  assert.equal(after.managed, true);
+  assert.notEqual(after.instanceId, before.instanceId);
+  assert.equal((await readFile(join(f.dir, "config/token"), "utf8")).trim(), token);
+});
+
+for (const scenario of ["busy", "terminal"]) test(`user's older ${scenario === "busy" ? "service running a task" : "terminal-started service"} keeps running when start cannot replace it`, { skip: process.platform === "win32" }, async t => {
+  // Given an older QC-Reframe service on this installation's port that is mid-task, or was started from a terminal.
+  const f = await installation(t, true);
+  const calls = [];
+  const old = createServer((request, response) => {
+    calls.push(`${request.method} ${request.url}`);
+    response.setHeader("Content-Type", "application/json");
+    if (request.url === "/health") return response.end(JSON.stringify({ service: "qc-alchemy", version: "0.0.1", ready: true, managed: scenario === "busy" }));
+    if (request.method === "POST" && request.url === "/shutdown") {
+      response.statusCode = 409;
+      return response.end(JSON.stringify({ error: "任务或 Agent CLI 安装更新执行中，请等待完成后再停止服务。" }));
+    }
+    response.statusCode = 404; response.end("{}");
+  });
+  old.listen(Number(f.env.ALCHEMY_PORT), "127.0.0.1"); await once(old, "listening");
+  try {
+    // When the user starts the current version, Then start fails with the reason and the old service is untouched.
+    await assert.rejects(f.run("start"), error => scenario === "busy"
+      ? /旧版本服务 0\.0\.1 未停止.*执行中/.test(error.stderr)
+      : /已运行 0\.0\.1.*原终端/.test(error.stderr));
+    assert.equal(calls.includes("POST /shutdown"), scenario === "busy");
+    assert.equal((await fetch(`http://127.0.0.1:${f.env.ALCHEMY_PORT}/health`)).status, 200);
+    await assert.rejects(stat(join(f.dir, "runtime/start.lock")), { code: "ENOENT" });
+  } finally { await new Promise(resolve => old.close(resolve)); }
+});
+
 test("user approves their separately loaded extension during setup and reconnects after restart without a code", { skip: process.platform === "win32" }, async t => {
   // Given a fixed browser extension ID approved by the local installer; npm is stubbed to avoid rebuilding shared files.
   const { dir, env, run } = await installation(t);
@@ -252,11 +307,11 @@ test("user runs setup and the launcher is registered for each installed browser 
 });
 
 test("user's setup still completes when another installation owns the browser launcher", { skip: process.platform === "win32" }, async t => {
-  // Given Chrome's launcher registration belongs to another installation.
+  // Given Chrome's launcher registration belongs to another installation that still exists.
   const f = await setupWithStubbedNpm(t);
   const path = registrationPath(f.env, "chrome");
   await mkdir(dirname(path), { recursive: true });
-  const foreign = JSON.stringify({ name: nativeHostName, type: "stdio", path: "/another-install/launcher", allowed_origins: [] });
+  const foreign = await liveForeignRegistration(f);
   await writeFile(path, foreign);
   // When setup runs, Then it finishes, says why Chrome was skipped, and leaves the other registration alone.
   const { stdout } = await f.run("setup");
@@ -264,6 +319,25 @@ test("user's setup still completes when another installation owns the browser la
   assert.match(stdout, /初始化完成/);
   assert.equal(await readFile(path, "utf8"), foreign);
   assert.ok(JSON.parse(await readFile(join(f.dir, "config/runtime.json"), "utf8")));
+});
+
+test("user whose earlier installation folder was deleted gets the browser launcher back on setup", { skip: process.platform === "win32" }, async t => {
+  // Given Chrome's launcher registration still points into an installation folder that no longer exists.
+  const f = await setupWithStubbedNpm(t);
+  const path = registrationPath(f.env, "chrome");
+  await mkdir(dirname(path), { recursive: true });
+  const dead = JSON.stringify({ name: nativeHostName, type: "stdio", path: join(f.dir, "deleted install/.local/runtime/native-launcher"), allowed_origins: [`chrome-extension://${"d".repeat(32)}/`] });
+  await writeFile(path, dead);
+  // When this installation is asked to remove it, Then the registration is not its own and stays.
+  await assert.rejects(f.run("native-uninstall", "chrome"), error => /另一份安装/.test(error.stderr));
+  assert.equal(await readFile(path, "utf8"), dead);
+  // When setup runs, Then Chrome wakes this installation for the fixed extension instead.
+  const { stdout } = await f.run("setup");
+  assert.match(stdout, /Chrome 本机启动器已注册/);
+  const manifest = JSON.parse(await readFile(path, "utf8"));
+  assert.deepEqual(manifest.allowed_origins, [`chrome-extension://${EXTENSION_ID}/`]);
+  assert.ok((await stat(manifest.path)).mode & 0o100);
+  assert.match(await readFile(manifest.path, "utf8"), new RegExp(f.installRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
 test("user removes the Chrome launcher and Codex keeps waking the same installation", { skip: process.platform === "win32" }, async t => {

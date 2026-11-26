@@ -89,7 +89,7 @@ npm run status
 
 **初始化恢复：** CLI 缺失、未登录或缺少 app-server 时，`setup` 会提示后续处理并继续构建，使新用户可以先启动服务、加载扩展并自动连接，再在「插件模型」检查。Node.js 与 Alchemy skill 的必需检查仍会阻止无效初始化；`npm run doctor` 仍严格检查 CLI。完成构建和连接不代表 CLI 或模型已可用，仍需按提示完成安装、登录与验证。
 
-`start` 在后台运行 bridge，关闭启动终端后仍可使用；它会先验证带配对令牌的 `/health`。重复启动同一版本会复用服务。若端口被其他服务、旧版本或另一份安装占用，会停止启动流程并说明原因，不强行结束别人的进程。不要通过修改端口来绕过冲突，浏览器端默认连接 `43187`。
+`start` 在后台运行 bridge，关闭启动终端后仍可使用；它会先验证带配对令牌的 `/health`。重复启动同一版本会复用服务；本安装后台运行的是旧版本时（如升级后），`start` 与按需启动器会在启动前检查通过后自动停止旧服务并启动新版，任务、模型验证或 Agent CLI 操作执行中则保留旧服务并说明原因。若端口被其他服务、另一份安装或由原终端启动的旧版本占用，会停止启动流程并说明原因，不强行结束别人的进程。不要通过修改端口来绕过冲突，浏览器端默认连接 `43187`。
 
 ### macOS：打开时按需启动
 
@@ -102,7 +102,7 @@ npm run launcher:install -- codex
 
 随后重新加载扩展。打开工作台、轻量面板或主动连接时，若 HTTP 连接不可达，后台通过 `com.qc.reframe` 请求启动本安装的 bridge，再执行原有握手。已有服务在线时直接复用；后台提醒不会启动服务，业务写入失败不会自动重放。关闭界面不会停止服务；没有开机自启，也不自动安装、登录或调用 CLI/模型。
 
-注册写入用户级 `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.qc.reframe.json` 与 `~/Library/Application Support/OpenAI/Codex/NativeMessagingHosts/com.qc.reframe.json`，两者共用本安装数据目录的 `runtime/native-launcher`。Codex 路径来自其应用实现；Chrome 与 Codex 的实际唤起仍需在用户环境单独验证。注册固定当前 Node 可执行文件、安装/数据目录、端口和运行配置，不受浏览器环境中的同名变量影响。移动安装、升级或替换 Node（如 Homebrew 升级）、修改 CLI/skill 路径后，重新运行 `npm run setup` 或一键安装命令。同名注册属于另一份安装时，`setup` 只报告跳过，不覆盖。
+注册写入用户级 `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.qc.reframe.json` 与 `~/Library/Application Support/OpenAI/Codex/NativeMessagingHosts/com.qc.reframe.json`，两者共用本安装数据目录的 `runtime/native-launcher`。Codex 路径来自其应用实现；Chrome 与 Codex 的实际唤起仍需在用户环境单独验证。注册固定当前 Node 可执行文件、安装/数据目录、端口和运行配置，不受浏览器环境中的同名变量影响。移动安装、升级或替换 Node（如 Homebrew 升级）、修改 CLI/skill 路径后，重新运行 `npm run setup` 或一键安装命令。同名注册属于另一份安装时，`setup` 只报告跳过，不覆盖；若该注册指向的启动器文件已不存在（原安装目录已删除或移动），视为失效并替换为本安装。撤销命令只删除本安装自己的注册。
 
 非 macOS 平台不注册启动器；服务离线时，工作台和轻量端显示可复制的 `cd '<安装目录>' && npm start`。`ALCHEMY_APP_SUPPORT_DIR` 仅供隔离测试替换注册根目录。需要撤销某个浏览器的注册时运行：
 
