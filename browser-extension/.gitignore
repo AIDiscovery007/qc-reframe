@@ -41,3 +41,6 @@ coverage/
 *.njsproj
 *.sln
 *.sw?
+
+# Private key behind the public manifest key; keep it out of Git and back it up separately.
+/.keys/

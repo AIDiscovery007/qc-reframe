@@ -64,7 +64,7 @@ export async function createBridge({
   sessions,
   sessionReadTimeoutMs = 120_000,
 } = {}) {
-  const trustedConnections = connectionOrigins(join(root, ".output/chrome-mv3"), extensionId);
+  const trustedConnections = connectionOrigins(extensionId);
   const instanceId = randomUUID();
   const paths = await migrateStorage(dataDir);
   sessions ||= createSessionStore({ cwd: root, dataDir: paths.records });

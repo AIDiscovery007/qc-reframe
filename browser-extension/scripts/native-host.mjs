@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { endianness, homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { connectionOrigins } from "../bridge/connection.mjs";
 
 const hostName = "com.qc.reframe";
@@ -30,11 +30,25 @@ async function writeRegistration(path, content, previous, mode) {
   }
 }
 
+// Per-browser Native Messaging folders under the macOS application-support root.
+export const launcherBrowsers = { chrome: { label: "Chrome", profile: "Google/Chrome" }, codex: { label: "Codex", profile: "OpenAI/Codex" } };
+// ALCHEMY_APP_SUPPORT_DIR stands in for ~/Library/Application Support, only for isolated tests.
+const supportRoot = () => resolve(process.env.ALCHEMY_APP_SUPPORT_DIR || join(homedir(), "Library/Application Support"));
+const supported = () => process.platform !== "win32" && (!!process.env.ALCHEMY_APP_SUPPORT_DIR || process.platform === "darwin");
+const registrationPath = browser => join(supportRoot(), launcherBrowsers[browser].profile, "NativeMessagingHosts", `${hostName}.json`);
+
+async function ownedRegistration(path, executable) {
+  const text = await existingFile(path);
+  if (text === undefined) return false;
+  try { const manifest = JSON.parse(text); return manifest?.name === hostName && manifest.type === "stdio" && manifest.path === executable; }
+  catch { return false; }
+}
+
 export async function registerLauncher({ root, dataDir, port, env, uninstall, browser }) {
-  if (browser !== "codex" || process.platform === "win32" || (!process.env.ALCHEMY_NATIVE_HOST_DIR && process.platform !== "darwin"))
-    throw new Error("此平台或浏览器尚不支持按需启动器；请手动运行 npm start。首轮仅支持 macOS Codex。");
-  const directory = resolve(process.env.ALCHEMY_NATIVE_HOST_DIR || join(homedir(), "Library/Application Support/OpenAI/Codex/NativeMessagingHosts"));
-  const manifestPath = join(directory, `${hostName}.json`);
+  if (!Object.hasOwn(launcherBrowsers, browser) || !supported())
+    throw new Error("此平台或浏览器尚不支持按需启动器；请手动运行 npm start。目前支持 macOS 的 Chrome 与 Codex。");
+  const manifestPath = registrationPath(browser);
+  const directory = dirname(manifestPath);
   const executable = join(dataDir, "runtime", "native-launcher");
   const owner = `# QC-Reframe installation: ${JSON.stringify(root)}\n`;
   const current = await existingFile(manifestPath);
@@ -49,13 +63,15 @@ export async function registerLauncher({ root, dataDir, port, env, uninstall, br
     throw new Error("本机启动器文件属于其他安装，未覆盖或删除。");
   if (uninstall) {
     if (current !== undefined) await unlink(manifestPath);
-    if (launcher !== undefined) await unlink(executable);
+    // The executable is shared; keep it while another browser's registration still points to it.
+    const others = await Promise.all(Object.keys(launcherBrowsers).filter(other => other !== browser).map(other => ownedRegistration(registrationPath(other), executable)));
+    if (launcher !== undefined && !others.includes(true)) await unlink(executable);
     return;
   }
   const manifest = JSON.parse(await readFile(join(root, ".output/chrome-mv3/manifest.json"), "utf8"));
   const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   if (manifest.version !== version) throw new Error("扩展构建与当前版本不同，请先运行 npm run setup。");
-  const origins = [...connectionOrigins(join(root, ".output/chrome-mv3"), env.ALCHEMY_EXTENSION_ID)].map(origin => `${origin}/`);
+  const origins = [...connectionOrigins(env.ALCHEMY_EXTENSION_ID)].map(origin => `${origin}/`);
   // The browser's PATH, Node options and ALCHEMY_* variables are not authority.
   // Capture only installation configuration, never account credentials or tokens.
   const keys = ["HOME", "PATH", "TMPDIR", "LANG", "CODEX_HOME", "CODEX_BIN", "PI_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
@@ -126,4 +142,17 @@ export async function serveNative(start) {
   header[endianness() === "LE" ? "writeUInt32LE" : "writeUInt32BE"](body.length);
   await new Promise(resolve => process.stdout.write(Buffer.concat([header, body]), resolve));
   process.stdin.destroy();
+}
+
+/** Setup's default: register every supported browser that has a profile here; report, never fail setup. */
+export async function registerInstalledLaunchers(options) {
+  if (!supported()) return [];
+  const results = [];
+  for (const [browser, { label, profile }] of Object.entries(launcherBrowsers)) {
+    try { if (!(await stat(join(supportRoot(), profile))).isDirectory()) continue; }
+    catch (error) { if (error.code === "ENOENT") continue; throw error; }
+    try { await registerLauncher({ ...options, browser, uninstall: false }); results.push({ browser, label, ok: true }); }
+    catch (error) { results.push({ browser, label, ok: false, error: error.message }); }
+  }
+  return results;
 }

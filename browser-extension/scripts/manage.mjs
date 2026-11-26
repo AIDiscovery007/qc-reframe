@@ -1,4 +1,5 @@
-// Local lifecycle commands. No model calls, browser-profile edits, or global config writes.
+// Local lifecycle commands. No model calls, browser-profile edits, or global config writes;
+// setup only registers this installation's launcher in browsers' NativeMessagingHosts folders.
 import { access, mkdir, open, readFile, rmdir, writeFile, rename } from "node:fs/promises";
 import { constants } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
@@ -8,10 +9,10 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { storagePaths, ensureStorage, migrateStorage, moveLegacyFile, readStoredConfig, rotateServiceLog } from "../bridge/storage.mjs";
 import { connectionOrigins } from "../bridge/connection.mjs";
-import { registerLauncher, serveNative } from "./native-host.mjs";
+import { registerInstalledLaunchers, registerLauncher, serveNative } from "./native-host.mjs";
 
-// Preserve the installer's path spelling: Chromium derives the extension ID
-// from that path, including macOS /var versus /private/var aliases.
+// Preserve the installer's path spelling: the launcher records it as its owner,
+// including macOS /var versus /private/var aliases.
 const root = resolve(dirname(process.argv[1]), "..");
 const dataDir = resolve(process.env.ALCHEMY_DATA_DIR || join(root, ".local"));
 const paths = storagePaths(dataDir);
@@ -181,13 +182,13 @@ async function main() {
   if (command === "native-host") return serveNative(signal => start({ ...process.env }, { signal, automatic: true }));
   const env = await environment();
   if (command === "native-install" || command === "native-uninstall") {
-    if (process.argv.length !== 4) throw new Error("请运行 npm run launcher:install -- codex 或 npm run launcher:uninstall -- codex。");
+    if (process.argv.length !== 4) throw new Error("请运行 npm run launcher:install -- chrome（或 codex），撤销用 npm run launcher:uninstall -- chrome。");
     await registerLauncher({ root, dataDir, port, env, uninstall: command === "native-uninstall", browser: process.argv[3] });
-    console.log(command === "native-install" ? "Codex 本机启动器已注册；打开 Reframe 时按需启动，不配置开机自启。" : "本安装的启动器已撤销，现有服务与数据保留。");
+    console.log(command === "native-install" ? "本机启动器已注册；打开 Reframe 时按需启动，不配置开机自启。" : "本安装的启动器已撤销，现有服务与数据保留。");
     return;
   }
   if (["setup", "start", "run", "restart-after"].includes(command))
-    connectionOrigins(join(root, ".output/chrome-mv3"), env.ALCHEMY_EXTENSION_ID);
+    connectionOrigins(env.ALCHEMY_EXTENSION_ID);
   if (command === "restart-after") {
     if (!process.send || !process.argv[3] || !process.env.ALCHEMY_RESTART_ID) throw new Error("重启必须从已连接的插件发起。");
     const cancelled = new AbortController();
@@ -249,7 +250,9 @@ async function main() {
   if (command === "setup") {
     await doctor(env, true);
     if (!process.env.npm_execpath) throw new Error("请使用 npm run setup 执行初始化。");
-    for (const args of [["ci"], ["run", "build"]]) {
+    // A release runtime package already carries the built extension; it installs runtime dependencies only.
+    const prebuilt = await readable(join(root, "runtime-package.json"));
+    for (const args of prebuilt ? [["ci", "--omit=dev", "--ignore-scripts"]] : [["ci"], ["run", "build"]]) {
       const run = spawnSync(process.execPath, [process.env.npm_execpath, ...args], { cwd: root, env, stdio: "inherit" });
       if (run.status !== 0) throw new Error(`npm ${args.join(" ")} 失败，请修复后重试。`);
     }
@@ -257,7 +260,9 @@ async function main() {
     await moveLegacyFile(join(dataDir, "runtime.json"), configFile);
     await writeFile(`${configFile}.tmp`, JSON.stringify(Object.fromEntries(runtimeKeys.map(key => [key, env[key]])), null, 2) + "\n", { mode: 0o600 });
     await rename(`${configFile}.tmp`, configFile);
-    console.log("初始化完成。运行 npm start 启动；首次在浏览器加载扩展后会自动连接。");
+    for (const launcher of await registerInstalledLaunchers({ root, dataDir, port, env }))
+      console.log(launcher.ok ? `${launcher.label} 本机启动器已注册：打开扩展时按需启动服务。` : `${launcher.label} 本机启动器未注册：${launcher.error}`);
+    console.log(`初始化完成。运行 npm start 启动；在浏览器加载 ${join(root, ".output/chrome-mv3")} 后会自动连接。`);
     return;
   }
   if (command === "start") return start(env);

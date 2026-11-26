@@ -91,15 +91,23 @@ App 内置和无法确认来源的自定义安装只显示版本及原安装方�
 
 要求：可加载 MV3 扩展的浏览器、Node.js 22.15+、已安装并配置登录的 Codex CLI 或 Pi；Codex 内置生图及会话读取需要 Codex CLI；API 生图使用独立渠道配置。首发在 macOS 验证。
 
+macOS/Linux 可一键安装 Release 运行包（校验、初始化并启动服务，之后只需在浏览器加载打印的扩展目录），说明见[安装指引](docs/INSTALL_WITH_CODEX.md#一键安装macos--linux)：
+
+```bash
+curl -fsSL https://github.com/AIDiscovery007/qc-reframe/releases/latest/download/install.sh | bash
+```
+
+从源码安装：
+
 ```bash
 cd browser-extension
 npm run setup
 npm start
 ```
 
-`setup` 检查环境、安装锁定依赖并构建；Alchemy 运行 skill 已随仓库提供。`start` 后台启动本机服务，重复运行复用同版本服务和既有连接凭据；后台自动连接已批准的 Reframe 扩展，无需手填配对码。`npm run status` 查看状态，`npm stop` 停止服务并保留数据。macOS Codex 可在初始化后运行 `npm run launcher:install -- codex`，注册后打开 Reframe 会按需启动服务；其他平台或浏览器仍手动运行 `npm start`。
+`setup` 检查环境、安装锁定依赖并构建；Alchemy 运行 skill 已随仓库提供。`start` 后台启动本机服务，重复运行复用同版本服务和既有连接凭据；后台自动连接已批准的 Reframe 扩展，无需手填配对码。`npm run status` 查看状态，`npm stop` 停止服务并保留数据。macOS 上 `setup` 会为已安装的 Chrome、Codex 注册启动器，之后打开 Reframe 会按需启动服务；其他平台在界面复制启动命令，手动运行 `npm start`。
 
-界面不再显示配对输入、服务地址、重复 CLI 安装信息和启动说明；Codex/Pi 安装与版本统一在「插件模型」查看。自动连接要求先安装本机服务；macOS Codex 注册启动器后可由打开界面的健康检查唤起服务，后台提醒和业务写入不会唤起；加载标准 `.output/chrome-mv3` 目录会自动识别，ZIP 或其他目录由安装者按[安装指引](docs/INSTALL_WITH_CODEX.md)登记扩展 ID，普通网页与未批准扩展不能取得连接凭据。
+界面不显示配对输入、服务地址和重复 CLI 安装信息；服务离线时只显示一条可复制的启动命令。Codex/Pi 安装与版本统一在「插件模型」查看。自动连接要求先安装本机服务；已注册启动器时可由打开界面的健康检查唤起服务，后台提醒和业务写入不会唤起。manifest 带固定 key，从任何目录或 ZIP 加载的扩展 ID 相同、都会自动识别；普通网页与未批准扩展不能取得连接凭据。
 
 工作台「设置中心 → 本机连接」提供「重启本机服务」按钮：服务空闲时可重新加载已安装的服务代码，保留端口、数据目录、运行配置和配对；界面确认新服务实例就绪后提示成功。逆向、生图、模型验证或 Agent CLI 安装更新进行中暂不能重启。此操作不下载更新、不重载扩展。首次启用此功能的旧服务仍需在终端运行 `npm stop`、`npm start`；离线时可重新打开界面唤起已注册的启动器，未注册时先运行 `npm start`，直接用终端运行的非托管服务需在原终端停止后再启动。等待超时按提示运行 `npm run status`，并检查数据目录下 `logs/bridge.log`。
 

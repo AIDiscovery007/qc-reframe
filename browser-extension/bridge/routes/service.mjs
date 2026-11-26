@@ -28,6 +28,8 @@ export async function serviceRoutes(request, app) {
     json(200, {
       service: "qc-alchemy",
       version,
+      // Lets the extension offer `cd <installDir> && npm start` while the service is offline.
+      installDir: root,
       projectsRevision: projects.revision,
       managed: allowShutdown,
       instanceId, restartId, canRestart: allowShutdown && !!restart,

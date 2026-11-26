@@ -9,7 +9,7 @@ import { endianness, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createBridge } from "../bridge/server.mjs";
-import { extensionOrigin } from "../bridge/connection.mjs";
+import { EXTENSION_ID } from "../lib/extension-identity.mjs";
 
 const exec = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -34,7 +34,7 @@ async function installation(t, copyRoot = false) {
   const codex = join(dir, "codex-test");
   await writeFile(codex, '#!/usr/bin/env node\nconsole.log("codex-cli test");\n', { mode: 0o700 });
   const env = { ...process.env, ALCHEMY_DATA_DIR: dir, ALCHEMY_PORT: String(await unusedPort()),
-    ALCHEMY_NATIVE_HOST_DIR: join(dir, "native manifests"),
+    ALCHEMY_APP_SUPPORT_DIR: join(dir, "app support"),
     CODEX_BIN: codex, CODEX_HOME: join(dir, "codex-home"), IMAGEGEN_SKILL_PATH: join(dir, "missing-imagegen.md") };
   delete env.ALCHEMY_SKILL_PATH;
   const run = (command, ...args) => exec(process.execPath, [join(installRoot, "scripts/manage.mjs"), command, ...args], { env, timeout: 15000 });
@@ -43,6 +43,8 @@ async function installation(t, copyRoot = false) {
 }
 
 const nativeHostName = "com.qc.reframe";
+const browserProfiles = { chrome: "Google/Chrome", codex: "OpenAI/Codex" };
+const registrationPath = (env, browser) => join(env.ALCHEMY_APP_SUPPORT_DIR, browserProfiles[browser], "NativeMessagingHosts", `${nativeHostName}.json`);
 function nativeFrame(value) {
   const body = Buffer.from(JSON.stringify(value));
   const size = Buffer.alloc(4);
@@ -53,7 +55,7 @@ async function registeredLauncher(t) {
   const installationState = await installation(t, true);
   installationState.env.ALCHEMY_EXTENSION_ID = "b".repeat(32);
   await installationState.run("native-install", "codex");
-  const manifestPath = join(installationState.env.ALCHEMY_NATIVE_HOST_DIR, `${nativeHostName}.json`);
+  const manifestPath = registrationPath(installationState.env, "codex");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   return { ...installationState, manifestPath, manifest };
 }
@@ -91,7 +93,7 @@ test("user registers and removes only their own Codex launcher without touching 
   assert.equal(f.manifest.type, "stdio");
   assert.equal(f.manifest.path, resolve(f.manifest.path));
   assert.ok((await stat(f.manifest.path)).mode & 0o100);
-  assert.deepEqual(new Set(f.manifest.allowed_origins), new Set([`${extensionOrigin(join(f.installRoot, ".output/chrome-mv3"))}/`, `chrome-extension://${"b".repeat(32)}/`]));
+  assert.deepEqual(new Set(f.manifest.allowed_origins), new Set([`chrome-extension://${EXTENSION_ID}/`, `chrome-extension://${"b".repeat(32)}/`]));
   const preserved = join(f.dir, "project-keep.json");
   await writeFile(preserved, '{"keep":true}');
   await f.run("native-uninstall", "codex");
@@ -131,8 +133,8 @@ syncBuiltinESMExports();
 
 for (const registration of ["foreign", "empty", "invalid"]) test(`user cannot overwrite or uninstall an unowned ${registration} native host registration`, { skip: process.platform === "win32" }, async t => {
   const f = await installation(t, true);
-  await mkdir(f.env.ALCHEMY_NATIVE_HOST_DIR, { recursive: true });
-  const path = join(f.env.ALCHEMY_NATIVE_HOST_DIR, `${nativeHostName}.json`);
+  const path = registrationPath(f.env, "codex");
+  await mkdir(dirname(path), { recursive: true });
   const foreign = registration === "empty" ? "" : registration === "invalid" ? "{" : JSON.stringify({ name: nativeHostName, type: "stdio", path: "/another-install/launcher", allowed_origins: [] });
   await writeFile(path, foreign);
   for (const command of ["native-install", "native-uninstall"]) {
@@ -221,6 +223,77 @@ test("user approves their separately loaded extension during setup and reconnect
   // Then the previously approved extension connects both times using the same private credential.
   assert.equal(tokens[0], tokens[1]);
   assert.equal((await readFile(join(dir, "config/token"), "utf8")).trim(), tokens[0]);
+});
+
+async function setupWithStubbedNpm(t, { prebuilt = false } = {}) {
+  const f = await installation(t, true);
+  const calls = join(f.dir, "npm-calls.jsonl");
+  f.env.npm_execpath = join(f.dir, "npm-stub.cjs");
+  await writeFile(f.env.npm_execpath, `require("node:fs").appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`);
+  if (prebuilt) await writeFile(join(f.installRoot, "runtime-package.json"), "{}\n");
+  const npmCalls = async () => (await readFile(calls, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
+  return { ...f, npmCalls };
+}
+
+test("user runs setup and the launcher is registered for each installed browser only", { skip: process.platform === "win32" }, async t => {
+  // Given Chrome has a profile on this machine and Codex has never been opened.
+  const f = await setupWithStubbedNpm(t);
+  await mkdir(join(f.env.ALCHEMY_APP_SUPPORT_DIR, browserProfiles.chrome), { recursive: true });
+  // When setup runs.
+  const { stdout } = await f.run("setup");
+  // Then Chrome can wake the service for the fixed extension ID, and no Codex folder is created.
+  const manifest = JSON.parse(await readFile(registrationPath(f.env, "chrome"), "utf8"));
+  assert.deepEqual(manifest.allowed_origins, [`chrome-extension://${EXTENSION_ID}/`]);
+  assert.ok((await stat(manifest.path)).mode & 0o100);
+  await assert.rejects(stat(join(f.env.ALCHEMY_APP_SUPPORT_DIR, browserProfiles.codex)), { code: "ENOENT" });
+  assert.match(stdout, /Chrome 本机启动器已注册/);
+  assert.doesNotMatch(stdout, /Codex 本机启动器/);
+  assert.match(stdout, new RegExp(`加载 .*${f.installRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+});
+
+test("user's setup still completes when another installation owns the browser launcher", { skip: process.platform === "win32" }, async t => {
+  // Given Chrome's launcher registration belongs to another installation.
+  const f = await setupWithStubbedNpm(t);
+  const path = registrationPath(f.env, "chrome");
+  await mkdir(dirname(path), { recursive: true });
+  const foreign = JSON.stringify({ name: nativeHostName, type: "stdio", path: "/another-install/launcher", allowed_origins: [] });
+  await writeFile(path, foreign);
+  // When setup runs, Then it finishes, says why Chrome was skipped, and leaves the other registration alone.
+  const { stdout } = await f.run("setup");
+  assert.match(stdout, /Chrome 本机启动器未注册：.*另一份安装/);
+  assert.match(stdout, /初始化完成/);
+  assert.equal(await readFile(path, "utf8"), foreign);
+  assert.ok(JSON.parse(await readFile(join(f.dir, "config/runtime.json"), "utf8")));
+});
+
+test("user removes the Chrome launcher and Codex keeps waking the same installation", { skip: process.platform === "win32" }, async t => {
+  // Given both browsers registered by this installation.
+  const f = await registeredLauncher(t);
+  await f.run("native-install", "chrome");
+  const chrome = registrationPath(f.env, "chrome");
+  assert.equal(JSON.parse(await readFile(chrome, "utf8")).path, f.manifest.path);
+  // When Chrome's launcher is removed, Then Codex's registration and the shared executable remain.
+  await f.run("native-uninstall", "chrome");
+  await assert.rejects(readFile(chrome), { code: "ENOENT" });
+  assert.ok((await stat(f.manifest.path)).mode & 0o100);
+  assert.deepEqual(await nativeRequest(f), { ok: true });
+  // And removing the last registration also removes the executable.
+  await f.run("native-uninstall", "codex");
+  await assert.rejects(readFile(f.manifest.path), { code: "ENOENT" });
+});
+
+test("user installing the release runtime package gets runtime dependencies without a rebuild", { skip: process.platform === "win32" }, async t => {
+  // Given an installation that came from the prebuilt release package.
+  const f = await setupWithStubbedNpm(t, { prebuilt: true });
+  // When setup runs, Then npm only installs runtime dependencies, without dev tools or install scripts.
+  await f.run("setup");
+  assert.deepEqual(await f.npmCalls(), [["ci", "--omit=dev", "--ignore-scripts"]]);
+});
+
+test("user setting up from a source checkout still installs and builds", { skip: process.platform === "win32" }, async t => {
+  const f = await setupWithStubbedNpm(t);
+  await f.run("setup");
+  assert.deepEqual(await f.npmCalls(), [["ci"], ["run", "build"]]);
 });
 
 test("user mistypes an approved extension ID and setup preserves existing runtime configuration", { skip: process.platform === "win32" }, async t => {

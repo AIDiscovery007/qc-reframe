@@ -52,7 +52,7 @@ export function createServiceConnection() {
       }
     }
   };
-  const launcherHelp = "请检查本机启动器，运行 npm run launcher:install -- codex；不支持的浏览器请手动运行 npm start。";
+  const launcherHelp = "请在 QC-Reframe 安装目录运行 npm start 启动本机服务。";
   const ensureStarted = (signal: AbortSignal) => new Promise<void>((resolve, reject) => {
     let port: ReturnType<typeof browser.runtime.connectNative> | undefined;
     let finished = false;

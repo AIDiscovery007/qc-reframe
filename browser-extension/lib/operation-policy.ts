@@ -37,6 +37,8 @@ export const uiOperations: Readonly<Record<string, Operation>> = {
   "alchemy:save-project-view": ui,
   "alchemy:state": ui,
   "alchemy:connect": ui,
+  // Only extension pages may read the installation path behind the offline start command.
+  "alchemy:start-command": { source: "extension", transport: "message" },
   "alchemy:mode": ui,
   "alchemy:query": ui,
   "alchemy:cancel": ui,

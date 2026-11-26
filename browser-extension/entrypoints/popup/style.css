@@ -84,6 +84,11 @@ p { margin: 8px 0 14px; }
 .settings .select-field { display: grid; margin: 12px 0; }
 .error { padding: 12px; margin: 12px 0; border: 1px solid #a33d33; border-radius: 8px; background: #fff0ec; color: #892d24; font-size: 12px; overflow-wrap: anywhere; }
 .app > .error { margin: 16px 20px 0; }
+/* Offline start hint on extension pages: one selectable command and a copy action. */
+.start-command { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.start-command > span:first-child { flex: 1 1 auto; }
+.compact-main > .start-command, .workspace-main > .start-command { flex: none; margin: 0 16px 8px; }
+.start-command > code { flex: 1 1 100%; padding: 8px 10px; border-radius: 8px; background: var(--surface-muted); color: var(--ink); font-size: 11px; overflow-wrap: anywhere; user-select: all; }
 .result { margin-top: 32px; padding-top: 0; border-top: 0; }
 .language { display: flex; gap: 2px; }
 .language button { border: 1px solid transparent; border-radius: 4px; padding: 5px 9px; background: transparent; color: var(--muted); font-size: 11px; transition: none; }

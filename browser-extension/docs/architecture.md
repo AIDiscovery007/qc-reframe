@@ -175,6 +175,10 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 
 ## 自动连接
 
-`bridge/connection.mjs` 根据 Chromium 的 unpacked ID 规则确定当前安装标准输出目录的扩展 Origin，合并安装配置中显式批准的 `ALCHEMY_EXTENSION_ID`。服务的 `POST /connection` 校验精确 Origin、Host、JSON 空请求及无查询参数后返回既有 token，并禁止缓存；其他业务接口保持 Bearer 认证。原 token、配置和项目数据不重置，普通网页和未知扩展不能自动注册。
+`wxt.config.ts` 把 `lib/extension-identity.mjs` 的公开 key 写入 manifest，使 ZIP、移动目录或任意目录加载的扩展 ID 一致；`bridge/connection.mjs` 信任该固定 ID，并合并安装配置中显式批准的 `ALCHEMY_EXTENSION_ID`。旧版无 key 构建的路径 ID 不再获得凭据，重新加载当前构建后恢复。服务的 `POST /connection` 校验精确 Origin、Host、JSON 空请求及无查询参数后返回既有 token，并禁止缓存；其他业务接口保持 Bearer 认证。原 token、配置和项目数据不重置，普通网页和未知扩展不能自动注册。
 
 扩展后台按业务需要连接，并把凭据仅保存在 trusted local storage。并发请求共用一次握手，偏好写入串行合并，避免连接覆盖模式选择；收到明确 401 时最多恢复一次，网络失败和业务错误不重放请求。界面可见时轮询健康状态，首次未配对也会连接，关闭或切换设置不改变进行中的任务。Codex 与 Pi 共用此连接，安装/登录/模型验证仍由各自渠道管理；连接不依赖 Codex 技能或模型就绪。
+
+`/health` 返回安装目录 `installDir`；后台把它从健康数据中剥离，单独存入 trusted local storage，仅经 `alchemy:start-command`（扩展页面、message transport）生成 `cd '<目录>' && npm start`，content 与网页面板不能读取。服务离线且启动器不可用时，工作台、轻量端和「本机连接」显示这条可复制命令；旧服务未返回目录时退回通用说明。
+
+`npm run setup` 对已存在配置目录的浏览器（macOS 的 Chrome 与 Codex）注册 `com.qc.reframe` 按需启动器，共用数据目录下的 `runtime/native-launcher`；其他安装已占用的注册只报告跳过，不覆盖。`scripts/package-runtime.mjs` 把已构建扩展、bridge、服务脚本与 Alchemy skill 打成带 `runtime-package.json` 标记的 Release 运行包；`setup` 识别该标记后只执行 `npm ci --omit=dev --ignore-scripts`，不重新构建。`scripts/install.sh` 下载运行包并按 `SHA256SUMS` 校验，只写入空目录或已有运行包安装，升级时先停止本安装服务、只替换运行包所含条目，保留 `.local/` 与其他文件。
