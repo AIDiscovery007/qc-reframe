@@ -24,7 +24,7 @@
 
 | 位置 | 维护内容 |
 | --- | --- |
-| [根 README](README.md) | 产品定位、核心亮点、公开效果对照、工作台与文档索引；安装 Prompt 和操作细节放到副页，首页只保留当前版本和下载入口。 |
+| [根 README](README.md) · [中文版](README.zh-CN.md) | 英文与中文两版内容保持一致：一句话定位、一组公开效果对照、可交给任意 Agent 的安装 Prompt 与一键命令、加载扩展、分步使用、关键须知与文档索引。用浅显语言写，界面标签在英文版中附中文原文；排错、功能细节和版本史放到副页。 |
 | [功能导览](browser-extension/docs/FEATURES.md) | 按创作流程介绍核心亮点、配图与适用范围，链接到使用手册，不复制整套操作步骤。 |
 | [插件 README](browser-extension/README.md) | 当前功能行为、使用细节、开发命令和能力边界，不记录历次测试流水。 |
 | [安装指引](browser-extension/docs/INSTALL_WITH_CODEX.md) | 可由其他用户的 Codex 执行的初始化、配对、升级和排错流程。 |
@@ -106,7 +106,7 @@ UI 改动用 `npm run preview` 检查相关状态，再按任务需要验收实�
 
 ## 发布新版本：先提交，再发布
 
-1. 确定目标版本，更新 `package.json` 和 `package-lock.json` 中的根版本。WXT 从包版本生成 manifest；同步 README 当前版本、安装 Prompt、克隆标签、下载链接和安装指引，不复制旧版功能日志到首页。
+1. 确定目标版本，更新 `package.json` 和 `package-lock.json` 中的根版本。WXT 从包版本生成 manifest；同步中英文 README、安装 Prompt、克隆标签、下载链接和安装指引，不复制旧版功能日志到首页。
 2. 新增 `docs/releases/v版本号.md` 并更新索引。说明是否需要重启服务、重新加载扩展、刷新网页，以及数据或配置是否迁移；没有实际验证的环节如实标注。用于 GitHub Release 正文的图片链接使用对应标签下的公开完整地址，避免相对路径失效或后续 main 改动替换历史图片。
 3. 经 PR 合入 main，确认该提交的 `ci` 检查通过。
 4. 在该 main 提交创建 `v版本号` 标签并单独推送。不要修改既有标签来补发不同内容。

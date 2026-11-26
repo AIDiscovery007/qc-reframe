@@ -1,6 +1,6 @@
 # QC-Reframe · 功能导览
 
-[← 首页](../../README.md) · [安装](INSTALL_WITH_CODEX.md) · [效果画廊](gallery/README.md) · [使用手册](../README.md)
+[← 首页](../../README.zh-CN.md) · [安装](INSTALL_WITH_CODEX.md) · [效果画廊](gallery/README.md) · [使用手册](../README.md)
 
 从网页上的一张灵感图，到提示词、生成结果和本机项目库。这里介绍创作流程；具体操作与能力边界链接到使用手册。
 
