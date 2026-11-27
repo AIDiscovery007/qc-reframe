@@ -35,6 +35,8 @@ export const uiOperations: Readonly<Record<string, Operation>> = {
   "alchemy:image-models": { source: "extension", transport: "message" },
   "alchemy:image-settings": { source: "extension", transport: "message" },
   "alchemy:image-settings-save": { source: "extension", transport: "message" },
+  "alchemy:plugin-instructions": { source: "extension", transport: "message" },
+  "alchemy:plugin-instructions-save": { source: "extension", transport: "message" },
   "alchemy:agent-select": { source: "extension", transport: "message" },
   "alchemy:models-refresh": ui,
   "alchemy:model-verify": ui,

@@ -65,7 +65,7 @@ export function createBatchScheduler({ batches, jobs, projects, runtime, generat
                 image: await storedImage(item.snapshot), instruction: item.snapshot.instruction, referenceIndex: item.snapshot.referenceIndex,
                 sourceUrl: item.snapshot.sourceUrl, capture: item.snapshot.capture,
                 generation: { language: next.language, ...(next.aspectRatio ? { aspectRatio: next.aspectRatio } : {}), ...(next.imageSize ? { imageSize: next.imageSize } : {}) } },
-              { frozen: { modelSettings: next.modelSettings, generationModelSettings, jobId: item.jobId, sizeSnapshot } });
+              { frozen: { modelSettings: next.modelSettings, pluginInstructions: next.pluginInstructions, generationModelSettings, jobId: item.jobId, sizeSnapshot } });
             } catch (error) {
               item.status = 'failed'; item.stage = '启动失败'; item.error = error.message;
               await batches.put(next);

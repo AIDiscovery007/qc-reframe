@@ -17,10 +17,11 @@ import { readFile, realpath, writeFile } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAgent } from "./agent.mjs";
-import { runGeneration, imagegenSkillPath, readGenerationSettings } from "./generation.mjs";
+import { runGeneration, readGenerationSettings } from "./generation.mjs";
 import { createProjectStore, recoverProjectDeletion } from "./projects.mjs";
 import { inspectMagpie } from "./magpie.mjs";
 import { createImageSettingsStore } from "./image-settings.mjs";
+import { createPluginInstructionsStore } from "./plugin-instructions.mjs";
 import { runImageApi } from "./image-api.mjs";
 import { builtinAgents, createAgentRegistry, LEGACY_AGENT } from "./agents.mjs";
 import { createCompatibilityChecker, assertFeatureSupported } from "./compatibility.mjs";
@@ -56,7 +57,6 @@ export async function createBridge({
   generator = runGeneration,
   generationContext = readGenerationSettings,
   apiGenerator = runImageApi, magpieInspector = inspectMagpie,
-  generationSkillPath = imagegenSkillPath(),
   allowShutdown = false,
   restart,
   restartId,
@@ -89,6 +89,7 @@ export async function createBridge({
   // Codex also hosts session reading and built-in generation, so its CLI state is reported regardless of the reverse Agent.
   const codexHost = agents.get("codex");
   const imageSettings = await createImageSettingsStore({ dataDir: paths.config });
+  const pluginInstructions = await createPluginInstructionsStore({ dataDir: paths.config });
   const batchGenerationSettings = new Map(); // Secrets live only until the accepted batch settles.
   const requireFeature = async feature => {
     const report = await compatibility.getCompatibility();
@@ -220,7 +221,7 @@ export async function createBridge({
       onSettled: () => generationOutputs.settled(next),
       execute: async ({ signal, progress }) => {
         const output = await (modelSettings.imageProvider ? apiGenerator : generator)({ ...(modelSettings.imageProvider ? { settings: modelSettings, aspectRatio, imageSize } : {}), mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt: next.negativePrompt,
-          skillPath: generationSkillPath, cwd: root, signal, modelSettings, onProgress: progress });
+          signal, modelSettings, onProgress: progress });
         signal.throwIfAborted();
         if (!["png", "jpeg", "webp"].includes(output.extension)) throw new Error("生图返回了不支持的文件格式");
         generationOutputs.remember(next, output);
@@ -303,6 +304,8 @@ export async function createBridge({
       throw bad("找不到 Alchemy 技能，请设置 ALCHEMY_SKILL_PATH", 503);
     }
     const modelSettings = frozen?.modelSettings || agents.selection();
+    // Batches carry the snapshot from their own admission; a batch without one adds no plugin instruction.
+    const instructionsSnapshot = frozen ? frozen.pluginInstructions : pluginInstructions.snapshot();
     signal?.throwIfAborted();
     const sourceUrl = sourceUrlFor(body.sourceUrl);
     if (selectedSessions) assertSessionRequestActive();
@@ -381,7 +384,7 @@ export async function createBridge({
         const result = await agent({ run: agents.frozen(modelSettings).run, sessionContext, imagePath, subjectImagePath,
           subjectImagePaths: reenact?.subjects?.map((item) => images.path(item.subjectAsset)),
           subjects: reenact?.subjects, referenceIndex, basePrompt: reenact?.basePrompt, instruction: job.instruction,
-          mode: job.mode, skillPath, cwd: root, dataDir, signal, modelSettings, onProgress: progress });
+          mode: job.mode, skillPath, cwd: root, dataDir, signal, modelSettings, pluginInstructions: instructionsSnapshot, onProgress: progress });
         promptSnapshot = structuredClone(result);
         return { result };
       },
@@ -394,10 +397,10 @@ export async function createBridge({
   const upgrade = await createUpgradeService({ root, current: version, channel, paths, allowShutdown, busy: () => codexBusy() || cliBusy(),
     port: () => app.server.address().port, ...upgradeOptions });
   batches = await createBatchStore(join(paths.records, 'batches.json'), ids => { taskFeed.touch(); projects.touch(ids); });
-  const generation = createGenerationPreparation({ imageSettings, generationContext, cwd: root, cliBusy, agents, magpieInspector, requireFeature, generationSkillPath });
+  const generation = createGenerationPreparation({ imageSettings, generationContext, cliBusy, agents, magpieInspector, requireFeature });
   const imageCollection = createImageCollection({ images, thumbnails, runtime, records, batches, generationOutputs, jobs, acquireMutation });
   const batchAdmission = createBatchAdmission({
-    batches, projects, runtime, agents, cliBusy, storedImage, skillPath, requireFeature, batchGenerationSettings, generation,
+    batches, projects, runtime, agents, cliBusy, storedImage, skillPath, requireFeature, batchGenerationSettings, generation, pluginInstructions,
   });
   const cancelJob = async job => {
     if (job.autoGeneration?.status === 'pending') {
@@ -415,7 +418,7 @@ export async function createBridge({
   await imageCollection.collect();
 
   // Everything the route modules may use; `server` is attached once created.
-  const app = { agents, allowShutdown, channel: channel.name, batchAdmission, batches, cancelJob, cliBusy, codexBusy, codexHost, compatibility, dataDir, gallery, generationOutputs, generationSkillPath, imageAction, imageCollection, imageSettings, images, instanceId, jobs, magpieInspector, projects, publicBatch, requireFeature, restart, restartId, restoreSubjects, root, runtime, startDataDir, save, saveSubjects, sessions, skillPath, startGeneration, state, storedImage, taskFeed, thumbnails, upgrade, version };
+  const app = { agents, allowShutdown, channel: channel.name, batchAdmission, batches, cancelJob, cliBusy, codexBusy, codexHost, compatibility, dataDir, gallery, generationOutputs, imageAction, imageCollection, imageSettings, images, instanceId, pluginInstructions, jobs, magpieInspector, projects, publicBatch, requireFeature, restart, restartId, restoreSubjects, root, runtime, startDataDir, save, saveSubjects, sessions, skillPath, startGeneration, state, storedImage, taskFeed, thumbnails, upgrade, version };
   const server = createServer(async (req, res) => {
     const submission = new AbortController();
     const abortSubmission = () => submission.abort(bad("请求已取消", 499));

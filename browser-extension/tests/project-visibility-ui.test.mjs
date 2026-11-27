@@ -175,7 +175,7 @@ test('real bridge returns only actual changes to stale and concurrent UI windows
   t.after(() => rm(dir, { recursive: true, force: true }));
   const skillPath = join(dir, 'SKILL.md');
   await writeFile(skillPath, '---\nname: alchemy\n---\nTest skill');
-  const app = await createBridge({ dataDir: dir, skillPath, generationSkillPath: skillPath });
+  const app = await createBridge({ dataDir: dir, skillPath });
   app.server.listen(0, '127.0.0.1');
   await once(app.server, 'listening');
   t.after(async () => { app.server.closeAllConnections(); await new Promise(resolve => app.server.close(resolve)); });

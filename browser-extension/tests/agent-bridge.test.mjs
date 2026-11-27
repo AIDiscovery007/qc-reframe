@@ -16,7 +16,7 @@ async function setup(t, overrides = {}) {
   const models = modelStore('openai', 'codex-model'), piModels = modelStore('pi-provider', 'pi-model');
   const context = { provider: 'openai', model: 'codex-model', reasoningEffort: 'high', accountKey: 'fixture', codexGeneration: true };
   let unsupported = false, piUpdates = 0;
-  const options = { dataDir: dir, skillPath, generationSkillPath: skillPath, models, piModels,
+  const options = { dataDir: dir, skillPath, models, piModels,
     generationContext: async () => ({ ...context }),
     cli: { busy: false, status: async () => ({}), close() {} },
     piCli: { busy: false, status: async () => ({}), update: async () => { piUpdates++; return {}; }, close() {} },

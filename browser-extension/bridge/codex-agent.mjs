@@ -5,17 +5,17 @@ import { withCodex } from "./codex-rpc.mjs";
 import { assertModelContext, modelError, generationContextError } from "./model-context.mjs";
 import { taskResources, taskSystemPrompt, referenceToolSpec, readReference } from "./skill-resources.mjs";
 
-// Context sources a reverse or model check never needs: project and global skills, project AGENTS.md, environment and
-// permission notes, apps, plugins, browsers, sub-agents, web search, shell, file image viewing, user questions and image
-// generation. Unknown keys are ignored by older CLIs. The user's global AGENTS.md and the model's own code-mode tools have
-// no switch and still reach the model.
+// Context sources a Reframe task never needs: project and global skills, project AGENTS.md, environment and permission
+// notes, apps, plugins, browsers, sub-agents, web search, shell and its environment snapshot, file image viewing and user
+// questions. Image generation is on only for generation. Unknown keys are ignored by older CLIs. The user's global AGENTS.md
+// and the model's own code-mode tools have no switch and still reach the model.
 const ISOLATION = {
   project_doc_max_bytes: 0, include_permissions_instructions: false, include_environment_context: false,
   include_collaboration_mode_instructions: false, include_apps_instructions: false, web_search: "disabled",
   agents: { enabled: false }, skills: { include_instructions: false, bundled: { enabled: false } },
   features: { apps: false, plugins: false, remote_plugin: false, computer_use: false, browser_use: false, browser_use_external: false,
-    in_app_browser: false, goals: false, hooks: false, multi_agent_v2: false, shell_tool: false, sleep_tool: false, skill_search: false,
-    tool_suggest: false, image_generation: false, view_image: false },
+    in_app_browser: false, goals: false, hooks: false, multi_agent_v2: false, shell_tool: false, shell_snapshot: false, sleep_tool: false,
+    skill_search: false, tool_suggest: false, image_generation: false, view_image: false },
   tools: { experimental_request_user_input: { enabled: false } },
 };
 
@@ -31,21 +31,20 @@ const referenceTool = references => ({
 });
 
 /**
- * Codex app-server runner: one ephemeral read-only thread per call. Built-in generation keeps the bridge folder and the
- * user's Codex setup; reverse and model checks run isolated, with Reframe's prompt and skill snapshot as the base instructions.
+ * Codex app-server runner: one ephemeral read-only thread per call in a private folder, with Reframe's instructions in place
+ * of Codex's base prompt. Reverse adds its skill snapshot and tools; generation adds only the built-in image tool.
  */
 export async function runCodex(options) {
-  if (options.generation) return runThread(options);
   return withPrivateFolder(async dir => {
+    if (options.generation) return runThread({ ...options, cwd: dir, dynamicTools: [] });
     const { references, skillText } = await taskResources(options.input, dir, { probe: options.probe, label: "Codex" });
-    return runThread({ ...options, cwd: dir, isolated: true, input: options.input.filter(item => item.type !== "skill"),
+    return runThread({ ...options, cwd: dir, input: options.input.filter(item => item.type !== "skill"),
       instructions: options.probe ? options.instructions : taskSystemPrompt({ instructions: options.instructions, skillText, references, schemaRule: false }),
       dynamicTools: options.probe ? [] : [...options.dynamicTools || [], referenceTool(references)] });
   });
 }
 
-async function runThread({ input, schema, cwd, signal, onProgress = () => {}, instructions, generation = false, modelSettings, probe = false, dynamicTools = [], isolated = false }) {
-  if (generation) dynamicTools = [];
+async function runThread({ input, schema, cwd, signal, onProgress = () => {}, instructions, generation = false, modelSettings, probe = false, dynamicTools = [] }) {
   let threadId;
   let finalText = "";
   const images = [];
@@ -55,8 +54,6 @@ async function runThread({ input, schema, cwd, signal, onProgress = () => {}, in
   const onNotification = (message) => {
     const p = message.params || {};
     if (threadId && p.threadId && p.threadId !== threadId) return;
-    if (generation && message.method === "item/started" && p.item?.type === "commandExecution")
-      onProgress({ stage: "正在读取 imagegen 技能…" });
     if (message.method === "item/started" && p.item?.type === "dynamicToolCall" && p.item.tool === referenceToolSpec.name)
       onProgress({ stage: "正在读取技能参考资料…" });
     if (message.method === "item/agentMessage/delta")
@@ -106,12 +103,13 @@ async function runThread({ input, schema, cwd, signal, onProgress = () => {}, in
       }
       const started = await request("thread/start", {
         cwd, sandbox: "read-only", approvalPolicy: "never",
-        ...(isolated ? { baseInstructions: instructions } : { developerInstructions: instructions }),
+        baseInstructions: instructions,
         model: modelSettings.model,
         modelProvider: modelSettings.provider,
-        config: { model_reasoning_effort: modelSettings.reasoningEffort, ...(isolated ? { ...ISOLATION,
+        config: { model_reasoning_effort: modelSettings.reasoningEffort, ...ISOLATION,
+          features: { ...ISOLATION.features, image_generation: generation },
           // A table per server: names may contain dots, which a dotted override key would split.
-          mcp_servers: Object.fromEntries(Object.keys(config.mcp_servers || {}).map(name => [name, { enabled: false }])) } : {}) },
+          mcp_servers: Object.fromEntries(Object.keys(config.mcp_servers || {}).map(name => [name, { enabled: false }])) },
         ...(dynamicTools.length ? { dynamicTools: dynamicTools.map(tool => tool.spec) } : {}),
         ephemeral: probe || process.env.ALCHEMY_PERSIST_CODEX_SESSIONS !== "1",
       });

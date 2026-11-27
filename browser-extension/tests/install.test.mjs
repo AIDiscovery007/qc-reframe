@@ -35,7 +35,7 @@ async function installation(t, copyRoot = false) {
   await writeFile(codex, '#!/usr/bin/env node\nconsole.log("codex-cli test");\n', { mode: 0o700 });
   const env = { ...process.env, ALCHEMY_DATA_DIR: dir, ALCHEMY_PORT: String(await unusedPort()),
     ALCHEMY_APP_SUPPORT_DIR: join(dir, "app support"),
-    CODEX_BIN: codex, CODEX_HOME: join(dir, "codex-home"), IMAGEGEN_SKILL_PATH: join(dir, "missing-imagegen.md") };
+    CODEX_BIN: codex, CODEX_HOME: join(dir, "codex-home") };
   delete env.ALCHEMY_SKILL_PATH;
   const run = (command, ...args) => exec(process.execPath, [join(installRoot, "scripts/manage.mjs"), command, ...args], { env, timeout: 15000 });
   t.after(async () => { await run("stop").catch(() => {}); await rm(dir, { recursive: true, force: true }); });
@@ -398,7 +398,9 @@ test("bundled Alchemy runs without author's external files and has no dangling r
 
 test("fresh local service starts detached, reuses pairing, stops and restarts without data loss", { skip: process.platform === "win32" }, async t => {
   const { dir, run } = await installation(t);
-  assert.match((await run("doctor")).stdout, /可逆向提示词/);
+  const doctor = (await run("doctor")).stdout;
+  assert.match(doctor, /Alchemy skill：就绪/);
+  assert.doesNotMatch(doctor, /imagegen|IMAGEGEN_SKILL_PATH/, "built-in generation no longer depends on the imagegen skill");
   assert.match((await run("start")).stdout, /后台启动/);
   for (const directory of ["config", "records", "images", "logs", "runtime"]) assert.ok((await readdir(dir)).includes(directory));
   for (const file of ["token", "bridge.log", "model-settings.json", "runtime.json", "start.lock"]) assert.ok(!(await readdir(dir)).includes(file));

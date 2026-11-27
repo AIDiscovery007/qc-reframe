@@ -28,7 +28,7 @@ async function setup(t) {
   const models = { busy: false, selectedModel: "test", selection: () => ({ model: "test" }), invalidate: async () => {}, close() {} };
   const manager = () => ({ busy: false, status: async () => ({}), close() {} });
   const app = await createBridge({
-    dataDir: dir, skillPath, generationSkillPath: skillPath, models, piModels: models,
+    dataDir: dir, skillPath, models, piModels: models,
     cli: manager(), piCli: manager(), sessions: { busy: false, close() {} },
     compatibility: { getCompatibility: async () => ({}), snapshot: () => ({}) },
     generationContext: async () => ({ model: "image-test", provider: "fixture", codexGeneration: true }),

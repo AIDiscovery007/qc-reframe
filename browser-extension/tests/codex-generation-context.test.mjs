@@ -114,6 +114,9 @@ test('user generates through the actual RPC transport using the accepted CLI sna
   assert.equal(start.model, 'cli-model'); assert.equal(start.config.model_reasoning_effort, 'high');
   assert.equal(turn.model, 'cli-model'); assert.equal(turn.effort, 'high');
   assert.equal(calls.filter(m => m.method === 'turn/start').length, 1);
+  // And neither the accepted snapshot nor the image turn reads Codex settings from a project folder.
+  assert.ok(calls.filter(m => m.method === 'config/read').every(m => !m.params.cwd.startsWith(s.dir)));
+  assert.ok(!start.cwd.startsWith(s.dir));
 });
 
 for (const failure of ['account', 'provider', 'capability', 'model', 'substitution']) test(`user gets Codex recovery with no image turn after ${failure} failure`, async t => {

@@ -105,7 +105,7 @@ process.exit(run.status ?? 1);
   const env = { ...process.env, LC_ALL: "en_US.UTF-8", PATH: `${bin}:${process.env.PATH}`, HOME: join(dir, "home"), TMPDIR: dir,
     QC_REFRAME_BASE_URL: `http://127.0.0.1:${mirror.address().port}`, QC_REFRAME_DIR: join(dir, "Q C Reframe"),
     ALCHEMY_PORT: String(await unusedPort()), ALCHEMY_APP_SUPPORT_DIR: join(dir, "app support"),
-    CODEX_BIN: codex, CODEX_HOME: join(dir, "codex-home"), IMAGEGEN_SKILL_PATH: join(dir, "missing-imagegen.md") };
+    CODEX_BIN: codex, CODEX_HOME: join(dir, "codex-home") };
   for (const key of ["ALCHEMY_DATA_DIR", "ALCHEMY_SKILL_PATH", "ALCHEMY_EXTENSION_ID", "QC_REFRAME_VERSION"]) delete env[key];
   await mkdir(join(env.ALCHEMY_APP_SUPPORT_DIR, "Google/Chrome"), { recursive: true });
   const installDir = env.QC_REFRAME_DIR;

@@ -25,7 +25,7 @@ export function recoverySection(message = ""): RecoverySection | undefined {
   if (/Claude Code/.test(message)) return "models";
   if (/Pi.*(?:CLI|安装|版本|升级|更新|无法运行|无法启动|路径)/i.test(message)) return "pi-cli";
   if (/Pi|逆向 Agent/.test(message)) return "models";
-  if (/本机服务|配对码|图片逆向技能|ALCHEMY_SKILL_PATH|IMAGEGEN_SKILL_PATH/.test(message)) return "connection";
+  if (/本机服务|配对码|图片逆向技能|ALCHEMY_SKILL_PATH/.test(message)) return "connection";
   if (/刷新模型列表|重新验证|请先.*登录|账号|账户|额度|reasoning[._\s-]+effort/i.test(message)) return "models";
   if (/CLI|Codex.*(?:版本|升级|更新|不支持|无法运行|无法启动|安装)|app-server|experimentalApi|method not found/i.test(message)) return "cli";
   if (/模型|推理强度|登录|账号|账户|额度/.test(message)) return "models";

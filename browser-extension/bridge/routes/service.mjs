@@ -6,7 +6,7 @@ import { LEGACY_AGENT } from "../agents.mjs";
 /** Service status, sessions, Agent/model/CLI management, image settings and service lifecycle routes. Returns true when the request was handled. */
 export async function serviceRoutes(request, app) {
   const { req, res, path, query, json, validateQuery, includeHidden, submission, readSessions, assertSessionRequestActive } = request;
-  const { root, version, channel, dataDir, startDataDir, skillPath, generationSkillPath, instanceId, restartId, allowShutdown, restart, server, state, agents, codexHost, compatibility, requireFeature, cliBusy, codexBusy, imageSettings, magpieInspector, sessions, projects, batches, runtime, taskFeed, upgrade } = app;
+  const { root, version, channel, dataDir, startDataDir, skillPath, instanceId, restartId, allowShutdown, restart, server, state, agents, codexHost, compatibility, requireFeature, cliBusy, codexBusy, imageSettings, pluginInstructions, magpieInspector, sessions, projects, batches, runtime, taskFeed, upgrade } = app;
   if (req.method === "GET" && path === "/health") {
     validateQuery(["includeHidden"]);
     // The service manager polls readiness passively; only client health checks refresh CLI state.
@@ -79,6 +79,11 @@ export async function serviceRoutes(request, app) {
   if (path === "/image-settings" && (req.method === "GET" || req.method === "POST")) {
     validateQuery([]);
     json(200, req.method === "GET" ? imageSettings.view() : await imageSettings.save(await readBody(req)));
+    return true;
+  }
+  if (path === "/plugin-instructions" && (req.method === "GET" || req.method === "POST")) {
+    validateQuery([]);
+    json(200, req.method === "GET" ? pluginInstructions.view() : await pluginInstructions.save(await readBody(req)));
     return true;
   }
   if (req.method === "GET" && path === "/agents") {
@@ -163,7 +168,7 @@ export async function serviceRoutes(request, app) {
     if (codexBusy() || cliBusy()) throw bad("任务、模型验证或 Agent CLI 操作执行中，请等待完成后再重启。", 409);
     const nextRestartId = randomUUID();
     let commit;
-    try { commit = await restart({ root, dataDir, port: server.address().port, instanceId, restartId: nextRestartId, skillPath, generationSkillPath }); }
+    try { commit = await restart({ root, dataDir, port: server.address().port, instanceId, restartId: nextRestartId, skillPath }); }
     catch { throw bad("重启准备失败，原服务仍在运行。请查看本机服务日志后重试。", 503); }
     state.shuttingDown = true;
     let committed = false;

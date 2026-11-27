@@ -49,6 +49,8 @@ node agent-tool/ui.mjs gate --tier browser --no-build   # 全部登记场景＋�
 
 生图 API 设置：`node agent-tool/ui.mjs verify --scenarios image-settings-wide image-settings-narrow image-settings-legacy`。复用生产设置组件，覆盖两种直连 API 与 Magpie、进入/重开自动加载、空目录/失败邻近提示、失效模型保留并禁止保存、地址/渠道/卸载迟到目录、保存失败、密钥不回显、清除和窄屏；仅合成消息，不访问真实凭据、供应商或项目。桥接与协议反例：`node --test browser-extension/tests/image-api-bridge.test.mjs browser-extension/tests/image-api.test.mjs browser-extension/tests/image-settings.test.mjs browser-extension/tests/magpie.test.mjs`，使用临时配置、合成图片与 stub，不调用真实模型。
 
+插件指令：`node agent-tool/ui.mjs verify --scenarios plugin-instructions-failure plugin-instructions-narrow plugin-instructions-legacy`。覆盖内置指令载入、编辑后保存、保存失败保留草稿、重开持久、填入内置后恢复、窄屏无横向溢出与旧服务提示；只用合成消息，不调用真实模型。Node 反例：`node --test browser-extension/tests/plugin-instructions.test.mjs`。
+
 渠道保存即时同步：`image-settings-sync-{codex-to-magpie,magpie-to-codex}-{manual,continuous,batch}` 与 `image-settings-sync-{stale-health,rapid-switch,reopen-draft,snapshot}` 共 10 个场景，沿用 `node agent-tool/ui.mjs verify --scenarios ID …`。覆盖保存及健康刷新期间禁提交、保存后立即使用新渠道尺寸、迟到响应隔离、重开后新草稿保留及已受理快照；只用合成消息，不调用真实模型。Node 时序反例：`node --test browser-extension/tests/image-settings-sync.test.mjs`。
 
 底部生图模型：`workspace-image-model-{switch,empty,narrow,directory-failure,save-failure,stale-directory,stale-health,snapshot,reverse-busy,background-busy}`，沿用 `node agent-tool/ui.mjs verify --scenarios ID …`。覆盖目录原生选择、首次无提示词入口、设置中心同步、失败重试、迟到响应、手填尺寸保留、提交受理及当前/后台任务忙碌禁用、空闲恢复和原任务快照；检查无提交预览、无悬空描述与窄屏布局。仅合成消息，不调用网关、模型或写入真实项目。

@@ -87,7 +87,7 @@ export async function registerLauncher({ root, dataDir, port, env, uninstall, br
   // The browser's PATH, Node options and ALCHEMY_* variables are not authority.
   // Capture only installation configuration, never account credentials or tokens.
   // USER lets Claude Code find its macOS keychain login; it is an account name, not a credential.
-  const keys = ["HOME", "USER", "PATH", "TMPDIR", "LANG", "CODEX_HOME", "CODEX_BIN", "PI_BIN", "CLAUDE_BIN", "CLAUDE_CONFIG_DIR", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
+  const keys = ["HOME", "USER", "PATH", "TMPDIR", "LANG", "CODEX_HOME", "CODEX_BIN", "PI_BIN", "CLAUDE_BIN", "CLAUDE_CONFIG_DIR", "ALCHEMY_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
   const fixed = { ...Object.fromEntries(keys.filter(key => typeof env[key] === "string").map(key => [key, env[key]])), ALCHEMY_DATA_DIR: dataDir, ALCHEMY_PORT: String(port),
     // Only the dev launcher names its channel; the release launcher keeps its earlier form.
     ...(channel.name === "release" ? {} : { ALCHEMY_CHANNEL: channel.name }) };

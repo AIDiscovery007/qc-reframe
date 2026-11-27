@@ -37,3 +37,13 @@ test("bridge keeps slow read/write deadlines separate from management and ordina
   for (const path of ["/models/verify", "/cli/update", "/agents?detect=1"]) assert.equal(bridgeTimeout(path), 30_000);
   for (const path of ["/health", "/projects", "/jobs/job/generations", "/agents"]) assert.equal(bridgeTimeout(path), 15_000);
 });
+
+test("user's plugin instruction can be read and changed only from Reframe's own pages", () => {
+  // Given the settings messages for the plugin instruction.
+  for (const type of ["alchemy:plugin-instructions", "alchemy:plugin-instructions-save"]) {
+    const operation = operationFor(type);
+    // Then extension pages may call them, and web content cannot.
+    assert.equal(allowsOperation(operation, "extension"), true);
+    assert.equal(allowsOperation(operation, "content"), false);
+  }
+});

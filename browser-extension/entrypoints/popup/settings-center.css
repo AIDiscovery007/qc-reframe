@@ -125,3 +125,10 @@
 
 .image-generation-settings { overflow-wrap: anywhere; }
 .image-generation-settings .settings-pair-label input { min-width: 0; }
+
+.plugin-instructions form { margin-top: 18px; }
+.plugin-instructions textarea { display: block; width: 100%; min-height: 300px; max-height: 60dvh; resize: vertical; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 12px; line-height: 1.75; }
+.plugin-instructions textarea:disabled { background: var(--surface-muted); }
+.settings-center-content .plugin-instructions-count { margin: 6px 0 0; color: var(--muted); text-align: right; }
+.plugin-instructions-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px; }
+.settings-center-content .plugin-instructions-actions .primary { margin: 0; }

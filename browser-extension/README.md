@@ -42,6 +42,8 @@
 
 设置中心的「插件模型」以 Codex / Pi / Claude Code 卡片选择逆向 Agent，各自分别保留模型和推理强度，切换不会修改它们的全局默认模型和推理设置。点击卡片后，刷新所选 Agent 的模型列表并「验证并使用」；验证会发出少量文字请求。Pi 使用本机已配置的提供方和登录状态，列表仅显示支持图片输入的模型；不可用时报告错误，不回退其他 Agent。执行任务或验证期间不能切换。会话来源仍使用 Codex。生图在「生图渠道」独立选择；Magpie 可填写本机网关根地址或 `/v1`，连接后选择目录中的完整生图模型 ID，无需在 Reframe 填写供应商密钥。Magpie 支持文生图、按提示词版本图序附图、连续生图与批量完整复刻；可选择网关默认尺寸或填写像素宽高，附图支持取决于所选模型。连接成功仅证明目录可读取，保存设置不调用模型。旧 OpenAI/Gemini 配置与 Codex 路径保留，切换不会自动搬运密钥。连续流程和批次分别固定逆向与生图配置，历史记录不随设置切换改写。
 
+「设置中心 → 插件指令」相当于 Reframe 自己的 AGENTS.md / CLAUDE.md：每次逆向都会附加给所选 Agent（Codex、Pi 或 Claude Code，五条路径都生效），用来固定长期的观察角度与用词偏好；不用于生图。默认是随插件分发的内置指令，从逆向生图专家与资深视觉设计师的角度引导模型使用构图、镜头、布光、色彩、材质、媒介、风格谱系与排版等专业术语，并要求每个术语都有图中证据。可直接修改并保存（最多 16000 字符，保存在本机私有配置中）；「填入内置指令」后保存即恢复内置并随插件更新，清空后逆向不附加插件指令。本次任务指令优先，插件指令不能改变工具权限、图片顺序或输出格式；修改只影响之后提交的任务，已受理的任务和批次沿用提交时的版本。
+
 Pi 优先使用显式 `PI_BIN`，其次使用 Reframe 管理的安装，再从服务进程的 PATH 查找 `pi`；自定义路径可在服务空闲时运行 `npm stop`，再用 `PI_BIN=/absolute/path/to/pi npm start`（示例路径需替换），以后托管重启沿用该路径。Reframe 仅加载随仓库提供的 Pi 图片取证工具与技能资料工具，不加载个人扩展、项目指令或任意 shell 工具；图片、指令和选中的会话正文会发送给 Pi 所选的模型服务。未安装 Pi 时，可在「插件模型」选择 Pi 后的 CLI 管理区一键安装官方 npm 包；需要 Node.js 22.19+ 和 npm。新安装保存在数据目录的 `runtime/cli/pi`，验证版本和必需接口后才启用。Reframe 管理的安装和来源已验证的 npm 安装支持一键更新。支持原生自更新的 Pi 通过原 CLI 的 `pi update --self --no-approve` 升级本体，使用 Pi 自身安装目录；npm 默认目录不同不会让更新转向另一份安装。Reframe 管理的安装仍先验证候选版本再切换，旧 Pi 则沿用已核实的安装渠道。App 内置或来源无法确认的安装按原渠道维护。Reframe 不改 Pi 的默认模型和推理设置；Pi 自身仍可能自动刷新登录凭据。认证文件变化（包括正常 OAuth 刷新）会保守地要求重新验证，以避免沿用其他账号的验证状态。
 
 Claude Code 优先使用显式 `CLAUDE_BIN`，其次从服务进程的 PATH 查找 `claude`，再查找官方安装器的 `~/.local/bin/claude`；自定义路径的设置方式与 `PI_BIN` 相同。Reframe 通过官方 `claude -p` 非交互接口调用，每个任务一个进程，不加载用户、项目和本地设置（hooks、CLAUDE.md、设置文件中的 `apiKeyHelper`/`env` 都不生效），关闭内置工具，只提供本次图片取证与技能资料两个工具，不保存会话。沿用 Claude Code 自身的登录（`claude auth login`）；图片、指令和选中的会话正文会发送给所选 Claude 模型。模型列表来自 CLI 启动握手，读取列表不调用模型。登录账号、提供方、环境变量中的 API Key/令牌/云服务凭据或可执行文件变化后须重新验证模型。Claude Code 不能生图，生图渠道另行选择。macOS 上 Claude Code 从钥匙串读取登录，按需启动器须携带 `USER`；0.8.0 及更早注册的启动器请重新运行 `npm run setup`。只有官方安装器的入口可在插件内一键运行 `claude update`；npm、Homebrew 和桌面 App 内置版本按原渠道更新。
@@ -256,7 +258,7 @@ Codex、OpenAI 与 Gemini 直连渠道在工作台生图前可选择图片比例
 
 通用风格配方尚未指定主体，需先上传主体图并生成专属提示词，不能直接将 `[SUBJECT]` 发去生图。双图路径缺少必要图片时会明确报错，不静默降级成纯文字生成；逆向原主体图缺失时可上传新主体继续生图。完整复刻使用已有提示词生图时不依赖原图文件。
 
-默认生图通过本机 `codex app-server` 发起独立任务，显式调用 `imagegen` 技能及内置 `image_gen`，沿用 Codex 登录及额度。也可在「设置 → 生图渠道」选择 OpenAI 兼容 API 或 Gemini 原生 API，填写带版本路径的 API 地址、模型 ID 和 API Key，再保存；保存本身不调用模型。OpenAI 兼容服务须支持 Images generations / edits，仅有聊天接口不适用；Gemini 使用支持图片输出的 generateContent 模型。地址要求 HTTPS，本机网关允许 HTTP。
+默认生图通过本机 `codex app-server` 发起独立任务，只调用 Codex 内置 `image_gen`，不需要 imagegen 技能，沿用 Codex 登录及额度。也可在「设置 → 生图渠道」选择 OpenAI 兼容 API 或 Gemini 原生 API，填写带版本路径的 API 地址、模型 ID 和 API Key，再保存；保存本身不调用模型。OpenAI 兼容服务须支持 Images generations / edits，仅有聊天接口不适用；Gemini 使用支持图片输出的 generateContent 模型。地址要求 HTTPS，本机网关允许 HTTP。
 
 API Key 仅保存在本机服务私有配置中，界面只显示是否已保存；留空保留，更换地址须重新填写或清除。每个渠道单独保存配置。API 模式会将提示词和所需图片发送给所选服务，由服务商计费；无需 Codex 内置生图权限。OpenAI/Gemini 直连按接口支持的相近比例请求，并在提示词中保留精确目标；Magpie 提交按所选模型共享规则适配后的尺寸，自动模式省略尺寸，并保留原请求意图；实际输出仍取决于网关和模型。正在执行或已排队任务使用提交时的渠道、模型及密钥，重启后不会自动重试中断任务。不可用、额度耗尽或生成失败时显示错误，不自动切换渠道或重试。生图可能需要几分钟；取消停止本机等待与后续处理，已经发起的模型调用可能仍消耗额度。
 
@@ -291,15 +293,12 @@ Codex 渠道只接受 App Server 的 `imageGeneration` 完成事件，不把聊�
 ```bash
 CODEX_BIN=/absolute/path/to/codex \
 ALCHEMY_SKILL_PATH=/absolute/path/to/alchemy/SKILL.md \
-IMAGEGEN_SKILL_PATH=/absolute/path/to/imagegen/SKILL.md \
 npm run setup
 ```
 
 随后运行 `npm start`，路径会从 `.local/config/runtime.json` 恢复；环境变量可覆盖保存值。
 
 需保留技能的 `references/` 等伴随文件。启动前对插件实际使用的 CLI 绝对路径执行 `--version` 和 `login status`，按终端规则安全引用路径；不要用 PATH 上另一份 CLI 的结果代替。CLI 不在 PATH 或需固定使用某份安装时设置 `CODEX_BIN`，已有配置也应核对保存的路径。
-
-imagegen 默认位于 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`（未设置 `CODEX_HOME` 时使用 `~/.codex`）。
 
 ## 插件内升级
 
@@ -351,7 +350,7 @@ imagegen 默认位于 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`（未设置
 
 品牌标识采用 Raft 的亮黄 `#ffd440`、墨黑 `#141111`、青色 `#27ccf3` 与粉色 `#fe7da8`，几何 R 标识保留品牌原有的圆角与右下硬阴影；界面内容使用更轻的色面与留白。当前品牌源图为 `assets/brand/reframe.svg`。界面内嵌该 SVG，避免扩展资源地址在网页浮层中不可用；`npm run icons` 从同一源图生成 `public/icon/` 中的 16/32/48/96/128 px 图标。`build` 与 `zip` 会先更新图标。
 
-Git 保存 `browser-extension/`、`agent-tool/`、根目录 README、贡献指南与忽略规则。本地 `.local/`（配对令牌、Prompt JSON、参考图、截图）、下载/实验目录、依赖与构建产物不提交，也不会被删除；必要的品牌 SVG/PNG 和项目配置 JSON 正常提交。`alchemy` 的发布副本位于本目录 `.agents/skills/alchemy/`，包含运行所需参考文档；不包含作者的历史案例、Prompt JSON、来源索引或图片。`ALCHEMY_SKILL_PATH` 可指定其他完整安装。`imagegen` 使用新用户自己 Codex 中的技能，不随本仓库分发。
+Git 保存 `browser-extension/`、`agent-tool/`、根目录 README、贡献指南与忽略规则。本地 `.local/`（配对令牌、Prompt JSON、参考图、截图）、下载/实验目录、依赖与构建产物不提交，也不会被删除；必要的品牌 SVG/PNG 和项目配置 JSON 正常提交。`alchemy` 的发布副本位于本目录 `.agents/skills/alchemy/`，包含运行所需参考文档；不包含作者的历史案例、Prompt JSON、来源索引或图片。`ALCHEMY_SKILL_PATH` 可指定其他完整安装。Codex 内置生图直接使用 `image_gen`，不需要 imagegen 技能。
 
 ```bash
 npm run dev       # 开发版扩展（QC-Reframe Dev），WXT 开发模式，输出 .output/chrome-mv3-dev

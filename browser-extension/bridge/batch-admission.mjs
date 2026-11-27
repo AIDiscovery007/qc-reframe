@@ -18,7 +18,7 @@ function validateProjects(body, allowed) {
 // releases batchGenerationSettings on terminal persistence or service shutdown.
 export function createBatchAdmission({
   batches, projects, runtime, agents, cliBusy, storedImage, skillPath, requireFeature,
-  generation, batchGenerationSettings,
+  generation, batchGenerationSettings, pluginInstructions,
 }) {
   const inspectProject = async item => {
     const project = projects.summary(item.projectId);
@@ -71,6 +71,7 @@ export function createBatchAdmission({
       }
       const { modelSettings, generationModelSettings, sizeSnapshot, items } = await prepare(body, selected, signal);
       const batch = { id: randomUUID(), requestId: body.requestId, requestHash, createdAt: new Date().toISOString(), modelSettings,
+        pluginInstructions: pluginInstructions.snapshot(),
         generationModelSettings: Object.fromEntries(Object.entries(generationModelSettings).filter(([key]) => key !== "apiKey")),
         language: body.language, ...(body.aspectRatio ? { aspectRatio: body.aspectRatio } : {}), ...sizeSnapshot,
         items: items.map(({ eligible, inputRevision, ...item }) => ({ ...item, status: eligible ? "queued" : "rejected", stage: eligible ? "等待启动" : "未受理", ...(eligible ? { jobId: randomUUID() } : {}) })),

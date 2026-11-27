@@ -8,7 +8,7 @@ const unknownFeatures = () => Object.fromEntries(Object.keys(labels).map(key => 
 const methods = {
   initialize: ["clientInfo"],
   "account/read": ["refreshToken"], "config/read": ["cwd", "includeLayers"], "model/list": ["limit", "cursor", "includeHidden"],
-  "thread/start": ["cwd", "sandbox", "approvalPolicy", "developerInstructions", "model", "modelProvider", "config", "ephemeral"],
+  "thread/start": ["cwd", "sandbox", "approvalPolicy", "model", "modelProvider", "config", "ephemeral"],
   "turn/start": ["threadId", "input", "model", "effort"],
   "thread/list": ["limit", "cursor", "sortKey", "modelProviders", "sourceKinds", "archived"],
   "thread/read": ["threadId", "includeTurns"],
@@ -69,9 +69,9 @@ export function inspectProtocol(schema) {
     enumIncludes(field("thread/start", "sandbox"), "read-only"), enumIncludes(field("thread/start", "approvalPolicy"), "never")];
   const checks = {
     models,
-    // Reverse replaces Codex's base prompt with the skill snapshot instead of sending a skill input.
+    // Reverse and generation replace Codex's base prompt with Reframe's instructions; neither sends a skill input.
     reverse: [...inference, experimental(), hasField("thread/start", "dynamicTools"), hasField("thread/start", "baseInstructions"), hasField("turn/start", "outputSchema"), inputType("localImage")],
-    generation: [...inference, hasMethod("modelProvider/capabilities/read"), inputType("localImage"), inputType("skill")],
+    generation: [...inference, hasMethod("modelProvider/capabilities/read"), hasField("thread/start", "baseInstructions"), inputType("localImage")],
     // Older servers return complete embedded turns; pagination is checked only when requested.
     sessions: [hasMethod("initialize"), ...["thread/list", "thread/read"].map(hasMethod)],
   };

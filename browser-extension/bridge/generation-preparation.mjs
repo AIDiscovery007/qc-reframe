@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { validImageSizeRequest, requestedImageSize, normalizeMagpieSize } from "../lib/image-size.mjs";
 
 const bad = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -30,13 +29,13 @@ function generationSizeSnapshot(settings, value) {
 
 // Preparation does not admit tasks or write images. Callers keep eligibility checks
 // around these steps, and check dependencies only after their image validation.
-export function createGenerationPreparation({ imageSettings, generationContext, cwd, cliBusy, agents, magpieInspector, requireFeature, generationSkillPath }) {
+export function createGenerationPreparation({ imageSettings, generationContext, cliBusy, agents, magpieInspector, requireFeature }) {
   return {
     async prepare(body, { frozen, signal } = {}) {
       let modelSettings = frozen?.modelSettings;
       if (!frozen) {
         const selected = imageSettings.selection();
-        modelSettings = selected.provider === "codex" ? await generationContext({ cwd, signal }) : { ...selected, imageProvider: selected.provider };
+        modelSettings = selected.provider === "codex" ? await generationContext({ signal }) : { ...selected, imageProvider: selected.provider };
         signal?.throwIfAborted();
         if (cliBusy()) throw bad("Agent CLI 正在安装或更新，请等待完成。", 409);
         if (agents.busy) throw bad("正在验证模型，请稍候", 409);
@@ -54,7 +53,6 @@ export function createGenerationPreparation({ imageSettings, generationContext, 
       }
       if (modelSettings.imageProvider) return;
       await requireFeature("generation");
-      try { await readFile(generationSkillPath); } catch { throw bad("找不到 imagegen 技能，请设置 IMAGEGEN_SKILL_PATH", 503); }
     },
     restoreBatch(batch, modelSettings) {
       const sizeSnapshot = modelSettings.imageProvider === "magpie" ? {

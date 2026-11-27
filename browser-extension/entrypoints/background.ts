@@ -416,6 +416,11 @@ export default defineBackground(() => {
       case "alchemy:image-settings-save":
         if (!message.settings || typeof message.settings !== "object" || Array.isArray(message.settings)) throw new Error("无效生图设置");
         return bridge("/image-settings", token, message.settings);
+      case "alchemy:plugin-instructions":
+        return bridge("/plugin-instructions", token);
+      case "alchemy:plugin-instructions-save":
+        if (typeof message.text !== "string" || message.text.length > 20000 || typeof message.revision !== "string" || !/^[a-f0-9]{64}$/.test(message.revision)) throw new Error("无效插件指令");
+        return bridge("/plugin-instructions", token, { text: message.text, revision: message.revision });
       case "alchemy:agent-select":
         if (!isAgentId(message.agent)) throw new Error("请选择支持的 Agent");
         return bridge("/agents/select", token, { agent: message.agent });

@@ -86,7 +86,7 @@ npm start
 npm run status
 ```
 
-`setup` 会检查 CLI 登录、完整的 Alchemy skill、imagegen 文件，运行 `npm ci` 和生产构建（一键安装的运行包已构建，只安装运行依赖），并将 CLI/skill 路径保存在 `.local/config/runtime.json`。仓库已包含 Alchemy 的运行指令及必需参考文档，不需要从作者电脑复制文件，也不必安装到全局 skills 目录。
+`setup` 会检查 CLI 登录、完整的 Alchemy skill，运行 `npm ci` 和生产构建（一键安装的运行包已构建，只安装运行依赖），并将 CLI/skill 路径保存在 `.local/config/runtime.json`。仓库已包含 Alchemy 的运行指令及必需参考文档，不需要从作者电脑复制文件，也不必安装到全局 skills 目录。
 
 **初始化恢复：** CLI 缺失、未登录或缺少 app-server 时，`setup` 会提示后续处理并继续构建，使新用户可以先启动服务、加载扩展并自动连接，再在「插件模型」检查。Node.js 与 Alchemy skill 的必需检查仍会阻止无效初始化；`npm run doctor` 仍严格检查 CLI。完成构建和连接不代表 CLI 或模型已可用，仍需按提示完成安装、登录与验证。
 
@@ -115,14 +115,13 @@ npm run launcher:uninstall -- chrome
 
 `status` 应显示 `service: "qc-alchemy"`、`version: "0.8.0"`、`ready: true`。这只证明 bridge 与 Alchemy skill 就绪；`doctor` 另检查 CLI 登录。它们不会实际调用模型，因此不代表模型或生图已就绪。设置中心会另外展示 CLI 功能接口检查：只读获取本机 CLI 的接口描述，不调用模型；检查结果未知时不拦截任务，明确不支持时只限制相关功能，不关闭整个工作台。
 
-imagegen 默认读取 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`，未设置 `CODEX_HOME` 时读取 `~/.codex/skills/.system/imagegen/SKILL.md`。如果找不到，让 Codex 查找用户实际安装的 imagegen skill 并设置路径；不要创建一个同名空文件充当已安装。缺失 imagegen 不妨碍提示词逆向，但 Codex 内置生图不可用；独立 API/Magpie 渠道不依赖该 skill。找到 skill 也不代表账户一定支持内置 `image_gen`。
+Codex 内置生图直接调用内置 `image_gen`，不读取 imagegen skill，也不需要 `IMAGEGEN_SKILL_PATH`；旧配置中的该项会被忽略。账户是否支持内置 `image_gen` 以设置中心的能力检测和实际生图为准；独立 API/Magpie 渠道不依赖 Codex。
 
 特殊路径可在首次初始化时指定，脚本会保存这些路径供后续启动使用：
 
 ```bash
 CODEX_BIN=/absolute/path/to/codex \
 ALCHEMY_SKILL_PATH=/absolute/path/to/alchemy/SKILL.md \
-IMAGEGEN_SKILL_PATH=/absolute/path/to/imagegen/SKILL.md \
 npm run setup
 ```
 
@@ -205,6 +204,6 @@ v0.7.0 与 v0.8.0 不新增权限。v0.6.0 起新增 `nativeMessaging`（macOS �
 - 开发版（源码仓库）：`npm run dev:setup`、`npm run dev:start` 在端口 43197 运行开发版服务，使用仓库的 `.local/`；加载 `.output/chrome-mv3-dev` 中的 QC-Reframe Dev。它与一键安装的发行版互不连接。同一数据目录同时只能运行一个服务，仓库里的 `npm start` 需先 `npm stop`。
 - 三层更新分别核对：Codex CLI 按实际路径及原渠道处理；Reframe 服务通过更新完整源码、构建并重启生效；浏览器扩展需重新加载，已打开网页还需刷新。本机服务重启按钮不会下载 CLI 或 Reframe 更新，也不会替代扩展重载。
 - 网页仍显示旧 logo 或提示扩展失效：重新加载扩展后还需刷新网页。
-- 提示词能生成但图片不能生成：先检查所选生图渠道。Codex 内置检查 imagegen skill、账户能力与额度；API/Magpie 检查地址、模型权限、额度及实际错误。Magpie 的 Gemini 404 尚未确认解决，目录可读取不代表模型可调用；不自动切换渠道或重复付费请求。
+- 提示词能生成但图片不能生成：先检查所选生图渠道。Codex 内置检查账户生图能力与额度；API/Magpie 检查地址、模型权限、额度及实际错误。Magpie 的 Gemini 404 尚未确认解决，目录可读取不代表模型可调用；不自动切换渠道或重复付费请求。
 
 普通运行数据统一归入 `.local/config/`、`records/`、`images/`、`generation-outputs/`、`logs/` 和 `runtime/`。旧发布版的配置和记录可能直接位于 `.local/` 根部；更新后的服务会在启动时自动归位，配对信息及共享图片路径保留。备份时先停止服务，再复制整个数据目录；无需逐个整理文件。旧版根部 `start.lock` 若仍存在，也需先确认原启动命令已结束。

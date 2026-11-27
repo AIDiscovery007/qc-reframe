@@ -46,20 +46,20 @@ test("missing image tools affect reverse only; legacy embedded sessions remain u
   assert.doesNotThrow(() => assertFeatureSupported({ features: result }, "generation"));
 });
 
-test("user's Codex without replaceable base instructions cannot reverse but can still list models and generate", () => {
+test("user's Codex without replaceable base instructions cannot reverse or generate but can still list models", () => {
   // Given an app-server whose threads always carry Codex's own base prompt.
   const schema = protocol();
   delete parameters(schema, "thread/start").baseInstructions;
-  // When its capabilities are checked, Then only reverse is blocked, because its context could not be kept clean.
+  // When its capabilities are checked, Then reverse and generation are blocked, because their context could not be kept clean.
   const result = inspectProtocol(schema);
   assert.equal(result.reverse.status, "unsupported");
+  assert.equal(result.generation.status, "unsupported");
   assert.equal(result.models.status, "supported");
-  assert.equal(result.generation.status, "supported");
-  // Given the skill input variant is gone, Then reverse still works because it no longer sends the skill as an input item.
+  // Given the skill input variant is gone, Then both still work because neither sends a skill input item.
   const noSkill = protocol();
   noSkill.definitions.UserInput.oneOf.splice(2, 1);
   assert.equal(inspectProtocol(noSkill).reverse.status, "supported");
-  assert.equal(inspectProtocol(noSkill).generation.status, "unsupported");
+  assert.equal(inspectProtocol(noSkill).generation.status, "supported");
 });
 
 test("missing required security options and local image variant block affected inference", () => {

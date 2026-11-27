@@ -27,7 +27,7 @@ const configFile = paths.settings;
 const port = Number(process.env.ALCHEMY_PORT || channel.port);
 const url = `http://127.0.0.1:${port}`;
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-const runtimeKeys = ["CODEX_BIN", "PI_BIN", "CLAUDE_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
+const runtimeKeys = ["CODEX_BIN", "PI_BIN", "CLAUDE_BIN", "ALCHEMY_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
 const sleep = (ms, signal) => delay(ms, undefined, { signal });
 const readable = async path => { try { await access(path); return true; } catch { return false; } };
 const cliCommand = path => process.platform === "win32" ? `& '${path.replaceAll("'", "''")}'` : `'${path.replaceAll("'", "'\"'\"'")}'`;
@@ -39,7 +39,6 @@ async function environment() {
   const env = { ...process.env };
   for (const key of runtimeKeys) if (!env[key] && typeof saved[key] === "string") env[key] = saved[key];
   env.ALCHEMY_SKILL_PATH ||= join(root, ".agents/skills/alchemy/SKILL.md");
-  env.IMAGEGEN_SKILL_PATH ||= join(env.CODEX_HOME || join(homedir(), ".codex"), "skills/.system/imagegen/SKILL.md");
   return env;
 }
 
@@ -76,8 +75,7 @@ async function doctor(env, maintenance = false) {
   if (cliIssue && !maintenance) throw new Error(cliIssue);
   if (cliIssue) console.warn(`CLI 待处理，Reframe 初始化和本机管理仍可继续：${cliIssue}\n扩展自动连接后，请在插件模型中检查 Agent CLI、选择并验证模型，再开始逆向或生图。`);
   await checkSkill(env);
-  const imagegen = await readable(env.IMAGEGEN_SKILL_PATH);
-  console.log(`QC-Reframe ${version}\nNode.js ${process.versions.node}\nCodex CLI：${cliIssue ? "需要处理，请在设置中心检查" : "已登录"}\nAlchemy skill：就绪\n插件模型：在设置中心选择 Agent 并验证模型\nimagegen：${imagegen ? "已找到（实际生图能力以账户和模型为准）" : "未找到；可逆向提示词，Codex 内置生图前需配置 IMAGEGEN_SKILL_PATH，也可在设置中选择 API 生图"}`);
+  console.log(`QC-Reframe ${version}\nNode.js ${process.versions.node}\nCodex CLI：${cliIssue ? "需要处理，请在设置中心检查" : "已登录"}\nAlchemy skill：就绪\n插件模型：在设置中心选择 Agent 并验证模型`);
   return env;
 }
 

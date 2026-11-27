@@ -18,7 +18,7 @@ async function setup(t, magpieInspector = async () => ({ version: "test", models
   const skillPath = join(dir, 'SKILL.md'); await writeFile(skillPath, 'name: alchemy');
   const reverse = [], generation = [], codex = [], invalidated = [];
   const store = { busy: false, selectedModel: 'text-model', selection: () => ({ model: 'text-model' }), invalidate: async (...args) => invalidated.push(args), close() {} };
-  const options = { magpieInspector, dataDir: dir, skillPath, generationSkillPath: join(dir, 'absent.md'), models: store, piModels: store,
+  const options = { magpieInspector, dataDir: dir, skillPath, models: store, piModels: store,
     cli: { busy: false, status: async () => ({}), close() {} },
     compatibility: { snapshot: () => ({}), getCompatibility: async () => ({ features: { generation: { status: 'unsupported', message: 'Codex unavailable' } } }) },
     agent: args => new Promise((resolve, reject) => { reverse.push({ args, resolve, reject }); args.signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true }); }),
@@ -37,7 +37,7 @@ async function setup(t, magpieInspector = async () => ({ version: "test", models
 }
 
 test('user configures API generation without exposing credentials or requiring Codex image support', async t => {
-  // Given legacy settings, When an API is configured, Then only redacted settings return and API generation works without imagegen.
+  // Given legacy settings, When an API is configured, Then only redacted settings return and API generation works without Codex.
   const s = await setup(t);
   assert.equal((await s.request('/image-settings')).body.provider, 'codex');
   const saved = await s.request('/image-settings', settings);

@@ -143,6 +143,9 @@
 | automatic-connection-popup | popup 320×740 | /popup.html?state=empty&connectionRegression=1 | connectionRegression |
 | settings-recovery-narrow | workspace 320×740 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
 | settings-recovery | workspace 1440×1000 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
+| plugin-instructions-failure | workspace 1440×1000 | /workspace.html?state=library&pluginInstructionsRegression=failure | pluginInstructionsRegression |
+| plugin-instructions-narrow | workspace 360×740 | /workspace.html?state=library&pluginInstructionsRegression=narrow | pluginInstructionsRegression |
+| plugin-instructions-legacy | workspace 1440×1000 | /workspace.html?state=library&pluginInstructionsRegression=legacy | pluginInstructionsRegression |
 | service-upgrade-available | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=available | upgradeRegression |
 | service-upgrade-failed | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=failed | upgradeRegression |
 | service-upgrade-reload | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=reload | upgradeRegression |
