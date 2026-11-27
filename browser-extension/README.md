@@ -1,8 +1,8 @@
 # QC-Reframe for Chrome
 
-功能概览见 [功能导览](docs/FEATURES.md)。首次安装请先看 [项目首页](../README.zh-CN.md)（[English](../README.md)）和 [交给 Codex 执行的初始化流程](docs/INSTALL_WITH_CODEX.md)。当前发布版本：**0.7.0**。迭代记录见 [更新日志](docs/releases/README.md)，后续待发布改动见 [待发布](docs/releases/unreleased.md)。
+功能概览见 [功能导览](docs/FEATURES.md)。首次安装请先看 [项目首页](../README.zh-CN.md)（[English](../README.md)）和 [交给 Codex 执行的初始化流程](docs/INSTALL_WITH_CODEX.md)。当前发布版本：**0.8.0**。迭代记录见 [更新日志](docs/releases/README.md)，后续待发布改动见 [待发布](docs/releases/unreleased.md)。
 
-本版变化见 [v0.7.0 更新说明](docs/releases/v0.7.0.md)。macOS/Linux 重新运行一键安装命令即可升级。从 v0.6.0 或更早的源码安装升级，需先等待任务结束，再同步更新完整仓库并重启本机服务；扩展 ID 改为固定值，需移除旧扩展、加载新的 `.output/chrome-mv3`，再刷新工作台与网页；仅替换 Chrome ZIP 不够。历史项目、提示词、图片、配置和配对保留，不修改 Codex 全局配置。Chrome ZIP 仅含浏览器端，首次安装需一键安装的运行包或完整仓库；具体步骤见 [升级说明](docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)。
+本版变化见 [v0.8.0 更新说明](docs/releases/v0.8.0.md)。从 v0.8.0 起，一键安装的用户在「设置中心 › 本机连接」直接升级；从 v0.7.0 升级需再运行一次一键安装命令。从 v0.6.0 或更早的源码安装升级，需先等待任务结束，再同步更新完整仓库并重启本机服务；扩展 ID 改为固定值，需移除旧扩展、加载新的 `.output/chrome-mv3`，再刷新工作台与网页；仅替换 Chrome ZIP 不够。历史项目、提示词、图片、配置和配对保留，不修改 Codex 全局配置。Chrome ZIP 仅含浏览器端，首次安装需一键安装的运行包或完整仓库；具体步骤见 [升级说明](docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)。
 
 开发与后续维护请先阅读 [贡献指南](../Contribution.md)、[AGENTS.md](AGENTS.md) 和 [架构与维护边界](docs/architecture.md)。领域名称见 [GLOSSARY.md](../GLOSSARY.md)。
 
@@ -299,6 +299,16 @@ npm run setup
 
 imagegen 默认位于 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`（未设置 `CODEX_HOME` 时使用 `~/.codex`）。
 
+## 插件内升级
+
+一键安装的 v0.8.0 及以后版本可在「设置中心 › 本机连接」升级。有新的正式版本时，侧栏连接状态旁显示「新版本」；卡片显示当前与最新版本、「查看更新说明」和「升级到 X」。
+
+- 确认后，服务调用本安装的 `scripts/install.sh` 下载最新 Release，验证 `SHA256SUMS.sig` 签名与 SHA-256，停止服务、替换运行包文件，再初始化并启动新版本。完成后扩展自动重新加载并回到「本机连接」；已打开的网页需刷新。
+- `.local/` 全部保留。新版本初始化或启动失败时，自动移回旧文件并重新启动旧服务；下载、校验或停止阶段失败时不改动文件。输出见 `.local/logs/upgrade.log`，结果记录在 `.local/runtime/upgrade-result.json`。
+- 任务、模型验证或 Agent CLI 操作进行中时不能升级；升级期间服务拒绝新任务。源码仓库、Windows 和终端前台运行的服务不提供插件内升级，卡片会说明原因。
+- 另一个浏览器中的扩展仍是旧版本时，侧栏显示「需重新加载」，点进去重新加载即可。
+- 打开工作台时，服务每天最多向 GitHub 检查一次，可在卡片中关闭「每天自动检查更新」或手动「检查更新」。检查只请求 GitHub 的固定地址，不发送项目、图片或配对信息；GitHub 能看到的是 IP 和 `QC-Reframe/版本号` 形式的 User-Agent。
+
 ## 图片与数据
 
 普通安装的运行数据统一放在 `browser-extension/.local/`（可用 `ALCHEMY_DATA_DIR` 指定整个数据目录），按用途收纳：
@@ -342,13 +352,18 @@ imagegen 默认位于 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`（未设置
 Git 保存 `browser-extension/`、`agent-tool/`、根目录 README、贡献指南与忽略规则。本地 `.local/`（配对令牌、Prompt JSON、参考图、截图）、下载/实验目录、依赖与构建产物不提交，也不会被删除；必要的品牌 SVG/PNG 和项目配置 JSON 正常提交。`alchemy` 的发布副本位于本目录 `.agents/skills/alchemy/`，包含运行所需参考文档；不包含作者的历史案例、Prompt JSON、来源索引或图片。`ALCHEMY_SKILL_PATH` 可指定其他完整安装。`imagegen` 使用新用户自己 Codex 中的技能，不随本仓库分发。
 
 ```bash
-npm run dev       # WXT 开发模式
+npm run dev       # 开发版扩展（QC-Reframe Dev），WXT 开发模式，输出 .output/chrome-mv3-dev
+npm run dev:build # 开发版扩展的一次性构建
+npm run dev:setup # 开发版服务：端口 43197、仓库 .local/，macOS 注册 com.qc.reframe.dev 启动器
+npm run dev:start # 另有 dev:stop、dev:status
 npm run compile   # TypeScript 检查
 npm test          # 先 build；验证 bridge、任务状态与扩展兼容性
 npm run build     # .output/chrome-mv3
 npm run zip       # 扩展 ZIP，不包含本机 bridge / skill
 npm run preview   # 弹窗视觉预览，不调用 Codex
 ```
+
+开发版与一键安装的发行版可在同一台电脑上同时运行：开发版扩展 ID、名称、端口（43197）和启动器都与发行版不同，各自只连接自己的服务；开发版使用源码仓库的 `.local/`。同一数据目录同时只允许一个服务，仓库里已在运行 `npm start` 时 `dev:start` 会拒绝并提示先 `npm stop`。一键安装目录不含开发版构建，`dev:*` 命令会拒绝。两个扩展加载在同一个 Chrome 用户里时，网页图片上会出现两个 R 按钮，不调试时可在扩展页关闭开发版。
 
 开发辅助脚本统一位于根目录 [Agent 工具库](../agent-tool/README.md)，具体依赖、调用目录、输入输出和副作用见该索引。上述命令从 `browser-extension/` 执行，`npm run preview` 调用 `../agent-tool/preview.mjs`；安装/服务管理和图标构建仍使用本目录 `scripts/`。
 

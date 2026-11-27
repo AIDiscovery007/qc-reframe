@@ -1,8 +1,8 @@
-# 用 Codex 安装 QC-Reframe 0.7.0
+# 用 Codex 安装 QC-Reframe 0.8.0
 
-这是供用户及其 Codex 执行的本地安装流程。版本为 `0.7.0`，发行标签为 `v0.7.0`。请完成能够执行的步骤，再集中列出需要用户操作的剩余步骤。
+这是供用户及其 Codex 执行的本地安装流程。版本为 `0.8.0`，发行标签为 `v0.8.0`。请完成能够执行的步骤，再集中列出需要用户操作的剩余步骤。
 
-本版支持 macOS/Linux 一条命令安装；扩展 ID 固定，从任意目录加载都能自动连接本机服务；macOS 的 Chrome 与 Codex 打开 Reframe 即按需启动服务。变化与验证范围见 [v0.7.0 版本说明](releases/v0.7.0.md)。项目首页提供适用于任意 Agent 的[英文](../../README.md)与[中文](../../README.zh-CN.md)安装提示词。
+本版起，一键安装可在插件「设置中心 › 本机连接」直接升级，失败时自动恢复旧版本；源码仓库可以另外运行开发版，与发行版互不干扰。macOS/Linux 一条命令安装；扩展 ID 固定，从任意目录加载都能自动连接本机服务；macOS 的 Chrome 与 Codex 打开 Reframe 即按需启动服务。变化与验证范围见 [v0.8.0 版本说明](releases/v0.8.0.md)。项目首页提供适用于任意 Agent 的[英文](../../README.md)与[中文](../../README.zh-CN.md)安装提示词。
 
 [← 首页](../../README.zh-CN.md) · [功能导览](FEATURES.md) · [使用手册](../README.md)
 
@@ -11,10 +11,10 @@
 在 **Codex 桌面 App 的本地聊天**里复制发送：
 
 ```text
-请帮我安装并启动 QC-Reframe 0.7.0：
+请帮我安装并启动 QC-Reframe 0.8.0：
 https://github.com/AIDiscovery007/qc-reframe
 
-先阅读仓库 v0.7.0 标签下的 browser-extension/docs/INSTALL_WITH_CODEX.md。macOS/Linux 优先用其中的一键安装；已有安装则升级原来那份。
+先阅读仓库 v0.8.0 标签下的 browser-extension/docs/INSTALL_WITH_CODEX.md。macOS/Linux 优先用其中的一键安装；已有安装则升级原来那份。
 确认插件实际使用的本机 Codex CLI 路径、安装来源和版本，检查更新并按原安装方式处理，再完成环境检查、初始化、构建、本机服务启动和连接验证，
 优先在我的 Codex 内置浏览器里使用。能自动完成的步骤请直接完成。
 需要我登录或在浏览器界面确认加载扩展时，再给我准确的文件路径和最短操作步骤。
@@ -33,10 +33,11 @@ https://github.com/AIDiscovery007/qc-reframe
 curl -fsSL https://github.com/AIDiscovery007/qc-reframe/releases/latest/download/install.sh | bash
 ```
 
-安装器下载 Release 运行包（已构建的扩展、本机服务和 Alchemy skill），按同一 Release 的 `SHA256SUMS` 校验后安装到 `~/QC-Reframe`，再执行 `npm run setup` 与 `npm start`。完成后只剩[第 4 步](#4-加载到浏览器)：加载它打印的 `.output/chrome-mv3`。Codex CLI 缺失或未登录不阻止安装，连接后在「插件模型」处理。
+安装器下载 Release 运行包（已构建的扩展、本机服务和 Alchemy skill），验证 `SHA256SUMS.sig` 发布签名（Release 带签名时）并按 `SHA256SUMS` 校验后安装到 `~/QC-Reframe`，再执行 `npm run setup` 与 `npm start`。完成后只剩[第 4 步](#4-加载到浏览器)：加载它打印的 `.output/chrome-mv3`。Codex CLI 缺失或未登录不阻止安装，连接后在「插件模型」处理。
 
 - `QC_REFRAME_DIR=<目录>` 指定安装目录；`QC_REFRAME_VERSION=<版本号>` 安装指定版本。所选 Release 没有 `install.sh` 与 `qc-reframe-runtime.tar.gz` 附件时，按第 1–3 步安装。
-- 重新运行同一命令即升级：先停止本安装的服务，只替换运行包包含的文件，保留 `.local/`（项目、配对与配置）和目录里的其他文件。目录非空且不是运行包安装时拒绝写入；下载或校验失败不改动任何文件。
+- 重新运行同一命令即升级：先停止本安装的服务，把旧文件移到 `.qc-reframe-previous/`，只替换运行包包含的文件，保留 `.local/`（项目、配对与配置）和目录里的其他文件。新版本初始化或启动失败时自动移回旧文件并重新启动旧服务。目录非空且不是运行包安装时拒绝写入；下载或校验失败不改动任何文件。
+- v0.8.0 起也可在插件「设置中心 › 本机连接」升级，效果与重新运行安装命令相同，并且必须验证发布签名；完成后扩展自动重新加载。见[插件内升级](../README.md#插件内升级)。
 - Windows 暂不支持一键安装。
 
 ## 1. 获取完整发行版
@@ -46,7 +47,7 @@ curl -fsSL https://github.com/AIDiscovery007/qc-reframe/releases/latest/download
 优先复用用户已有的同一安装目录；没有时，在用户可写且准备长期保留的位置执行：
 
 ```bash
-git clone --branch v0.7.0 --single-branch https://github.com/AIDiscovery007/qc-reframe.git
+git clone --branch v0.8.0 --single-branch https://github.com/AIDiscovery007/qc-reframe.git
 cd qc-reframe/browser-extension
 ```
 
@@ -112,7 +113,7 @@ npm run launcher:uninstall -- chrome
 
 撤销仅删除本安装在该浏览器的注册；最后一个注册撤销后才删除共用入口，不停止服务、不删除项目、配置或令牌；遇到外来同名文件会拒绝覆盖或删除。启动器失败、端口占用、旧版本或启动锁未释放时按错误提示检查，仍可手动运行 `npm start`。宿主最多等待约 9 秒，界面连接操作总期限为 28 秒；超时不会替换或终止其他服务。
 
-`status` 应显示 `service: "qc-alchemy"`、`version: "0.7.0"`、`ready: true`。这只证明 bridge 与 Alchemy skill 就绪；`doctor` 另检查 CLI 登录。它们不会实际调用模型，因此不代表模型或生图已就绪。设置中心会另外展示 CLI 功能接口检查：只读获取本机 CLI 的接口描述，不调用模型；检查结果未知时不拦截任务，明确不支持时只限制相关功能，不关闭整个工作台。
+`status` 应显示 `service: "qc-alchemy"`、`version: "0.8.0"`、`ready: true`。这只证明 bridge 与 Alchemy skill 就绪；`doctor` 另检查 CLI 登录。它们不会实际调用模型，因此不代表模型或生图已就绪。设置中心会另外展示 CLI 功能接口检查：只读获取本机 CLI 的接口描述，不调用模型；检查结果未知时不拦截任务，明确不支持时只限制相关功能，不关闭整个工作台。
 
 imagegen 默认读取 `$CODEX_HOME/skills/.system/imagegen/SKILL.md`，未设置 `CODEX_HOME` 时读取 `~/.codex/skills/.system/imagegen/SKILL.md`。如果找不到，让 Codex 查找用户实际安装的 imagegen skill 并设置路径；不要创建一个同名空文件充当已安装。缺失 imagegen 不妨碍提示词逆向，但 Codex 内置生图不可用；独立 API/Magpie 渠道不依赖该 skill。找到 skill 也不代表账户一定支持内置 `image_gen`。
 
@@ -141,7 +142,7 @@ npm run setup
 
 1. 打开 `chrome://extensions`。
 2. 开启开发者模式，选择“加载已解压的扩展程序”。
-3. 选择 `.output/chrome-mv3`，确认列表显示 QC-Reframe **0.7.0**。`.output` 是隐藏目录：macOS 在选择窗口按 ⌘⇧G 粘贴完整路径。
+3. 选择 `.output/chrome-mv3`，确认列表显示 QC-Reframe **0.8.0**。`.output` 是隐藏目录：macOS 在选择窗口按 ⌘⇧G 粘贴完整路径。
 
 请用户自行确认浏览器展示的权限。安装到 Chrome 与安装到 Codex 内置浏览器是两份独立安装。
 
@@ -166,7 +167,7 @@ Windows PowerShell 先设置 `$env:ALCHEMY_EXTENSION_ID = '<实际的32位扩展
 验收分开报告：
 
 - 服务状态：认证的健康检查成功、版本与 skill 就绪。
-- 扩展状态：实际加载 0.7.0，悬停图片后出现 R 标志，点击可展开“立即逆向 / 加入 Reframe / 打开工作台”。
+- 扩展状态：实际加载 0.8.0，悬停图片后出现 R 标志，点击可展开“立即逆向 / 加入 Reframe / 打开工作台”。
 - 连接状态：打开工作台自动连接成功，「插件模型」能读取当前 Agent，选图后能显示参考图。
 
 连接后在「插件模型」选择候选项，点击「验证并使用」才保存。该操作发送一次简短请求，会消耗少量模型额度；用户仅要求安装时，保留为手动步骤并说明尚未验证。
@@ -177,15 +178,15 @@ Windows PowerShell 先设置 `$env:ALCHEMY_EXTENSION_ID = '<实际的32位扩展
 
 **从无固定 key 的版本（v0.6.0 及更早）升级：** 扩展 ID 改为固定值，旧扩展不再获得连接凭据。升级服务后在扩展管理页移除旧 QC-Reframe，再加载新的 `.output/chrome-mv3`，并为新扩展确认权限。扩展内保存的本地偏好与未提交草稿重置一次；项目、历史结果、生图渠道与服务配置保存在 `.local/`，不受影响。一键安装的用户重新运行安装命令即完成服务升级。
 
-源码安装升级到 v0.7.0，必须更新完整仓库并重启本机服务，再重新加载扩展、刷新工作台与网页。本机服务、启动器和扩展需要同时更新才能生效；只替换 Chrome ZIP 不够。服务重启会把未完成流程标记为中断，不自动重跑。已有项目、历史结果、配对与配置保留，无需手工迁移或重新配对，不修改 Codex 全局配置，也不自动归并已有重复项目。
+源码安装升级到 v0.8.0，必须更新完整仓库并重启本机服务，再重新加载扩展、刷新工作台与网页。本机服务、启动器和扩展需要同时更新才能生效；只替换 Chrome ZIP 不够。服务重启会把未完成流程标记为中断，不自动重跑。已有项目、历史结果、配对与配置保留，无需手工迁移或重新配对，不修改 Codex 全局配置，也不自动归并已有重复项目。
 
 1. 保存重要编辑；已有「重试保存」结果先完成保存，完全未落盘的图片仅保留在服务内存。等待任务完成或主动取消后，在原 `browser-extension` 目录执行 `npm stop`。由 `npm run bridge` 前台启动的服务请在原终端停止。
-2. 保留本地改动与 `.local/` 数据，将完整仓库更新到 `v0.7.0`，在 `browser-extension` 执行 `npm run setup`，再执行 `npm start`；核对 `npm run status` 为 `0.7.0`、`ready: true`。macOS 上 `setup` 会为已安装的 Chrome 与 Codex 注册启动器。
-3. 重新加载原扩展，再刷新工作台和已打开网页，确认扩展管理页显示 `0.7.0`。从 v0.6.0 或更早版本升级时按上文先移除旧扩展、加载新的 `.output/chrome-mv3`；之后的升级重新加载原扩展即可。使用 ZIP 时，将本版 ZIP 解压到原扩展加载目录。不要清空浏览器数据。轻量端未提交草稿属于浏览器会话数据，不承诺跨浏览器重启保留。
+2. 保留本地改动与 `.local/` 数据，将完整仓库更新到 `v0.8.0`，在 `browser-extension` 执行 `npm run setup`，再执行 `npm start`；核对 `npm run status` 为 `0.8.0`、`ready: true`。macOS 上 `setup` 会为已安装的 Chrome 与 Codex 注册启动器。
+3. 重新加载原扩展，再刷新工作台和已打开网页，确认扩展管理页显示 `0.8.0`。从 v0.6.0 或更早版本升级时按上文先移除旧扩展、加载新的 `.output/chrome-mv3`；之后的升级重新加载原扩展即可。使用 ZIP 时，将本版 ZIP 解压到原扩展加载目录。不要清空浏览器数据。轻量端未提交草稿属于浏览器会话数据，不承诺跨浏览器重启保留。
 
-按上述步骤停止旧服务并启动新版；已支持插件内重启的托管服务，也可在更新和构建完成后通过设置中心的本机服务重启按钮操作。任务、模型验证或 Agent CLI 操作执行中不可重启。按钮不下载更新、不重载扩展；服务离线时，已注册的 macOS Codex 启动器可在重新打开界面时启动，否则需终端运行 `npm start`。详见 [v0.7.0 升级说明](releases/v0.7.0.md#升级方式与数据)。
+按上述步骤停止旧服务并启动新版；已支持插件内重启的托管服务，也可在更新和构建完成后通过设置中心的本机服务重启按钮操作。任务、模型验证或 Agent CLI 操作执行中不可重启。按钮不下载更新、不重载扩展；服务离线时，已注册的 macOS Codex 启动器可在重新打开界面时启动，否则需终端运行 `npm start`。详见 [v0.8.0 升级说明](releases/v0.8.0.md#升级方式与数据)。
 
-v0.7.0 不新增权限。v0.6.0 起新增 `nativeMessaging`（macOS 按需启动本机服务）与 `scripting`（打开网页逆向面板时注入面板脚本）权限，从 v0.5.0 或更早版本升级时按浏览器提示确认；从 v0.2.0 或更早版本升级时，需按浏览器要求确认自 v0.3.0 起新增的 `notifications`、`offscreen`、`alarms` 权限，分别用于桌面提醒、可选提示音和后台恢复检查。默认桌面通知静默，声音需在设置中心主动开启。系统通知关闭时仍可查看界面未读标记。
+v0.7.0 与 v0.8.0 不新增权限。v0.6.0 起新增 `nativeMessaging`（macOS 按需启动本机服务）与 `scripting`（打开网页逆向面板时注入面板脚本）权限，从 v0.5.0 或更早版本升级时按浏览器提示确认；从 v0.2.0 或更早版本升级时，需按浏览器要求确认自 v0.3.0 起新增的 `notifications`、`offscreen`、`alarms` 权限，分别用于桌面提醒、可选提示音和后台恢复检查。默认桌面通知静默，声音需在设置中心主动开启。系统通知关闭时仍可查看界面未读标记。
 
 首次安装需一键安装的运行包或完整仓库，不能仅靠 Chrome ZIP 完成。会话正文索引在「选择对话会话 → 标题和正文」中按需建立；索引是本地可重建数据，清除后可重新建立，不删除 Codex 源会话或已提交任务的创作快照。
 
@@ -199,7 +200,9 @@ v0.7.0 不新增权限。v0.6.0 起新增 `nativeMessaging`（macOS 按需启动
 - `doctor` 失败：按输出处理 CLI、登录或 skill；可在明确替换路径后重新运行 `npm run setup`，不会清空项目。
 - 端口冲突：确认服务所属目录；旧版本先停止再启动。不要杀死不明进程或删除 token 来尝试修复。
 - 第一次启动被打断且留下 `.local/runtime/start.lock`：先确认没有启动命令还在执行，再移除该空目录，保留其他 `.local` 文件。
-- 升级：完成任务 → 停止服务 → 获取目标版本 → `npm run setup` → `npm start` → 重新加载浏览器扩展 → 刷新工作台和原网页。一键安装的用户完成任务后重新运行安装命令，再重新加载扩展、刷新网页。
+- 升级：完成任务 → 停止服务 → 获取目标版本 → `npm run setup` → `npm start` → 重新加载浏览器扩展 → 刷新工作台和原网页。一键安装的 v0.8.0 及以后版本在「设置中心 › 本机连接」升级；更早的版本完成任务后重新运行安装命令，再重新加载扩展、刷新网页。
+- 插件内升级失败：卡片会说明失败阶段，以及是否已恢复旧版本；详细输出在安装目录的 `.local/logs/upgrade.log`。显示「未能自动恢复」或服务长时间离线时，重新运行一键安装命令即可完成或修复安装。替换中途浏览器启动器不会唤醒服务。
+- 开发版（源码仓库）：`npm run dev:setup`、`npm run dev:start` 在端口 43197 运行开发版服务，使用仓库的 `.local/`；加载 `.output/chrome-mv3-dev` 中的 QC-Reframe Dev。它与一键安装的发行版互不连接。同一数据目录同时只能运行一个服务，仓库里的 `npm start` 需先 `npm stop`。
 - 三层更新分别核对：Codex CLI 按实际路径及原渠道处理；Reframe 服务通过更新完整源码、构建并重启生效；浏览器扩展需重新加载，已打开网页还需刷新。本机服务重启按钮不会下载 CLI 或 Reframe 更新，也不会替代扩展重载。
 - 网页仍显示旧 logo 或提示扩展失效：重新加载扩展后还需刷新网页。
 - 提示词能生成但图片不能生成：先检查所选生图渠道。Codex 内置检查 imagegen skill、账户能力与额度；API/Magpie 检查地址、模型权限、额度及实际错误。Magpie 的 Gemini 404 尚未确认解决，目录可读取不代表模型可调用；不自动切换渠道或重复付费请求。

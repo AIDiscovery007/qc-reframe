@@ -68,10 +68,10 @@ curl -fsSL https://github.com/AIDiscovery007/qc-reframe/releases/latest/download
 
 - **需要：** Node.js 22.15+、能加载扩展的 Chrome 或其他 Chromium 浏览器，以及已登录的 [Codex CLI](https://developers.openai.com/codex/cli)。Pi 需要 Node.js 22.19+。生图也可以用 OpenAI 兼容 API、Gemini 或本机 Magpie 网关。一条命令安装支持 macOS 和 Linux；Windows 请从源码安装。
 - **重启电脑后：** Mac 上直接打开 QC-Reframe，服务会自己启动。其他系统运行扩展里显示的命令，或 `cd ~/QC-Reframe && npm start`。
-- **更新：** 再运行一次安装命令，然后在 `chrome://extensions` 点 QC-Reframe 的重新加载按钮，并刷新已打开的网页。项目都会保留。
+- **更新：** v0.8.0 起，打开 **设置中心 → 本机连接**，点 **升级到** 即可；有新版本时侧栏会显示 **新版本**。扩展会自己重新加载，之后刷新已打开的网页。v0.7.0 或更早版本请再运行一次安装命令，然后在 `chrome://extensions` 点 QC-Reframe 的重新加载按钮，并刷新已打开的网页。项目都会保留。
 - **以前用源码装过 v0.6.0 或更早版本？** 请升级原来那份：把上面的提示词交给 Agent，或按[升级步骤](browser-extension/docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)操作。扩展 ID 现在是固定的，所以要先移除旧的 QC-Reframe 扩展，再加载新的 `.output/chrome-mv3`，只需一次。项目都会保留。
 - **停止服务：** `cd ~/QC-Reframe && npm stop`，不会删除任何内容。
-- **隐私：** 项目、提示词和图片都存在你的电脑上，但模型并不离线运行。你选择发送的内容会交给你选的 Agent 或生图服务：选中的图片、你上传的照片和任务指令；使用会话创作时，还包括所选会话中的用户文本和助手回复。逆向得到的是相近的提示词，不是原始提示词。[数据说明 →](browser-extension/README.md#图片与数据)
+- **隐私：** 项目、提示词和图片都存在你的电脑上，但模型并不离线运行。本机服务每天向 GitHub 查询一次最新版本，不发送项目数据，可在「本机连接」关闭。你选择发送的内容会交给你选的 Agent 或生图服务：选中的图片、你上传的照片和任务指令；使用会话创作时，还包括所选会话中的用户文本和助手回复。逆向得到的是相近的提示词，不是原始提示词。[数据说明 →](browser-extension/README.md#图片与数据)
 
 ## 更多
 
