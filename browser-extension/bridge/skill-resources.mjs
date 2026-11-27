@@ -42,6 +42,19 @@ export async function taskResources(input, dir, { probe = false, label }) {
   return { images, references, skillText, manifest };
 }
 
+export const referenceToolSpec = {
+  name: "alchemy_read_reference",
+  description: "Read a reference from the current task's Alchemy skill snapshot. Only the listed reference names are allowed.",
+  inputSchema: { type: "object", additionalProperties: false, properties: { path: { type: "string" } }, required: ["path"] },
+};
+
+/** Every Agent reads references only by the names in the task snapshot, never by file path. */
+export function readReference(references, args) {
+  if (!args || typeof args !== "object" || Array.isArray(args) || Object.keys(args).some(key => key !== "path") || !Object.hasOwn(references, args.path))
+    throw new Error("仅允许读取本次技能的参考文档。");
+  return references[args.path];
+}
+
 /** Shared task system prompt for CLI Agents that load the skill snapshot through Reframe tools. */
 export function taskSystemPrompt({ instructions, skillText, references, schema, readTool = "alchemy_read_reference", schemaRule = true }) {
   return [instructions, ...skillText,

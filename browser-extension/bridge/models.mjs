@@ -2,13 +2,14 @@ import { readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { withCodex } from "./codex-rpc.mjs";
 import { readModelContext } from "./model-context.mjs";
-import { runCodex } from "./codex-agent.mjs";
+import { runCodex, withPrivateFolder } from "./codex-agent.mjs";
 
 const effortOptions = (item) => item.supportedReasoningEfforts?.length ? item.supportedReasoningEfforts
   : item.reasoningEffort ? [{ reasoningEffort: item.reasoningEffort }] : [];
 
-export async function readModelCatalog(cwd) {
-  return withCodex({ cwd, timeoutMs: 45_000 }, async (request) => {
+// Resolved outside the bridge folder, as reverse and model checks run, so a project's Codex settings never change the account key.
+export async function readModelCatalog() {
+  return withPrivateFolder(cwd => withCodex({ cwd, timeoutMs: 45_000 }, async (request) => {
     const context = await readModelContext(request, cwd);
     const models = [];
     const cursors = new Set();
@@ -25,7 +26,7 @@ export async function readModelCatalog(cwd) {
       cursors.add(cursor);
     } while (cursor);
     return { ...context, models };
-  });
+  }));
 }
 
 export async function verifyModel({ cwd, selection, signal }) {

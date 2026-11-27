@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -10,7 +10,7 @@ import { runCodex } from "../bridge/codex-agent.mjs";
 import { readModelCatalog } from "../bridge/models.mjs";
 import { runGeneration } from "../bridge/generation.mjs";
 
-async function fakeCodex(t, turnCode, initializeCode = "") {
+async function fakeCodex(t, turnCode, initializeCode = "", config = {}) {
   const dir = await mkdtemp(join(tmpdir(), "alchemy-inspection-rpc-"));
   const file = join(dir, "codex");
   const log = join(dir, "calls.jsonl");
@@ -22,6 +22,7 @@ const done = () => {
   send({method:'turn/completed',params:{threadId:'test',turn:{status:'completed'}}});
 };
 let start, expectedReplies = 1;
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({method:'process/started',cwd:process.cwd()})+'\\n');
 require('node:readline').createInterface({input:process.stdin}).on('line', line => {
   const m = JSON.parse(line); fs.appendFileSync(${JSON.stringify(log)},line+'\\n');
   if (m.id === undefined) return;
@@ -29,7 +30,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
   if (m.method === 'initialize') { ${initializeCode} }
   let result = {};
   if (m.method === 'account/read') result={account:{type:'chatgpt',email:'inspection@example.com',planType:'test'},requiresOpenaiAuth:true};
-  if (m.method === 'config/read') result={config:{model_provider:'openai'}};
+  if (m.method === 'config/read') result={config:{model_provider:'openai',...${JSON.stringify(config)}}};
   if (m.method === 'model/list') result={data:[{model:'vision',defaultReasoningEffort:'low',isDefault:true}],nextCursor:null};
   if (m.method === 'modelProvider/capabilities/read') result={imageGeneration:true};
   if (m.method === 'thread/start') { start=m.params; result={thread:{id:'test'},model:m.params.model,modelProvider:m.params.modelProvider}; }
@@ -81,7 +82,7 @@ test("runAgent registers input-scoped inspection and RPC delivers actual ordered
   assert.equal(start.sandbox, "read-only");
   assert.equal(start.approvalPolicy, "never");
   assert.equal(start.ephemeral, true);
-  assert.deepEqual(start.dynamicTools.map(s => [s.name, s.type, s.inputSchema.properties.image.maximum]), [["alchemy_inspect_image", "function", 2]]);
+  assert.deepEqual(start.dynamicTools.map(s => [s.name, s.type, s.inputSchema.properties.image?.maximum]), [["alchemy_inspect_image", "function", 2], ["alchemy_read_reference", "function", undefined]]);
   assert.equal(messages.find(m => m.id === "bad").result.success, false);
   for (const [id, rgb] of [["first", [255, 0, 0]], ["last", [0, 0, 255]]]) {
     const response = messages.find(m => m.id === id).result;
@@ -90,6 +91,90 @@ test("runAgent registers input-scoped inspection and RPC delivers actual ordered
     const pixels = await sharp(Buffer.from(image.imageUrl.split(",")[1], "base64")).raw().toBuffer();
     assert.deepEqual([...pixels.subarray(0, 3)], rgb);
   }
+});
+
+// Only Reframe's task prompt, the selected skill snapshot, the task text, the chosen images and Reframe tools reach the model.
+const CODEX_ISOLATION = {
+  project_doc_max_bytes: 0, include_permissions_instructions: false, include_environment_context: false,
+  include_collaboration_mode_instructions: false, include_apps_instructions: false, web_search: "disabled",
+  agents: { enabled: false }, skills: { include_instructions: false, bundled: { enabled: false } },
+  features: { apps: false, plugins: false, remote_plugin: false, computer_use: false, browser_use: false, browser_use_external: false,
+    in_app_browser: false, goals: false, hooks: false, multi_agent_v2: false, shell_tool: false, sleep_tool: false, skill_search: false,
+    tool_suggest: false, image_generation: false, view_image: false },
+  tools: { experimental_request_user_input: { enabled: false } },
+};
+
+test("user's Codex reverse sees only the task prompt, skill snapshot, chosen images, task text and Reframe tools", async t => {
+  // Given a skill with one reference, the user's own Codex MCP servers, and the bridge folder with its own Codex settings.
+  const { dir, calls } = await fakeCodex(t, `
+    expectedReplies = 2;
+    send({method:'item/started',params:{threadId:'test',item:{type:'dynamicToolCall',tool:'alchemy_read_reference',arguments:{path:'references/style.md'}}}});
+    send({id:'ref',method:'item/tool/call',params:{threadId:'test',turnId:'t',callId:'ref',tool:'alchemy_read_reference',arguments:{path:'references/style.md'}}});
+    send({id:'escape',method:'item/tool/call',params:{threadId:'test',turnId:'t',callId:'escape',tool:'alchemy_read_reference',arguments:{path:'../SKILL.md'}}});
+  `, "", { mcp_servers: { "computer-use": { command: "a" }, "team.docs": { command: "b" } } });
+  await mkdir(join(dir, "skill/references"), { recursive: true });
+  const skillPath = join(dir, "skill/SKILL.md"), imagePath = join(dir, "reference.png");
+  await writeFile(skillPath, "---\nname: alchemy\n---\n技能正文");
+  await writeFile(join(dir, "skill/references/style.md"), "风格参考");
+  await sharp({ create: { width: 1, height: 1, channels: 3, background: "blue" } }).png().toFile(imagePath);
+  const catalog = await readModelCatalog(dir);
+  const modelSettings = { ...catalog.models[0], accountKey: catalog.accountKey, provider: catalog.provider };
+  // When the user reverses one reference image with an extra instruction.
+  const stages = [];
+  const result = await runAgent({ run: runCodex, mode: "recreate", imagePath, instruction: "用户附加要求", skillPath, cwd: dir, modelSettings, onProgress: ({ stage }) => stages.push(stage) });
+  // Then Codex runs in a private empty folder with Reframe's prompt in place of its own and every optional context source off.
+  assert.equal(result.promptEn, "cat");
+  const messages = await calls();
+  const start = messages.find(m => m.method === "thread/start").params, turn = messages.find(m => m.method === "turn/start").params;
+  assert.ok(!start.cwd.startsWith(dir));
+  assert.equal(messages.filter(m => m.method === "process/started").at(-1).cwd, start.cwd);
+  assert.equal(messages.filter(m => m.method === "config/read").at(-1).params.cwd, start.cwd);
+  await assert.rejects(access(start.cwd), { code: "ENOENT" });
+  assert.equal(start.developerInstructions, undefined);
+  assert.match(start.baseInstructions, /^仅分析用户选中的图片[\s\S]*技能正文[\s\S]*alchemy_read_reference[\s\S]*references\/style\.md/);
+  assert.deepEqual(start.config, { model_reasoning_effort: "low", ...CODEX_ISOLATION,
+    mcp_servers: { "computer-use": { enabled: false }, "team.docs": { enabled: false } } });
+  assert.deepEqual(start.dynamicTools.map(tool => tool.name), ["alchemy_inspect_image", "alchemy_read_reference"]);
+  assert.deepEqual(turn.input.filter(item => item.type !== "text"), [{ type: "localImage", path: imagePath }]);
+  assert.ok(turn.input.some(item => item.type === "text" && item.text.includes("用户附加要求")));
+  // And it reads only the selected skill's references.
+  assert.deepEqual(messages.find(m => m.id === "ref").result, { success: true, contentItems: [{ type: "inputText", text: "风格参考" }] });
+  const escape = messages.find(m => m.id === "escape").result;
+  assert.equal(escape.success, false);
+  assert.match(escape.contentItems[0].text, /仅允许读取本次技能的参考文档/);
+  assert.ok(stages.includes("正在读取技能参考资料…"));
+});
+
+test("user's Codex model list and model check ignore the bridge folder, while built-in generation keeps its setup", async t => {
+  // Given a verified model.
+  const { dir, calls } = await fakeCodex(t, "done();");
+  const catalog = await readModelCatalog(dir);
+  const modelSettings = { ...catalog.models[0], accountKey: catalog.accountKey, provider: catalog.provider };
+  // When the model is checked and an image is generated.
+  await runCodex({ cwd: dir, input: [{ type: "text", text: "仅回复 OK。" }], instructions: "连接检查", modelSettings, probe: true });
+  await runCodex({ cwd: dir, input: [], instructions: "生图规则", modelSettings, generation: true });
+  // Then listing and checking run in private folders with only the check prompt, and generation keeps image generation.
+  const messages = await calls();
+  assert.ok(!messages.find(m => m.method === "config/read").params.cwd.startsWith(dir));
+  const [probe, generation] = messages.filter(m => m.method === "thread/start").map(m => m.params);
+  assert.ok(!probe.cwd.startsWith(dir));
+  assert.equal(probe.baseInstructions, "连接检查");
+  assert.equal(probe.developerInstructions, undefined);
+  assert.deepEqual(probe.config, { model_reasoning_effort: "low", ...CODEX_ISOLATION, mcp_servers: {} });
+  assert.equal(generation.cwd, dir);
+  assert.equal(generation.baseInstructions, undefined);
+  assert.equal(generation.developerInstructions, "生图规则");
+  assert.deepEqual(generation.config, { model_reasoning_effort: "low" });
+});
+
+test("user's Codex reverse stops without a model call when the skill snapshot cannot be read", async t => {
+  // Given a skill path that no longer exists.
+  const { dir, calls } = await fakeCodex(t, "done();");
+  const catalog = await readModelCatalog(dir);
+  const modelSettings = { ...catalog.models[0], accountKey: catalog.accountKey, provider: catalog.provider };
+  // When a reverse task starts, Then it fails before any Codex thread starts.
+  await assert.rejects(runCodex({ cwd: dir, modelSettings, instructions: "规则", input: [{ type: "skill", name: "alchemy", path: join(dir, "missing/SKILL.md") }] }), { code: "ENOENT" });
+  assert.ok(!(await calls()).some(m => m.method === "thread/start"));
 });
 
 test("generation and probe never register inspection or opt into experimental tool APIs", async t => {

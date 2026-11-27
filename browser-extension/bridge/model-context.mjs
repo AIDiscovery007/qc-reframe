@@ -59,6 +59,7 @@ export async function readGenerationContext(request, cwd) {
   } catch (error) { throw generationContextError(error); }
 }
 
+/** Returns the effective CLI config for `cwd` once the selection still matches it. */
 export async function assertModelContext(request, cwd, selection) {
   if (!selection?.model) throw Object.assign(new Error("请在连接设置中选择模型，并点击「验证并使用」。"), { recovery: "models" });
   const { context: current, config } = await readContext(request, cwd);
@@ -67,6 +68,7 @@ export async function assertModelContext(request, cwd, selection) {
     throw Object.assign(new Error("Codex 内置生图：CLI 推理配置已变化，请重新提交。"), { modelContextChanged: true });
   if (current.accountKey !== selection.accountKey)
     throw Object.assign(new Error("Codex 账号、登录或提供方已变化（或 CLI 已更换），请在连接设置中刷新模型列表并重新验证。"), { modelContextChanged: true, recovery: "models" });
+  return config;
 }
 
 export function modelError(error, model) {

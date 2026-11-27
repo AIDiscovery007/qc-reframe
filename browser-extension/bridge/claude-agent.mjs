@@ -15,7 +15,10 @@ const TOOLS = ["mcp__reframe__alchemy_inspect_image", "mcp__reframe__alchemy_rea
 // Documented `claude -p` flags: no user/project settings, hooks, CLAUDE.md, plugins' MCP servers, skills or saved sessions.
 const isolation = ["--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands", "--permission-prompts", "none", "--tools", ""];
 const stream = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"];
-const childEnv = env => ({ ...env, DISABLE_AUTOUPDATER: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
+// A bridge started from a Claude Code session inherits that session's identity, links, effort and tool toggles; in Claude's
+// own namespace only login, provider and certificate settings reach the CLI (see SETTINGS_ENV).
+const childEnv = env => ({ ...Object.fromEntries(Object.entries(env).filter(([key]) => SETTINGS_ENV.has(key) || !/^(?:CLAUDE|AI_AGENT$|MCP_)/.test(key))),
+  DISABLE_AUTOUPDATER: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
 const missing = () => new Error("找不到 Claude Code CLI，请先安装 Claude Code 或配置 CLAUDE_BIN。");
 const changed = () => Object.assign(new Error("Claude Code 登录账号或本机程序已变化，请刷新模型列表并重新验证。"), { modelContextChanged: true, recovery: "models" });
 
@@ -74,6 +77,8 @@ const CREDENTIAL_ENV = ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CL
   "AWS_BEARER_TOKEN_BEDROCK", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_REGION", "AWS_DEFAULT_REGION", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
   "ANTHROPIC_VERTEX_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUD_ML_REGION", "ANTHROPIC_VERTEX_BASE_URL",
   "ANTHROPIC_FOUNDRY_RESOURCE", "ANTHROPIC_FOUNDRY_BASE_URL", "ANTHROPIC_FOUNDRY_AUTH_TOKEN", "ANTHROPIC_FOUNDRY_API_KEY"];
+const SETTINGS_ENV = new Set([...CREDENTIAL_ENV, "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_CLIENT_CERT", "CLAUDE_CODE_CLIENT_KEY", "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+  "CLAUDE_CODE_API_KEY_HELPER_TTL_MS", "CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH", "CLAUDE_CODE_SKIP_FOUNDRY_AUTH", "CLAUDE_CODE_SKIP_MANTLE_AUTH"]);
 
 /** Metadata of the shared credential files a selected cloud provider reads, as Pi does for its auth files; contents are never read. */
 async function credentialFiles(env) {
