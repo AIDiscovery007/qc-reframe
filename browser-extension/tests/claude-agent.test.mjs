@@ -140,6 +140,31 @@ test("user sees login guidance and re-verification instead of a silent account s
   await assert.rejects(runClaude({ env: switched, input: [], modelSettings: { ...selected, accountKey: key } }), error => error.modelContextChanged === true && error.recovery === "models");
 });
 
+test("user must re-verify when Claude Code would bill another API key or cloud account from the environment", async t => {
+  // Given an API-key login whose status names no account, and a model verified with key A.
+  const { dir, withConfig } = await fixture(t, { events: success() });
+  const apiKey = { loggedIn: true, authMethod: "api_key", apiProvider: "firstParty" };
+  const base = withConfig({ auth: apiKey, events: success() });
+  for (const name of Object.keys(base)) if (/^(ANTHROPIC_|CLAUDE_CODE_|AWS_|GOOGLE_|GCLOUD_|CLOUD_ML_)/.test(name)) delete base[name];
+  const keyA = { ...base, ANTHROPIC_API_KEY: "sk-ant-key-a" };
+  const verified = await accountKey(keyA);
+  // Then the same key keeps its trust and the key never appears in what is saved.
+  assert.equal(await accountKey(keyA), verified);
+  assert.match(verified, /^[\da-f]{64}$/);
+  // When the bridge restarts with key B, an auth token or an OAuth token instead, Then the task stops before calling the model.
+  for (const env of [{ ...base, ANTHROPIC_API_KEY: "sk-ant-key-b" }, { ...keyA, ANTHROPIC_AUTH_TOKEN: "token" }, { ...base, CLAUDE_CODE_OAUTH_TOKEN: "oauth" }])
+    await assert.rejects(runClaude({ env, input: [], modelSettings: { ...selected, accountKey: verified } }), error => error.modelContextChanged === true && error.recovery === "models");
+  // Given Bedrock through a shared credentials file, When that file is replaced, Then the context changes too.
+  const credentials = join(dir, "aws-credentials");
+  await writeFile(credentials, "[default]\n");
+  const bedrock = { ...base, CLAUDE_CODE_USE_BEDROCK: "1", AWS_PROFILE: "work", AWS_SHARED_CREDENTIALS_FILE: credentials, AWS_CONFIG_FILE: join(dir, "aws-config") };
+  const before = await accountKey(bedrock);
+  assert.notEqual(before, verified);
+  await writeFile(credentials, "[default]\nother account\n");
+  assert.notEqual(await accountKey(bedrock), before);
+  assert.notEqual(await accountKey({ ...bedrock, AWS_PROFILE: "personal" }), before);
+});
+
 test("user sees an unavailable or substituted Claude model fail explicitly without fallback", async t => {
   // Given the API rejects the model, Then it is marked unavailable; Given another model answers, Then the task stops.
   const { withConfig } = await fixture(t);

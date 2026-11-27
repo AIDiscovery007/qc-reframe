@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, writeFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
@@ -67,7 +67,28 @@ function invoke({ executable, args, cwd, env, input, endInput = true, signal, ti
   });
 }
 
-/** Login identity from the documented `claude auth status`, plus the executable fingerprint; tokens are never read. */
+// In `-p` mode these environment credentials outrank the stored login, and `auth status` reports only their kind, so their
+// values enter the one-way account hash (never stored, logged or shown). Sources: code.claude.com/docs/en/authentication.
+const CREDENTIAL_ENV = ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE",
+  "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_PROFILE", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID", "ANTHROPIC_BASE_URL",
+  "AWS_BEARER_TOKEN_BEDROCK", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_REGION", "AWS_DEFAULT_REGION", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+  "ANTHROPIC_VERTEX_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUD_ML_REGION", "ANTHROPIC_VERTEX_BASE_URL",
+  "ANTHROPIC_FOUNDRY_RESOURCE", "ANTHROPIC_FOUNDRY_BASE_URL", "ANTHROPIC_FOUNDRY_AUTH_TOKEN", "ANTHROPIC_FOUNDRY_API_KEY"];
+
+/** Metadata of the shared credential files a selected cloud provider reads, as Pi does for its auth files; contents are never read. */
+async function credentialFiles(env) {
+  const home = env.HOME || homedir();
+  const paths = [
+    ...(env.CLAUDE_CODE_USE_BEDROCK ? [env.AWS_SHARED_CREDENTIALS_FILE || join(home, ".aws/credentials"), env.AWS_CONFIG_FILE || join(home, ".aws/config")] : []),
+    ...(env.CLAUDE_CODE_USE_VERTEX ? [env.GOOGLE_APPLICATION_CREDENTIALS || join(home, ".config/gcloud/application_default_credentials.json")] : []),
+  ];
+  return Promise.all(paths.map(async path => {
+    try { const info = await stat(path); return [path, info.ino, info.size, info.mtimeMs, info.ctimeMs]; }
+    catch (error) { if (error.code === "ENOENT") return [path, null]; throw error; }
+  }));
+}
+
+/** Login identity from the documented `claude auth status`, environment credentials and the executable fingerprint. */
 async function claudeContext(env = process.env, signal) {
   const located = await resolveClaudeExecutable(env);
   if (!located) throw missing();
@@ -78,7 +99,8 @@ async function claudeContext(env = process.env, signal) {
     throw Object.assign(new Error("Claude Code 未登录，请在终端运行 claude auth login 后刷新模型列表。"), { recovery: "models" });
   const info = await stat(located.resolved);
   const identity = Object.fromEntries(["authMethod", "apiProvider", "email", "orgId", "subscriptionType", "planTier", "configDirectory"].map(key => [key, status[key] ?? null]));
-  const accountKey = createHash("sha256").update(JSON.stringify({ identity, baseUrl: env.ANTHROPIC_BASE_URL ?? null,
+  const credentials = Object.fromEntries(CREDENTIAL_ENV.map(key => [key, env[key] ?? null]));
+  const accountKey = createHash("sha256").update(JSON.stringify({ identity, credentials, files: await credentialFiles(env),
     executable: located.resolved, stamp: [info.ino, info.size, info.mtimeMs, info.ctimeMs] })).digest("hex");
   const plan = typeof status.subscriptionType === "string" && status.subscriptionType ? `Claude ${status.subscriptionType[0].toUpperCase()}${status.subscriptionType.slice(1)}` : null;
   const accountLabel = typeof status.apiProvider === "string" && status.apiProvider !== "firstParty" ? `Claude Code · ${status.apiProvider}` : plan || "Claude Code · API";
