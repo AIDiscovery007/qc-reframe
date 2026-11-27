@@ -91,11 +91,13 @@ const args = process.argv.slice(2), command = args[0] === "run" ? args[1] : args
 const run = require("node:child_process").spawnSync(process.execPath, ["scripts/manage.mjs", command], { stdio: "inherit", env: { ...process.env, npm_execpath: ${JSON.stringify(npmExec)} } });
 process.exit(run.status ?? 1);
 `, { mode: 0o755 });
-  // Copies that stop after package.json: one fails as when the disk fills, one is killed with its installer as when the terminal closes.
-  const interrupted = { fail: join(dir, "failing-cp"), kill: join(dir, "killed-cp") };
-  for (const [mode, folder] of Object.entries(interrupted)) {
+  // Commands that fail partway: a copy that stops after package.json as when the disk fills, the same copy killed with its
+  // installer as when the terminal closes, and a move of package.json that fails as when a file cannot be renamed.
+  const faults = { copyFails: join(dir, "failing-cp"), copyKilled: join(dir, "killed-cp"), moveFails: join(dir, "failing-mv") };
+  for (const [fault, folder] of Object.entries(faults)) {
     await mkdir(folder);
-    await writeFile(join(folder, "cp"), `#!/bin/sh\n/bin/cp "\${2%.}package.json" "$3"\n${mode === "kill" ? "kill -9 $PPID\n" : ""}exit 1\n`, { mode: 0o755 });
+    if (fault === "moveFails") await writeFile(join(folder, "mv"), '#!/bin/sh\ncase "$1" in */package.json) exit 1 ;; esac\nexec /bin/mv "$@"\n', { mode: 0o755 });
+    else await writeFile(join(folder, "cp"), `#!/bin/sh\n/bin/cp "\${2%.}package.json" "$3"\n${fault === "copyKilled" ? "kill -9 $PPID\n" : ""}exit 1\n`, { mode: 0o755 });
   }
   const codex = join(dir, "codex-test");
   await writeFile(codex, '#!/usr/bin/env node\nconsole.log("codex-cli test");\n', { mode: 0o700 });
@@ -114,8 +116,8 @@ process.exit(run.status ?? 1);
     await rm(dir, { recursive: true, force: true });
   });
   // Feed the script through stdin, exactly as `curl … | bash` does.
-  const install = async ({ interruptCopy, env: extra = {} } = {}) => {
-    const runEnv = { ...env, ...extra, ...(interruptCopy ? { PATH: `${interrupted[interruptCopy]}:${env.PATH}` } : {}) };
+  const install = async ({ fault, env: extra = {} } = {}) => {
+    const runEnv = { ...env, ...extra, ...(fault ? { PATH: `${faults[fault]}:${env.PATH}` } : {}) };
     const child = spawn("bash", [], { env: runEnv, cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     child.stdout.on("data", data => { stdout += data; });
@@ -207,7 +209,7 @@ test("user reruns the installer to upgrade and keeps projects, pairing and their
 test("user whose first install was interrupted mid-copy reruns the installer and finishes", { skip, timeout: 90000 }, async t => {
   // Given a first install whose copy stopped after one file.
   const m = await machine(t);
-  const interrupted = await m.install({ interruptCopy: "fail" });
+  const interrupted = await m.install({ fault: "copyFails" });
   assert.notEqual(interrupted.code, 0);
   assert.match(interrupted.stderr, /重新运行安装命令即可/);
   // When the user reruns the installer, Then it recognises its own partial folder and completes.
@@ -223,7 +225,7 @@ test("user whose upgrade was interrupted mid-copy reruns the installer and keeps
   assert.equal((await m.install()).code, 0);
   const token = await readFile(join(m.installDir, ".local/config/token"), "utf8");
   await writeFile(join(m.installDir, "my-notes.txt"), "mine\n");
-  const interrupted = await m.install({ interruptCopy: "kill" });
+  const interrupted = await m.install({ fault: "copyKilled" });
   assert.notEqual(interrupted.code, 0);
   await assert.rejects(stat(join(m.installDir, "runtime-package.json")), { code: "ENOENT" });
   // When the user reruns the installer, Then it completes the upgrade and the service runs with the same data.
@@ -315,10 +317,11 @@ test("user whose upgrade fails gets the working version back with its data", { s
   await writeFile(join(m.installDir, ".local/records/kept.json"), "{}\n");
   await writeFile(join(m.installDir, "my-notes.txt"), "mine\n");
   const env = { QC_REFRAME_VERSION: "9.9.9", QC_REFRAME_REQUIRE_SIGNATURE: "1" };
-  // When the new release cannot be set up, cannot start, or cannot be copied in.
-  for (const [stage, archive, interruptCopy] of [["setup", await variant("9.9.9", "setup")], ["start", await variant("9.9.9", "start")], ["replace", await variant("9.9.9"), "fail"]]) {
+  // When the new release cannot be set up, cannot start, cannot be copied in, or the old files cannot all be moved aside.
+  const cases = [["setup", await variant("9.9.9", "setup")], ["start", await variant("9.9.9", "start")], ["replace", await variant("9.9.9"), "copyFails"], ["replace", await variant("9.9.9"), "moveFails"]];
+  for (const [stage, archive, fault] of cases) {
     await m.publish(archive);
-    const result = await m.install({ env, interruptCopy });
+    const result = await m.install({ env, fault });
     // Then the previous version is restored and running again, with the same data and files.
     assert.notEqual(result.code, 0, stage);
     assert.match(result.stderr, new RegExp(`已恢复 ${version.replaceAll(".", "\\.")}`), result.stderr);

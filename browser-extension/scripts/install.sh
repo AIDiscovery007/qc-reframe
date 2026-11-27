@@ -21,7 +21,7 @@ main() {
   # Ed25519 public key (SPKI, base64) whose private half signs SHA256SUMS in the release workflow.
   local signing_key="MCowBQYDK2VwAyEAJwJD2t90DjeLsBzTGC4wydAWmW4/RltK0c3WlSaeewg="
   # stage names the step a failure belongs to; result and from are set when an existing installation is upgraded.
-  local stage="download" result="" from="" target="${QC_REFRAME_VERSION:-}" backup=""
+  local stage="download" result="" from="" target="${QC_REFRAME_VERSION:-}" backup="" copying=""
   target="${target#v}"
   say() { printf '%s\n' "$*"; }
   # Records how an upgrade of an existing installation ended, for the extension's settings page.
@@ -46,12 +46,14 @@ main() {
     done
   }
   # Puts the previous version back after a failed upgrade and starts it again. Runs inside `||`, so it checks each step itself.
+  # Until the copy starts, the folder holds only original files (those not yet moved aside are the only copies), so
+  # nothing is deleted; once it starts, every original the package owns is in $previous and the owned names are new files.
   restore() {
     printf 'QC-Reframe 升级失败：%s。正在恢复 %s…\n' "$1" "${from:-原版本}" >&2
     : > "$dir/$pending"
     (cd "$dir" && node scripts/manage.mjs stop </dev/null >/dev/null 2>&1) || true
     local name path
-    while IFS= read -r name; do rm -rf "${dir:?}/$name"; done < <(owned)
+    if [ -n "$copying" ]; then while IFS= read -r name; do rm -rf "${dir:?}/$name"; done < <(owned); fi
     for path in "$dir/$previous"/* "$dir/$previous"/.[!.]*; do
       { [ -e "$path" ] || [ -L "$path" ]; } || continue
       if ! mv "$path" "$dir/"; then
@@ -151,6 +153,7 @@ main() {
     if [ -z "$backup" ]; then rm -rf "${dir:?}/$name"
     elif [ -e "$dir/$name" ] || [ -L "$dir/$name" ]; then mv "$dir/$name" "$dir/$previous/$name" || restore "无法移开旧版本文件"; fi
   done < <(owned)
+  copying=1
   cp -R "$new/." "$dir/" || { [ -z "$backup" ] || restore "复制新版本文件失败"; fail "复制文件到 $dir 失败；重新运行安装命令即可，数据目录 .local 未改动。"; }
   rm -f "$dir/$pending"
 
