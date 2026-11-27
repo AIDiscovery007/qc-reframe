@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { request } from "../../lib/client";
+import { extensionChannel } from "../../lib/extension-channel";
 
 /** Offline hint for extension pages only: the exact command that starts this installation. */
 export default function StartCommand() {
@@ -15,7 +16,7 @@ export default function StartCommand() {
   }, []);
   if (command === undefined) return null;
   // Before the first successful connection the folder is unknown; name the step instead.
-  if (!command) return <div className="start-command"><span>在 QC-Reframe 安装目录的终端运行 <code>npm start</code> 启动本机服务。</span></div>;
+  if (!command) return <div className="start-command"><span>在 {extensionChannel.shortName} 安装目录的终端运行 <code>{extensionChannel.commands.start}</code> 启动本机服务。</span></div>;
   const copy = async () => {
     setCopyError("");
     try {

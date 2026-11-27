@@ -3,8 +3,8 @@ import { lstat, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs
 import { endianness, homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { connectionOrigins } from "../bridge/connection.mjs";
+import { channels } from "../lib/channel.mjs";
 
-const hostName = "com.qc.reframe";
 const quote = value => `'${value.replaceAll("'", "'\"'\"'")}'`;
 
 async function existingFile(path) {
@@ -35,29 +35,31 @@ export const launcherBrowsers = { chrome: { label: "Chrome", profile: "Google/Ch
 // ALCHEMY_APP_SUPPORT_DIR stands in for ~/Library/Application Support, only for isolated tests.
 const supportRoot = () => resolve(process.env.ALCHEMY_APP_SUPPORT_DIR || join(homedir(), "Library/Application Support"));
 const supported = () => process.platform !== "win32" && (!!process.env.ALCHEMY_APP_SUPPORT_DIR || process.platform === "darwin");
-const registrationPath = browser => join(supportRoot(), launcherBrowsers[browser].profile, "NativeMessagingHosts", `${hostName}.json`);
+// Each channel registers under its own host name, so the release and dev launchers never replace each other.
+const registrationPath = (browser, { hostName }) => join(supportRoot(), launcherBrowsers[browser].profile, "NativeMessagingHosts", `${hostName}.json`);
 
 // A QC-Reframe registration whose launcher file is gone belongs to a deleted or moved installation
 // and can start nothing, so registering this installation may replace it.
-async function abandonedRegistration(manifest) {
+async function abandonedRegistration(manifest, { hostName }) {
   if (manifest?.name !== hostName || manifest.type !== "stdio" || typeof manifest.path !== "string" || !isAbsolute(manifest.path)) return false;
   try { await lstat(manifest.path); return false; }
   catch (error) { if (error.code === "ENOENT" || error.code === "ENOTDIR") return true; throw error; }
 }
 
-async function ownedRegistration(path, executable) {
+async function ownedRegistration(path, executable, { hostName }) {
   const text = await existingFile(path);
   if (text === undefined) return false;
   try { const manifest = JSON.parse(text); return manifest?.name === hostName && manifest.type === "stdio" && manifest.path === executable; }
   catch { return false; }
 }
 
-export async function registerLauncher({ root, dataDir, port, env, uninstall, browser }) {
+export async function registerLauncher({ root, dataDir, port, env, uninstall, browser, channel = channels.release }) {
   if (!Object.hasOwn(launcherBrowsers, browser) || !supported())
-    throw new Error("此平台或浏览器尚不支持按需启动器；请手动运行 npm start。目前支持 macOS 的 Chrome 与 Codex。");
-  const manifestPath = registrationPath(browser);
+    throw new Error(`此平台或浏览器尚不支持按需启动器；请手动运行 ${channel.commands.start}。目前支持 macOS 的 Chrome 与 Codex。`);
+  const { hostName } = channel;
+  const manifestPath = registrationPath(browser, channel);
   const directory = dirname(manifestPath);
-  const executable = join(dataDir, "runtime", "native-launcher");
+  const executable = join(dataDir, "runtime", channel.launcherFile);
   const owner = `# QC-Reframe installation: ${JSON.stringify(root)}\n`;
   const current = await existingFile(manifestPath);
   const launcher = await existingFile(executable);
@@ -66,7 +68,7 @@ export async function registerLauncher({ root, dataDir, port, env, uninstall, br
     try { manifest = JSON.parse(current); } catch { /* Invalid registrations belong to someone else. */ }
     const owned = manifest?.name === hostName && manifest.type === "stdio" && manifest.path === executable && launcher?.startsWith(`#!/bin/sh\n${owner}`);
     // Uninstall removes only this installation's own registration; an abandoned foreign one stays.
-    if (!owned && (uninstall || !await abandonedRegistration(manifest)))
+    if (!owned && (uninstall || !await abandonedRegistration(manifest, channel)))
       throw new Error("本机启动器注册属于另一份安装或存在冲突，未覆盖或删除。请从原安装目录撤销。");
   }
   if (launcher !== undefined && !launcher.startsWith(`#!/bin/sh\n${owner}`))
@@ -74,21 +76,23 @@ export async function registerLauncher({ root, dataDir, port, env, uninstall, br
   if (uninstall) {
     if (current !== undefined) await unlink(manifestPath);
     // The executable is shared; keep it while another browser's registration still points to it.
-    const others = await Promise.all(Object.keys(launcherBrowsers).filter(other => other !== browser).map(other => ownedRegistration(registrationPath(other), executable)));
+    const others = await Promise.all(Object.keys(launcherBrowsers).filter(other => other !== browser).map(other => ownedRegistration(registrationPath(other, channel), executable, channel)));
     if (launcher !== undefined && !others.includes(true)) await unlink(executable);
     return;
   }
-  const manifest = JSON.parse(await readFile(join(root, ".output/chrome-mv3/manifest.json"), "utf8"));
+  const manifest = JSON.parse(await readFile(join(root, channel.outputDir, "manifest.json"), "utf8"));
   const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-  if (manifest.version !== version) throw new Error("扩展构建与当前版本不同，请先运行 npm run setup。");
-  const origins = [...connectionOrigins(env.ALCHEMY_EXTENSION_ID)].map(origin => `${origin}/`);
+  if (manifest.version !== version) throw new Error(`扩展构建与当前版本不同，请先运行 ${channel.commands.setup}。`);
+  const origins = [...connectionOrigins(env.ALCHEMY_EXTENSION_ID, channel)].map(origin => `${origin}/`);
   // The browser's PATH, Node options and ALCHEMY_* variables are not authority.
   // Capture only installation configuration, never account credentials or tokens.
   const keys = ["HOME", "PATH", "TMPDIR", "LANG", "CODEX_HOME", "CODEX_BIN", "PI_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
-  const fixed = { ...Object.fromEntries(keys.filter(key => typeof env[key] === "string").map(key => [key, env[key]])), ALCHEMY_DATA_DIR: dataDir, ALCHEMY_PORT: String(port) };
+  const fixed = { ...Object.fromEntries(keys.filter(key => typeof env[key] === "string").map(key => [key, env[key]])), ALCHEMY_DATA_DIR: dataDir, ALCHEMY_PORT: String(port),
+    // The release launcher stays byte-identical to earlier versions; only the dev launcher names its channel.
+    ...(channel.name === "release" ? {} : { ALCHEMY_CHANNEL: channel.name }) };
   const command = ["/usr/bin/env", "-i", ...Object.entries(fixed).map(([key, value]) => `${key}=${value}`), process.execPath, join(root, "scripts/manage.mjs"), "native-host", JSON.stringify(origins)];
   const script = `#!/bin/sh\n${owner}exec ${command.map(quote).join(" ")} "$@"\n`;
-  const registration = JSON.stringify({ name: hostName, description: "Start this QC-Reframe installation on demand", path: executable, type: "stdio", allowed_origins: origins }, null, 2) + "\n";
+  const registration = JSON.stringify({ name: hostName, description: `Start this ${channel.shortName} installation on demand`, path: executable, type: "stdio", allowed_origins: origins }, null, 2) + "\n";
   await mkdir(join(dataDir, "runtime"), { recursive: true, mode: 0o700 });
   await mkdir(directory, { recursive: true, mode: 0o700 });
   // Exclusive creation prevents a conflicting installation from being overwritten.

@@ -6,7 +6,7 @@ import { LEGACY_AGENT } from "../agents.mjs";
 /** Service status, sessions, Agent/model/CLI management, image settings and service lifecycle routes. Returns true when the request was handled. */
 export async function serviceRoutes(request, app) {
   const { req, res, path, query, json, validateQuery, includeHidden, submission, readSessions, assertSessionRequestActive } = request;
-  const { root, version, dataDir, startDataDir, skillPath, generationSkillPath, instanceId, restartId, allowShutdown, restart, server, state, agents, codexHost, compatibility, requireFeature, cliBusy, codexBusy, imageSettings, magpieInspector, sessions, projects, batches, runtime, taskFeed } = app;
+  const { root, version, channel, dataDir, startDataDir, skillPath, generationSkillPath, instanceId, restartId, allowShutdown, restart, server, state, agents, codexHost, compatibility, requireFeature, cliBusy, codexBusy, imageSettings, magpieInspector, sessions, projects, batches, runtime, taskFeed, upgrade } = app;
   if (req.method === "GET" && path === "/health") {
     validateQuery(["includeHidden"]);
     // The service manager polls readiness passively; only client health checks refresh CLI state.
@@ -28,6 +28,8 @@ export async function serviceRoutes(request, app) {
     json(200, {
       service: "qc-alchemy",
       version,
+      // Which identity this service has; the extension compares it with its own build before trusting the hints below.
+      channel,
       // Lets the extension offer `cd <installDir> && npm start` while the service is offline. dataDir appears only when
       // this service uses a folder other than the installation's own .local, so that command reopens the same data.
       installDir: root,
@@ -134,6 +136,21 @@ export async function serviceRoutes(request, app) {
     if (path.endsWith("/verify") && (typeof body.model !== "string" || body.model.length > 200)) throw bad("请选择有效模型");
     try { json(path.endsWith("/verify") ? 202 : 200, path.endsWith("/verify") ? await store.start(body.model, body.reasoningEffort) : await store.refresh()); }
     catch (error) { throw Object.assign(error, { status: error.status || 503 }); }
+    return true;
+  }
+  if (req.method === "GET" && path === "/upgrade") {
+    validateQuery(["check"]);
+    json(200, await upgrade.status(query.get("check")));
+    return true;
+  }
+  if (req.method === "POST" && path === "/upgrade/settings") {
+    validateQuery([]);
+    json(200, await upgrade.settings(await readBody(req)));
+    return true;
+  }
+  if (req.method === "POST" && path === "/upgrade") {
+    validateQuery([]);
+    json(202, await upgrade.start(await readBody(req)));
     return true;
   }
   if (req.method === "POST" && path === "/restart") {

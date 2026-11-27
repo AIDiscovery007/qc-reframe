@@ -6,10 +6,11 @@
 
 后续待发布改动见 [unreleased](unreleased.md)。
 
-最新版本：[v0.7.0 · 一条命令安装，打开即用](v0.7.0.md)。
+最新版本：[v0.8.0 · 插件内升级，开发版与发行版分开运行](v0.8.0.md)。
 
 | 版本 | 更新内容 | 详情 |
 | --- | --- | --- |
+| 0.8.0 | 插件内检查与一键升级、失败自动恢复旧版本、签名的 Release、源码仓库开发版与发行版分开运行 | [版本说明](v0.8.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.8.0) |
 | 0.7.0 | 一条命令安装与运行包、固定扩展 ID 自动连接、macOS Chrome 与 Codex 打开即启动、旧服务与失效启动器自动替换、中英文首页 | [版本说明](v0.7.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.7.0) |
 | 0.6.0 | macOS Codex 按需启动本机服务、网页面板按需加载、本机服务 Agent 适配器与路由重构、扩展模块化瘦身 | [版本说明](v0.6.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.6.0) |
 | 0.5.0 | Codex/Pi 逆向与 CLI 管理、自动连接、独立生图渠道、Magpie 工作流与尺寸适配、保存恢复 | [版本说明](v0.5.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.5.0) |

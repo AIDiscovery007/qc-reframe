@@ -143,6 +143,13 @@
 | automatic-connection-popup | popup 320×740 | /popup.html?state=empty&connectionRegression=1 | connectionRegression |
 | settings-recovery-narrow | workspace 320×740 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
 | settings-recovery | workspace 1440×1000 | /workspace.html?state=library&settingsRegression=1 | settingsRegression |
+| service-upgrade-available | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=available | upgradeRegression |
+| service-upgrade-failed | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=failed | upgradeRegression |
+| service-upgrade-reload | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=reload | upgradeRegression |
+| service-upgrade-blocked | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=blocked | upgradeRegression |
+| service-upgrade-check-failed | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=check-failed | upgradeRegression |
+| service-upgrade-current | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=current | upgradeRegression |
+| service-upgrade-narrow | workspace 320×740 | /workspace.html?state=library&upgradeRegression=narrow | upgradeRegression |
 | workspace-image-model-switch | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=switch&generationDelay=60000&reverseDelay=60000 | workspaceImageModelRegression |
 | workspace-image-model-empty | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=empty&generationDelay=60000&reverseDelay=60000 | workspaceImageModelRegression |
 | workspace-image-model-narrow | workspace 360×740 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=narrow&generationDelay=60000&reverseDelay=60000 | workspaceImageModelRegression |

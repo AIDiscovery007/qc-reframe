@@ -9,7 +9,14 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { storagePaths, ensureStorage, migrateStorage, moveLegacyFile, readStoredConfig, rotateServiceLog } from "../bridge/storage.mjs";
 import { connectionOrigins } from "../bridge/connection.mjs";
+import { readServiceRecord } from "../bridge/service-record.mjs";
+import { channels, serviceChannel } from "../lib/channel.mjs";
 import { registerInstalledLaunchers, registerLauncher, serveNative } from "./native-host.mjs";
+
+// `npm run dev:*` passes --dev; the dev launcher passes ALCHEMY_CHANNEL=dev. Either way the rest of argv keeps its positions.
+if (process.argv[2] === "--dev") { process.argv.splice(2, 1); process.env.ALCHEMY_CHANNEL = "dev"; }
+const channel = serviceChannel(process.env.ALCHEMY_CHANNEL);
+const { commands } = channel;
 
 // Preserve the installer's path spelling: the launcher records it as its owner,
 // including macOS /var versus /private/var aliases.
@@ -17,7 +24,7 @@ const root = resolve(dirname(process.argv[1]), "..");
 const dataDir = resolve(process.env.ALCHEMY_DATA_DIR || join(root, ".local"));
 const paths = storagePaths(dataDir);
 const configFile = paths.settings;
-const port = Number(process.env.ALCHEMY_PORT || 43187);
+const port = Number(process.env.ALCHEMY_PORT || channel.port);
 const url = `http://127.0.0.1:${port}`;
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 const runtimeKeys = ["CODEX_BIN", "PI_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
@@ -92,11 +99,30 @@ async function probe(signal) {
   if (!response.ok) throw new Error(`端口 ${port} 已被其他服务或另一份 QC-Reframe 安装占用，未改动现有服务。`);
   const health = await response.json();
   if (health.service !== "qc-alchemy") throw new Error(`端口 ${port} 已占用；可能是旧版服务，请先从原终端停止它。`);
+  // Services before the dev channel report none, and they were all the release.
+  const running = channels[health.channel] || channels.release;
+  if (running !== channel) throw new Error(`端口 ${port} 正运行同一数据目录的${running.shortName}服务，未改动它。请先运行 ${running.commands.stop}，或换用默认端口。`);
   return health;
 }
 
+// One service per data folder: a service of the other channel, or on another port, may already serve this folder.
+// It answers with this folder's token, which proves it is ours to report; it is never stopped from here.
+async function assertDataDirFree(signal) {
+  const record = await readServiceRecord(paths.runtime);
+  if (!record || record.port === port) return;
+  let health;
+  try {
+    const timeout = AbortSignal.timeout(1500);
+    const response = await fetch(`http://127.0.0.1:${record.port}/health`, { headers: { Authorization: `Bearer ${await token()}`, "X-Reframe-Probe": "passive" }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, redirect: "error" });
+    if (response.ok) health = await response.json();
+  } catch { signal?.throwIfAborted(); }
+  if (health?.service !== "qc-alchemy") return;
+  const running = channels[health.channel] || channels.release;
+  throw new Error(`数据目录 ${dataDir} 正由${running.shortName}服务（端口 ${record.port}）使用，同一数据目录同时只能运行一个服务。请先运行 ${running.commands.stop}${record.port === running.port ? "" : `（带 ALCHEMY_PORT=${record.port}）`}，再重试。`);
+}
+
 function connectionInfo() {
-  console.log(`\n服务：${url}\n扩展目录：${join(root, ".output/chrome-mv3")}\n数据目录：${dataDir}\n连接：从上述目录加载的扩展会自动连接，无需填写配对码。\n首次加载说明：${join(root, "docs/INSTALL_WITH_CODEX.md")}\n检查：npm run status　停止：npm stop`);
+  console.log(`\n服务：${channel.shortName} ${url}\n扩展目录：${join(root, channel.outputDir)}\n数据目录：${dataDir}\n连接：从上述目录加载的扩展会自动连接，无需填写配对码。\n首次加载说明：${join(root, "docs/INSTALL_WITH_CODEX.md")}\n检查：${commands.status}　停止：${commands.stop}`);
 }
 
 // A service that answered probe() holds this installation's token. Same version: reuse it.
@@ -104,7 +130,7 @@ function connectionInfo() {
 function runningService(existing) {
   if (!existing) return "absent";
   if (existing.version !== version) {
-    if (!existing.managed) throw new Error(`已运行 ${existing.version}，当前文件为 ${version}。此服务由原终端启动，请在原终端按 Ctrl+C 停止后再运行 npm start。`);
+    if (!existing.managed) throw new Error(`已运行 ${existing.version}，当前文件为 ${version}。此服务由原终端启动，请在原终端按 Ctrl+C 停止后再运行 ${commands.start}。`);
     return "outdated";
   }
   if (!existing.ready) throw new Error("服务已运行，但 Alchemy skill 未就绪。请先停止服务并运行 npm run doctor。");
@@ -118,6 +144,9 @@ async function start(env, { signal, automatic = false } = {}) {
     connectionInfo();
   };
   if (runningService(await probe(signal)) === "current") return reuse();
+  // scripts/install.sh keeps these while it replaces this installation; only its own `npm start` may start the service then.
+  if (automatic && (await readable(join(root, ".qc-reframe-install-pending")) || await readable(join(root, ".qc-reframe-previous"))))
+    throw new Error("此安装正在升级，完成后服务会自动启动；若升级已中断，请重新运行安装命令。");
   const release = await prepareStart(env, !automatic, signal);
   try {
     // Another manager may have completed startup between the first probe and lock.
@@ -148,8 +177,8 @@ async function stopService(signal) {
 // Hold the startup lock from preflight through handoff; neither path reacquires it.
 async function prepareStart(env, checkCli = true, signal) {
   signal?.throwIfAborted();
-  const manifest = JSON.parse(await readFile(join(root, ".output/chrome-mv3/manifest.json"), "utf8"));
-  if (manifest.version !== version) throw new Error("扩展构建与当前版本不同，请先运行 npm run setup。");
+  const manifest = JSON.parse(await readFile(join(root, channel.outputDir, "manifest.json"), "utf8"));
+  if (manifest.version !== version) throw new Error(`扩展构建与当前版本不同，请先运行 ${commands.setup}。`);
   if (checkCli) await doctor(env, true);
   else await checkSkill(env);
   await ensureStorage(dataDir);
@@ -167,6 +196,7 @@ async function prepareStart(env, checkCli = true, signal) {
   try {
     if (await readable(join(dataDir, "start.lock"))) throw new Error("旧版启动锁仍存在，请确认旧启动命令已结束后移除数据目录根部的 start.lock 空目录。");
     await access(join(root, "bridge/server.mjs"), constants.R_OK);
+    await assertDataDirFree(signal);
   } catch (error) { await rmdir(lock); throw error; }
   return () => rmdir(lock);
 }
@@ -181,7 +211,7 @@ async function launch(env, { signal, quiet = false } = {}) {
     try {
       signal?.throwIfAborted();
       child = spawn(process.execPath, ["--preserve-symlinks-main", join(root, "bridge/server.mjs")], {
-        cwd: root, env: { ...env, ALCHEMY_DATA_DIR: dataDir, ALCHEMY_PORT: String(port), ALCHEMY_MANAGED: "1" },
+        cwd: root, env: { ...env, ALCHEMY_DATA_DIR: dataDir, ALCHEMY_PORT: String(port), ALCHEMY_CHANNEL: channel.name, ALCHEMY_MANAGED: "1" },
         detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd],
       });
       await once(child, "spawn");
@@ -205,17 +235,20 @@ async function launch(env, { signal, quiet = false } = {}) {
 
 async function main() {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("ALCHEMY_PORT 无效。");
+  // A release install ships only the release build, so the dev channel has nothing to run there.
+  if (channel !== channels.release && await readable(join(root, "runtime-package.json")))
+    throw new Error(`开发版命令只能在源码仓库使用；此目录是一键安装的发行版，请使用 ${channels.release.commands.start} / ${channels.release.commands.stop}。`);
   const command = process.argv[2];
   if (command === "native-host") return serveNative(signal => start({ ...process.env }, { signal, automatic: true }));
   const env = await environment();
   if (command === "native-install" || command === "native-uninstall") {
     if (process.argv.length !== 4) throw new Error("请运行 npm run launcher:install -- chrome（或 codex），撤销用 npm run launcher:uninstall -- chrome。");
-    await registerLauncher({ root, dataDir, port, env, uninstall: command === "native-uninstall", browser: process.argv[3] });
+    await registerLauncher({ root, dataDir, port, env, channel, uninstall: command === "native-uninstall", browser: process.argv[3] });
     console.log(command === "native-install" ? "本机启动器已注册；打开 Reframe 时按需启动，不配置开机自启。" : "本安装的启动器已撤销，现有服务与数据保留。");
     return;
   }
   if (["setup", "start", "run", "restart-after"].includes(command))
-    connectionOrigins(env.ALCHEMY_EXTENSION_ID);
+    connectionOrigins(env.ALCHEMY_EXTENSION_ID, channel);
   if (command === "restart-after") {
     if (!process.send || !process.argv[3] || !process.env.ALCHEMY_RESTART_ID) throw new Error("重启必须从已连接的插件发起。");
     const cancelled = new AbortController();
@@ -240,7 +273,7 @@ async function main() {
         if (health.instanceId !== process.argv[3]) throw new Error("服务实例已变化，未替换其他服务。");
         await sleep(100);
       }
-      throw new Error("原服务未按时停止，请运行 npm run status 检查。");
+      throw new Error(`原服务未按时停止，请运行 ${commands.status} 检查。`);
     } finally {
       process.removeListener("SIGTERM", cancel);
       process.removeListener("disconnect", cancel);
@@ -251,13 +284,13 @@ async function main() {
   if (command === "doctor") return doctor(env);
   if (command === "pair") {
     const value = await token();
-    if (!value) throw new Error("尚未初始化配对码，请先运行 npm start。");
+    if (!value) throw new Error(`尚未初始化配对码，请先运行 ${commands.start}。`);
     console.log(value);
     return;
   }
   if (command === "status") {
     const health = await probe();
-    console.log(health ? JSON.stringify(health, null, 2) : "本机服务未运行。运行 npm start 启动。");
+    console.log(health ? JSON.stringify(health, null, 2) : `本机服务未运行。运行 ${commands.start} 启动。`);
     if (!health?.ready) process.exitCode = 1;
     return;
   }
@@ -272,10 +305,10 @@ async function main() {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   if (command === "setup") {
     await doctor(env, true);
-    if (!process.env.npm_execpath) throw new Error("请使用 npm run setup 执行初始化。");
+    if (!process.env.npm_execpath) throw new Error(`请使用 ${commands.setup} 执行初始化。`);
     // A release runtime package already carries the built extension; it installs runtime dependencies only.
     const prebuilt = await readable(join(root, "runtime-package.json"));
-    for (const args of prebuilt ? [["ci", "--omit=dev", "--ignore-scripts"]] : [["ci"], ["run", "build"]]) {
+    for (const args of prebuilt ? [["ci", "--omit=dev", "--ignore-scripts"]] : [["ci"], ["run", channel === channels.dev ? "dev:build" : "build"]]) {
       const run = spawnSync(process.execPath, [process.env.npm_execpath, ...args], { cwd: root, env, stdio: "inherit" });
       if (run.status !== 0) throw new Error(`npm ${args.join(" ")} 失败，请修复后重试。`);
     }
@@ -283,21 +316,22 @@ async function main() {
     await moveLegacyFile(join(dataDir, "runtime.json"), configFile);
     await writeFile(`${configFile}.tmp`, JSON.stringify(Object.fromEntries(runtimeKeys.map(key => [key, env[key]])), null, 2) + "\n", { mode: 0o600 });
     await rename(`${configFile}.tmp`, configFile);
-    for (const launcher of await registerInstalledLaunchers({ root, dataDir, port, env }))
+    for (const launcher of await registerInstalledLaunchers({ root, dataDir, port, env, channel }))
       console.log(launcher.ok ? `${launcher.label} 本机启动器已注册：打开扩展时按需启动服务。` : `${launcher.label} 本机启动器未注册：${launcher.error}`);
-    console.log(`初始化完成。运行 npm start 启动；在浏览器加载 ${join(root, ".output/chrome-mv3")} 后会自动连接。`);
+    console.log(`初始化完成。运行 ${commands.start} 启动；在浏览器加载 ${join(root, channel.outputDir)} 后会自动连接。`);
     return;
   }
   if (command === "start") return start(env);
   if (command === "run") {
     await doctor(env, true);
-    const child = spawn(process.execPath, ["--preserve-symlinks-main", join(root, "bridge/server.mjs")], { cwd: root, env, stdio: "inherit" });
+    await assertDataDirFree();
+    const child = spawn(process.execPath, ["--preserve-symlinks-main", join(root, "bridge/server.mjs")], { cwd: root, env: { ...env, ALCHEMY_CHANNEL: channel.name }, stdio: "inherit" });
     for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => child.kill(signal));
     const [code] = await once(child, "exit");
     process.exitCode = code || 0;
     return;
   }
-  throw new Error("使用 npm run setup / doctor / status / pair，或 npm start / stop。");
+  throw new Error(`使用 ${commands.setup} / ${commands.status}，或 ${commands.start} / ${commands.stop}。`);
 }
 
 try { await main(); }

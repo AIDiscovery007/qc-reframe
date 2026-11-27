@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { createBridge } from '../bridge/server.mjs';
+import { buildChannel } from '../lib/channel.mjs';
 
 async function fixture(t, options = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'reframe-restart-'));
@@ -81,7 +82,7 @@ const source = await readFile(new URL('../lib/service-restart.ts', import.meta.u
 function polling(clock = Date) {
   const exports = {};
   runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
-    { exports, Date: clock, setTimeout });
+    { exports, Date: clock, setTimeout, require: name => name === './extension-channel' ? { extensionChannel: buildChannel('production') } : assert.fail(`unexpected import ${name}`) });
   return exports.waitForServiceRestart;
 }
 const ticket = { previousInstanceId: 'old', restartId: 'request' };

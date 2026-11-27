@@ -48,7 +48,7 @@ const job = {
   result,
 };
 
-const regressions = Object.fromEntries(['input-operation', 'workspace-image-model', 'image-settings-sync', 'magpie-workflows', 'generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
+const regressions = Object.fromEntries(['input-operation', 'workspace-image-model', 'image-settings-sync', 'magpie-workflows', 'generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'service-upgrade', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
   .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
 async function sendScript(req, res, body) {
   res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
@@ -281,6 +281,12 @@ const server = createServer(async (req, res) => {
         const batchItems=request=>request.projects.map(item=>({projectId:item.projectId,inputRevision:item.inputRevision,title:projects.find(p=>p.id===item.projectId)?.title||'已删除项目',eligible:batchAllAccepted||item.projectId!==projects[3]?.id,...(!batchAllAccepted&&item.projectId===projects[3]?.id?{error:'参考图缺失'}:{})}));
         const service={service:'qc-alchemy',version:'0.3.2',managed:previewOptions.get('restart')!=='manual',canRestart:!['old','manual'].includes(previewOptions.get('restart')),instanceId:'preview-first'};
         let restartingUntil=0;
+        // Synthetic upgrade states: the preview never contacts GitHub, runs an installer or reloads the extension.
+        const upgradeFlow=previewOptions.get('upgradeRegression')||'current';
+        const upgradeRelease={version:'0.1.19',title:'QC-Reframe v0.1.19',url:'https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.1.19',publishedAt:'2026-11-27T00:00:00.000Z'};
+        const upgrade={current:upgradeFlow==='reload'?'0.1.19':'0.1.18',install:'package',autoCheck:true,latest:['current','reload'].includes(upgradeFlow)?null:upgradeRelease,checkedAt:'2026-11-27T00:00:00.000Z',
+          checkError:upgradeFlow==='check-failed'?'无法检查更新：网络不可用或 GitHub 暂时无响应，请稍后重试。':null,available:['available','failed','blocked','narrow'].includes(upgradeFlow),
+          canUpgrade:['available','failed','narrow'].includes(upgradeFlow),reason:upgradeFlow==='blocked'?'请等待当前任务、模型验证或 Agent CLI 操作完成后再升级。':null,upgrading:false,lastResult:null};
         let connectionFailures=previewOptions.has('connectionRegression')?1:0;
       let imageSaveFailed=false, magpieSaveFailed=false, magpieChangingDirectoryReads=0;
       const imageSettings={provider:'codex',configs:{magpie:{baseUrl:'http://127.0.0.1:3425',model:''},openai:{baseUrl:'https://api.openai.com/v1',model:'',hasApiKey:false},gemini:{baseUrl:'https://generativelanguage.googleapis.com/v1beta',model:'',hasApiKey:false}}};
@@ -453,6 +459,19 @@ const server = createServer(async (req, res) => {
             return {ok:true,value:snapshot};
           }
           if(message.type==='alchemy:upload-reference'){if(new URLSearchParams(location.search).get('swap')==='failed')return {error:'互换失败（预览），请重试'};let p=projects.find(p=>(p.image||template)===message.image);if(!p){p={id:crypto.randomUUID(),title:'上传的参考图',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),sourceUrl:'',capture:'original',jobs:[],image:message.image};projects.unshift(p);touch(p);}data.selection={...selection(p),image:message.image};return {ok:true,value:data.selection};}
+          if(['alchemy:upgrade-status','alchemy:upgrade-settings','alchemy:upgrade-start','alchemy:extension-reload'].includes(message.type)){
+            if(message.type==='alchemy:extension-reload'){document.documentElement.dataset.previewExtensionReloads=String(Number(document.documentElement.dataset.previewExtensionReloads||0)+1);return {ok:true};}
+            if(message.type==='alchemy:upgrade-settings')upgrade.autoCheck=message.autoCheck;
+            if(message.type==='alchemy:upgrade-status'&&message.check==='manual'){await new Promise(resolve=>setTimeout(resolve,300));upgrade.checkedAt=new Date().toISOString();}
+            if(message.type==='alchemy:upgrade-start'){
+              const startedAt=new Date().toISOString(),failed=upgradeFlow==='failed';
+              Object.assign(upgrade,{upgrading:true,canUpgrade:false,reason:'正在升级到 0.1.19，完成后本机服务会自动重新启动。'});
+              setTimeout(()=>Object.assign(upgrade,{upgrading:false,reason:null,canUpgrade:failed,available:failed,current:failed?'0.1.18':'0.1.19',
+                lastResult:{version:'0.1.19',from:'0.1.18',outcome:failed?'rolled_back':'upgraded',stage:failed?'setup':null,at:new Date().toISOString()}}),1200);
+              return {ok:true,value:{version:'0.1.19',startedAt}};
+            }
+            return {ok:true,value:structuredClone(upgrade)};
+          }
           if(message.type==='alchemy:service-restart'){if(previewOptions.get('restart')==='failed')return {error:'重启准备失败，原服务仍在运行。请查看本机服务日志后重试。'};const ticket={previousInstanceId:service.instanceId,restartId:crypto.randomUUID()};restartingUntil=Date.now()+1800;setTimeout(()=>Object.assign(service,{instanceId:crypto.randomUUID(),restartId:ticket.restartId}),1800);return {ok:true,value:ticket};}
           if(message.type==='alchemy:query'&&message.path==='/health'&&previewOptions.has('connectionRegression')){
             if(connectionFailures-- > 0)return {error:'本机服务未运行，启动后将自动连接。'};
@@ -698,6 +717,8 @@ const server = createServer(async (req, res) => {
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/agent-settings-regression.js"></script></body>'));
     if (['/workspace.html', '/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('connectionRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/automatic-connection-regression.js"></script></body>'));
+    if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('upgradeRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/service-upgrade-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('settingsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/settings-recovery-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('batchRecreateRegression'))

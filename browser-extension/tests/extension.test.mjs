@@ -1402,6 +1402,99 @@ test("service restart explains an old bridge route and preserves actionable serv
   assert.equal((await send()).error, error);
 });
 
+// Scenario: user checks for and starts an upgrade from the settings page
+//   Given the workspace or a web page asks the background about upgrades
+//   When the request comes from an extension page with valid input
+//   Then only the fixed upgrade endpoints are called with exactly that input; web pages and invalid input reach nothing
+test("user's upgrade requests reach only the fixed upgrade endpoints, from extension pages, with validated input", async () => {
+  const calls = [];
+  const { handlers } = await background(async (url, options) => {
+    calls.push({ url: String(url), options });
+    return { ok: true, json: async () => ({ current: "0.8.0" }) };
+  });
+  const page = { id: "test", url: "chrome-extension://test/workspace.html" };
+  const web = { id: "test", frameId: 0, url: "https://example.com/", tab: { id: 4 } };
+  const send = message => new Promise(resolve => handlers.message(message, page, resolve));
+  for (const type of ["alchemy:upgrade-status", "alchemy:upgrade-settings", "alchemy:upgrade-start", "alchemy:extension-reload"])
+    assert.equal(handlers.message({ type, autoCheck: true, version: "0.9.0" }, web, () => assert.fail("web pages get no reply")), undefined);
+  assert.equal(calls.length, 0);
+  for (const [message, path] of [
+    [{ type: "alchemy:upgrade-status" }, "/upgrade"],
+    [{ type: "alchemy:upgrade-status", check: "auto" }, "/upgrade?check=auto"],
+    [{ type: "alchemy:upgrade-status", check: "manual" }, "/upgrade?check=manual"],
+  ]) {
+    assert.equal((await send(message)).value.current, "0.8.0");
+    assert.ok(calls.at(-1).url.endsWith(path), calls.at(-1).url);
+    assert.equal(calls.at(-1).options.method, "GET");
+  }
+  await send({ type: "alchemy:upgrade-settings", autoCheck: false, extra: "ignored" });
+  assert.ok(calls.at(-1).url.endsWith("/upgrade/settings"));
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body), { autoCheck: false });
+  await send({ type: "alchemy:upgrade-start", version: "0.9.0", path: "/shutdown", command: "rm" });
+  assert.ok(calls.at(-1).url.endsWith("/upgrade"));
+  assert.equal(calls.at(-1).options.method, "POST");
+  assert.equal(calls.at(-1).options.headers.Authorization, "Bearer test");
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body), { version: "0.9.0" });
+  const before = calls.length;
+  for (const message of [
+    { type: "alchemy:upgrade-status", check: "daily" },
+    { type: "alchemy:upgrade-settings", autoCheck: "no" },
+    { type: "alchemy:upgrade-settings" },
+    { type: "alchemy:upgrade-start", version: "v0.9.0" },
+    { type: "alchemy:upgrade-start", version: "0.9.0/../../shutdown" },
+    { type: "alchemy:upgrade-start" },
+  ]) assert.match((await send(message)).error, /无效/);
+  assert.equal(calls.length, before);
+});
+
+// Scenario: user's service predates in-extension upgrades
+//   Given a service without the upgrade route
+//   When the settings page asks for upgrade status
+//   Then the user is told how to update by hand; the service's own refusals pass through unchanged
+test("user is told to update by hand when the service predates in-extension upgrades", async () => {
+  let error = "Not found";
+  const { handlers } = await background(async () => ({ ok: false, status: 404, json: async () => ({ error }) }));
+  const send = type => new Promise(resolve => handlers.message({ type, version: "0.9.0" }, { id: "test", url: "chrome-extension://test/workspace.html" }, resolve));
+  assert.match((await send("alchemy:upgrade-status")).error, /0\.8\.0.*README/);
+  error = "请等待当前任务、模型验证或 Agent CLI 操作完成后再升级。";
+  assert.equal((await send("alchemy:upgrade-start")).error, error);
+});
+
+// Scenario: user finishes an upgrade by reloading the extension
+//   Given the settings page asks the background to reload the extension
+//   When the extension starts again soon after
+//   Then it reloads only after replying, and reopens the workspace on the connection settings once
+test("user's extension reloads after replying and reopens the connection settings once", async () => {
+  let reloads = 0;
+  const local = {};
+  const { handlers } = await background(undefined, {}, chrome => {
+    chrome.runtime.reload = () => { reloads++; };
+    chrome.storage.local.get = async () => ({ ...structuredClone(local), preferences: { token: "test" } });
+    chrome.storage.local.set = async value => { Object.assign(local, value); };
+    chrome.storage.local.remove = async key => { delete local[key]; };
+  });
+  const response = await new Promise(resolve => handlers.message({ type: "alchemy:extension-reload" }, { id: "test", url: "chrome-extension://test/workspace.html" }, resolve));
+  assert.equal(response.ok, true);
+  assert.equal(reloads, 0, "the reply must leave before the extension unloads");
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(reloads, 1);
+  assert.equal(typeof local.upgradeReopenAt, "number");
+
+  const reopened = await background(undefined, {}, chrome => {
+    chrome.storage.local.get = async () => ({ ...structuredClone(local), preferences: { token: "test" } });
+    chrome.storage.local.remove = async key => { delete local[key]; };
+  });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(reopened.tabs.length, 1);
+  const url = new URL(reopened.tabs[0].url);
+  assert.equal(url.searchParams.get("view"), "settings");
+  assert.equal(url.searchParams.get("section"), "connection");
+  assert.equal("upgradeReopenAt" in local, false);
+  const again = await background(undefined, {}, chrome => { chrome.storage.local.get = async () => ({ ...structuredClone(local), preferences: { token: "test" } }); });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(again.tabs.length, 0);
+});
+
 const clientCode = ts.transpileModule(await readFile(new URL('../lib/client.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;

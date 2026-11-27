@@ -1,3 +1,5 @@
+import { extensionChannel } from "./extension-channel";
+
 export type ServiceHealth = {
   service: string; version: string; ready: boolean; managed?: boolean; canRestart?: boolean;
   instanceId?: string; restartId?: string; active?: number; cliBusy?: boolean; modelBusy?: boolean;
@@ -17,5 +19,6 @@ export async function waitForServiceRestart(ticket: RestartTicket, read: () => P
     } catch { signal.throwIfAborted(); }
     await pause();
   }
-  throw new Error("未能确认新服务已启动。请在插件目录运行 npm run status；若已停止，运行 npm start，并查看 .local/logs/bridge.log。");
+  const { status, start } = extensionChannel.commands;
+  throw new Error(`未能确认新服务已启动。请在插件目录运行 ${status}；若已停止，运行 ${start}，并查看 .local/logs/bridge.log。`);
 }

@@ -105,6 +105,10 @@ export const scenarios = [
   })),
   { id: 'settings-recovery-narrow', surface: 'workspace', path: '/workspace.html?state=library&settingsRegression=1', viewport: { width: 320, height: 740 }, regression: 'settingsRegression', rules: [] },
   { id: 'settings-recovery', surface: 'workspace', path: '/workspace.html?state=library&settingsRegression=1', viewport: wide, regression: 'settingsRegression', rules: [] },
+  ...['available', 'failed', 'reload', 'blocked', 'check-failed', 'current', 'narrow'].map(flow => ({
+    id: `service-upgrade-${flow}`, surface: 'workspace', path: `/workspace.html?state=library&upgradeRegression=${flow}`,
+    viewport: flow === 'narrow' ? { width: 320, height: 740 } : wide, regression: 'upgradeRegression', rules: [],
+  })),
 ];
 
 export const exampleScenarios = [

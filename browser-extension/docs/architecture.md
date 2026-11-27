@@ -166,6 +166,9 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 | 逆向 Agent 登记、选择与旧快照 | `agents.test.mjs` 的注册表 interface；`extension.test.mjs` 验证扩展只校验 ID 格式 |
 | 网页浮层与按需面板 | `content-collection.test.mjs`（按需加载、失败提示）；`extension.test.mjs`（bundle 拆分、仅顶层 frame 注入） |
 | 示例与生产一致性 | `preview-contract.test.mjs`：运行实际 preview 脚本并与生产检索契约对照 |
+| 通道身份、数据目录占用与 `dev:*` 拒绝 | `dev-channel.test.mjs`（临时目录与 `ALCHEMY_APP_SUPPORT_DIR`） |
+| 升级检查、受理与安装器回滚 | `upgrade.test.mjs`（模拟 GitHub 与固定安装器参数）、`runtime-package.test.mjs`（本机假 Release 的升级、签名与回滚） |
+| 扩展跟随升级与重新加载 | `service-upgrade.test.mjs` 直接导入 `lib/service-upgrade.ts`；`extension.test.mjs` 验证消息与 reload 后重新打开；`service-upgrade.browser.js` 验证卡片 |
 
 测试优先通过真实 interface 注入 request、execute 或文件系统故障，验证可观察行为。App 的同步与编排规则已移入上述 module，测试直接导入；只读取 App 源码检查组件回调接线（`callbackProps`），不再提取闭包执行。新增规则放进对应 module，不为测试重新暴露 App 私有闭包。预览也不泛化成适配器框架；出现第二个真实实现和实际分歧后再深化 seam。
 
@@ -175,10 +178,24 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 
 ## 自动连接
 
-`wxt.config.ts` 把 `lib/extension-identity.mjs` 的公开 key 写入 manifest，使 ZIP、移动目录或任意目录加载的扩展 ID 一致；`bridge/connection.mjs` 信任该固定 ID，并合并安装配置中显式批准的 `ALCHEMY_EXTENSION_ID`。旧版无 key 构建的路径 ID 不再获得凭据，重新加载当前构建后恢复。服务的 `POST /connection` 校验精确 Origin、Host、JSON 空请求及无查询参数后返回既有 token，并禁止缓存；其他业务接口保持 Bearer 认证。原 token、配置和项目数据不重置，普通网页和未知扩展不能自动注册。
+`wxt.config.ts` 按构建 mode 从 `lib/channel.mjs` 取得发行版或开发版身份，把对应公开 key 写入 manifest，使 ZIP、移动目录或任意目录加载的扩展 ID 一致；`bridge/connection.mjs` 只信任本服务通道的固定 ID，并合并安装配置中显式批准的 `ALCHEMY_EXTENSION_ID`。旧版无 key 构建的路径 ID 不再获得凭据，重新加载当前构建后恢复。服务的 `POST /connection` 校验精确 Origin、Host、JSON 空请求及无查询参数后返回既有 token，并禁止缓存；其他业务接口保持 Bearer 认证。原 token、配置和项目数据不重置，普通网页和未知扩展不能自动注册。
 
 扩展后台按业务需要连接，并把凭据仅保存在 trusted local storage。并发请求共用一次握手，偏好写入串行合并，避免连接覆盖模式选择；收到明确 401 时最多恢复一次，网络失败和业务错误不重放请求。界面可见时轮询健康状态，首次未配对也会连接，关闭或切换设置不改变进行中的任务。Codex 与 Pi 共用此连接，安装/登录/模型验证仍由各自渠道管理；连接不依赖 Codex 技能或模型就绪。
 
 `/health` 返回安装目录 `installDir`；服务使用的数据目录不是该安装自己的 `.local`（如经 `ALCHEMY_DATA_DIR` 指定）时，另返回 `dataDir`。后台把两者从健康数据中剥离，单独存入 trusted local storage，仅经 `alchemy:start-command`（扩展页面、message transport）生成 `cd '<目录>' && npm start`；有 `dataDir` 时命令带 `ALCHEMY_DATA_DIR='<数据目录>'`，在新终端粘贴也会打开同一份数据，数据目录无法安全显示时不给命令。content 与网页面板不能读取。服务离线且启动器不可用时，工作台、轻量端和「本机连接」显示这条可复制命令；旧服务未返回目录时退回通用说明。
 
 `npm run setup` 对已存在配置目录的浏览器（macOS 的 Chrome 与 Codex）注册 `com.qc.reframe` 按需启动器，共用数据目录下的 `runtime/native-launcher`；其他安装已占用的注册只报告跳过，不覆盖；注册指向的启动器文件已不存在时视为失效安装，注册（不含撤销）可替换。`start` 与启动器共用 `manage.mjs` 的启动流程：`/health` 接受本安装令牌即视为本安装服务，同版本复用，托管的旧版本在预检和启动锁之后经 `/shutdown` 停止再启动，服务忙时 `/shutdown` 拒绝，旧服务保持运行。`scripts/package-runtime.mjs` 把已构建扩展、bridge、服务脚本与 Alchemy skill 打成带 `runtime-package.json` 标记的 Release 运行包；`setup` 识别该标记后只执行 `npm ci --omit=dev --ignore-scripts`，不重新构建。`scripts/install.sh` 下载运行包并按 `SHA256SUMS` 校验，只写入空目录、已有运行包安装或带 `.qc-reframe-install-pending` 标记的未完成替换（标记在复制完成前一直保留，中断后可重跑），升级时先停止本安装服务、只替换运行包所含条目，保留 `.local/` 与其他文件。
+
+## 开发版与发行版
+
+`lib/channel.mjs` 是两套身份的唯一来源：发行版 `release`（端口 43187、`com.qc.reframe`、`.output/chrome-mv3`）与开发版 `dev`（端口 43197、`com.qc.reframe.dev`、`.output/chrome-mv3-dev`），各有固定扩展 ID 与公开 key。扩展由构建 mode 决定通道（`lib/extension-channel.ts`，`development` 为开发版）；服务只由显式的 `--dev`（`npm run dev:*`）或 `ALCHEMY_CHANNEL` 决定，未设置即发行版，其他值拒绝。`/health` 报告 `channel`。服务启动时在数据目录登记端口与通道（`bridge/service-record.mjs`），同一数据目录已有存活服务时 `manage.mjs` 拒绝启动并说明先停哪一个。运行包安装没有开发版构建，`dev:*` 拒绝执行。
+
+## 插件内升级
+
+`bridge/upgrade.mjs` 是升级的唯一服务端 module，`routes/service.mjs` 只做装配：
+
+- `GET /upgrade[?check=auto|manual]`：返回当前、最新、能否升级与原因、是否升级中和安装器的上次结果。`auto` 在开关打开且距上次检查满一天时请求 GitHub，`manual` 每分钟最多一次，不带参数从不联网。检查结果与开关持久化在 `config/upgrade.json`。GitHub 请求只访问固定地址，拒绝重定向、超过 1 MB 的响应、预发布、草稿和与标签不一致的页面链接。
+- `POST /upgrade/settings {autoCheck}`；`POST /upgrade {version}` 返回 202 与 `{version, startedAt}`。受理前重新确认 GitHub 最新版本等于请求版本且高于当前版本，并检查运行包、平台、托管方式、通道与忙碌状态。随后以固定参数分离启动本安装的 `scripts/install.sh`（`QC_REFRAME_VERSION` 固定目标、`QC_REFRAME_REQUIRE_SIGNATURE=1`），输出写入 `logs/upgrade.log`。安装器运行期间，`server.mjs` 拒绝除 `/shutdown` 外的所有 POST。
+- `scripts/install.sh` 验证签名与 SHA-256 后停止服务，把旧条目移到 `.qc-reframe-previous/`，`setup` 或 `start` 失败时移回并重启旧服务；结果写入 `runtime/upgrade-result.json`。替换期间存在 `.qc-reframe-install-pending` 或 `.qc-reframe-previous` 时，`manage.mjs` 的自动启动（启动器）拒绝唤醒。
+- 扩展端：`lib/service-upgrade.ts` 是纯规则（提示、跟随、结果文案、reload 后重新打开），`ServiceUpgrade.tsx` 只负责卡片与确认框，`lib/use-upgrade-hint.ts` 提供侧栏提示。`alchemy:upgrade-*` 与 `alchemy:extension-reload` 只接受扩展页面的 message transport。成功后后台在 `storage.local` 记下 `upgradeReopenAt` 再 `runtime.reload()`；新后台启动时消费该记录，两分钟内才重新打开「设置中心 › 本机连接」。
+- `scripts/sign-release.mjs` 在 Release 工作流的单独步骤中用 `RELEASE_SIGNING_KEY` 签名 `SHA256SUMS`，并先用 `install.sh` 内置公钥验证，避免发布已安装副本会拒绝的签名。

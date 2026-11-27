@@ -22,6 +22,7 @@ import { downloadPromptMarkdown } from "../../lib/prompt-export";
 import useProjectLibrary from "./useProjectLibrary";
 import { useMotion } from "../../lib/use-motion";
 import { pollWhileVisible } from "../../lib/visible-poll";
+import { useUpgradeHint } from "../../lib/use-upgrade-hint";
 import { createPortal } from "react-dom";
 import { normalizeImage } from "../../lib/image";
 import NewProject from "../workspace/NewProject";
@@ -127,6 +128,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const recentProjects = library.recent.items.filter(visibleProject);
   const [service, setService] = useState(initialServiceStatus);
   const { connected, connectionText, cliBusy, cliStatus, modelBusy, reverseAgent, selectedModel } = service;
+  const upgrade = useUpgradeHint(workspace && connected);
   const [serviceBusy, setServiceBusy] = useState(false);
   const [channel, setChannel] = useState(initialGenerationChannel);
   const generationSettings = useRef<ReturnType<typeof createGenerationSettings> | undefined>(undefined);
@@ -514,7 +516,8 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         <button className="nav-action" aria-label="任务中心" disabled={!connected} onClick={() => setTasksOpen(true)}><Icon name="clock" /><span>任务中心</span>{reminders.unread.length > 0 && <span className="reminder-dot" data-failed={reminders.unread.some(item => item.status === "failed")} role="img" aria-label={`${reminders.unread.length} 项结果未查看`} />}{activeCount > 0 && <span className="count">{activeCount}</span>}</button>
         <div className="sidebar-label">最近项目</div>
         <div className="project-nav">{recentProjects.map(item => <RecentProject key={item.id} project={item} currentMode={preferences.mode} active={!historyOpen && !galleryOpen && activeProject?.id === item.id} disabled={busy} onOpen={() => void openProject(item)} />)}</div>
-        <div className="sidebar-bottom"><button className="nav-action" aria-label="设置中心" onClick={() => setSettings(true)}><Icon name="settings" /><span>设置中心</span></button><div className="connection-state"><i className={`online-dot ${connected ? "" : "offline"}`} />{connected ? "本机服务已连接" : "本机未连接"}{connected && cliStatus?.updateAvailable && <button className="text-button" onClick={() => openRecovery("cli")}>{cliStatus.comparisonReference ? "版本参考" : "可更新"}</button>}</div></div>
+        <div className="sidebar-bottom"><button className="nav-action" aria-label="设置中心" onClick={() => setSettings(true)}><Icon name="settings" /><span>设置中心</span></button><div className="connection-state"><i className={`online-dot ${connected ? "" : "offline"}`} />{connected ? "本机服务已连接" : "本机未连接"}{connected && upgrade.hint ? <button className="text-button" onClick={() => openRecovery("connection")}>{upgrade.hint === "reload" ? "需重新加载" : "新版本"}</button>
+          : connected && cliStatus?.updateAvailable && <button className="text-button" onClick={() => openRecovery("cli")}>{cliStatus.comparisonReference ? "版本参考" : "可更新"}</button>}</div></div>
       </aside>}
       <div className={workspace ? "workspace-main" : "compact-main"}>
       {workspace && !galleryOpen && <header className="workspace-head"><div><h1>{historyOpen ? "全部项目" : activeProject?.title || "新项目"}</h1></div><div className="head-actions">
@@ -578,7 +581,7 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         onUndo={() => { if (visibilityNotice) void setProjectsHidden(visibilityNotice.ids, !visibilityNotice.hidden, true).catch(error => setVisibilityError(error.message)); }} />}
       {workspace && sessionPicker === drawerKey && preferences.mode === "session" && <SessionPicker value={selectedSessions()} onClose={() => setSessionPicker(undefined)} onConfirm={ids => saveInput("session", undefined, taskInstruction("session"), "", [], ids)} />}
       {workspace && newProjectOpen && <NewProject busy={busy} error={error} onClose={() => setNewProjectOpen(false)} onUpload={() => referenceInput.current?.click()} />}
-      {workspace && settings && <SettingsCenter section={settingsSection} onSectionChange={setSettingsSection} connected={connected} serviceBusy={serviceBusy} onClose={() => setSettings(false)} onConnected={() => setPreferences(value => ({ ...value, paired: true }))} onSaveImageSettings={saveImageSettings} imageSettingsRevision={imageSettingsRevision} />}
+      {workspace && settings && <SettingsCenter section={settingsSection} onSectionChange={setSettingsSection} connected={connected} serviceBusy={serviceBusy} onClose={() => setSettings(false)} onConnected={() => setPreferences(value => ({ ...value, paired: true }))} onUpgradeStatus={upgrade.update} onSaveImageSettings={saveImageSettings} imageSettingsRevision={imageSettingsRevision} />}
       {tasksOpen && <TaskCenter workspace={workspace} visibilityError={visibilityError} unread={reminders.unread} onNoticeOpen={openNotice} showHidden={showHidden} hiddenProjectIds={hiddenProjectIds} busy={busy} onToggleHidden={() => void toggleHiddenProjects()} onClose={() => setTasksOpen(false)} onUpdate={updateJob} onOpen={async (_projectId, _mode, jobId, generationId) => {
         await sync.current?.openTask(jobId, generationId);
       }} />}

@@ -24,6 +24,11 @@ export const uiOperations: Readonly<Record<string, Operation>> = {
   "alchemy:upload-reference": ui,
   "alchemy:update-project-input": connected,
   "alchemy:service-restart": ui,
+  // Upgrades act on the installation, so only the extension's own pages may ask; web pages never see release data.
+  "alchemy:upgrade-status": { source: "extension", transport: "message" },
+  "alchemy:upgrade-settings": { source: "extension", transport: "message" },
+  "alchemy:upgrade-start": { source: "extension", transport: "message" },
+  "alchemy:extension-reload": { source: "extension", transport: "message" },
   "alchemy:cli-check": ui,
   "alchemy:cli-update": ui,
   "alchemy:cli-install": ui,

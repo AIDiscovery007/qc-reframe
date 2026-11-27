@@ -6,11 +6,15 @@ import ts from "typescript";
 import { validImageSizeRequest } from "../lib/image-size.mjs";
 import { validGenerationRatio } from "../lib/generation-session.ts";
 import * as operationPolicy from "../lib/operation-policy.ts";
+import { buildChannel } from "../lib/channel.mjs";
+import * as serviceUpgrade from "../lib/service-upgrade.ts";
+
+const channelModule = { extensionChannel: buildChannel("production") };
 
 const bridgeModule = {};
 runInNewContext(ts.transpileModule(await readFile(new URL("../lib/bridge.ts", import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-}).outputText, { exports: bridgeModule, require: () => operationPolicy });
+}).outputText, { exports: bridgeModule, require: name => name === "./extension-channel" ? channelModule : operationPolicy });
 
 const transpile = async path => ts.transpileModule(await readFile(new URL(path, import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -58,10 +62,10 @@ function background(local = { preferences: { token: "private-token" } }) {
   runInNewContext(compiled, {
     exports: {}, defineBackground: fn => fn(), crypto, URLSearchParams, TextEncoder, console,
     AbortController, AbortSignal, setTimeout, clearTimeout,
-    require: name => (name in ownedModules ? instantiate(ownedModules[name], { "wxt/browser": { browser }, "./bridge": { ...bridgeModule, bridge } }) : undefined) ?? ({
+    require: name => (name in ownedModules ? instantiate(ownedModules[name], { "wxt/browser": { browser }, "./bridge": { ...bridgeModule, bridge }, "./extension-channel": channelModule }) : undefined) ?? ({
       "../lib/reminder-background": { startReminderService: () => ({ wake: async () => {}, projectsChanged: async () => {} }) },
       "wxt/browser": { browser }, "../lib/bridge": { ...bridgeModule, bridge },
-      "../lib/operation-policy": operationPolicy,
+      "../lib/operation-policy": operationPolicy, "../lib/extension-channel": channelModule, "../lib/service-upgrade": serviceUpgrade,
       "../lib/image-size.mjs": { validImageSizeRequest }, "../lib/generation-session": { validGenerationRatio },
       "../lib/capture": { captureImage: async () => ({ image, capture: "original" }) },
     })[name],
@@ -227,9 +231,11 @@ test("web selection conceals a duplicate hidden image and collecting it preserve
 
 test('public motion messages preserve trusted storage and notify extension pages and reachable content scripts', async () => {
   const bg = background({ preferences: { token: 'private-token' }, motionPreference: 'full' });
+  // Startup reads its own keys (the post-upgrade reopen mark); the public message may read only the preference.
+  const startup = bg.storageReads.length;
   const read = await bg.send({ type: 'alchemy:get-motion-preference' }, contentSender);
   assert.equal(read.value, 'full');
-  assert.deepEqual(bg.storageReads, ['motionPreference']);
+  assert.deepEqual(bg.storageReads.slice(startup), ['motionPreference']);
   assert.deepEqual(bg.accessLevels, ['TRUSTED_CONTEXTS']);
   const saved = await bg.send({ type: 'alchemy:set-motion-preference', preference: 'reduce', token: 'injected' }, contentSender);
   assert.equal(saved.ok, true);
