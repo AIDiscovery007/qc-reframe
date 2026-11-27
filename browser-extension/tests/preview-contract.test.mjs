@@ -106,7 +106,7 @@ test("root preview serves built entries, gallery images and browser regression s
     assert.equal(response.headers.get("content-type"), type);
     assert.ok((await response.arrayBuffer()).byteLength > 100);
   }
-  for (const name of ["batch-recreate", "settings-recovery", "generation-actions", "auto-style", "creation-context", "image-order"]) {
+  for (const name of ["batch-recreate", "settings-recovery", "service-upgrade", "generation-actions", "auto-style", "creation-context", "image-order"]) {
     const response = await fetch(`${baseURL}/${name}-regression.js`);
     assert.equal(response.status, 200, name);
     assert.match(response.headers.get("content-type"), /javascript/);

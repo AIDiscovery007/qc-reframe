@@ -110,8 +110,10 @@ UI 改动用 `npm run preview` 检查相关状态，再按任务需要验收实�
 2. 新增 `docs/releases/v版本号.md` 并更新索引。说明是否需要重启服务、重新加载扩展、刷新网页，以及数据或配置是否迁移；没有实际验证的环节如实标注。用于 GitHub Release 正文的图片链接使用对应标签下的公开完整地址，避免相对路径失效或后续 main 改动替换历史图片。
 3. 经 PR 合入 main，确认该提交的 `ci` 检查通过。
 4. 在该 main 提交创建 `v版本号` 标签并单独推送。不要修改既有标签来补发不同内容。
-5. [Release 工作流](.github/workflows/release.yml)对标签准确提交运行完整回归；通过后核对标签位于 main、包版本与标签一致、版本页存在，再执行 `npm run zip`，核对 ZIP 的 manifest 版本，用 `npm run package:runtime` 生成运行包 `qc-reframe-runtime.tar.gz` 并附上 `install.sh`，为三者生成只含文件名的 `SHA256SUMS`，以版本页首行为标题、全文为正文创建 Release。带 `-` 的标签发布为 prerelease，其余为 latest。回归失败则不发布。发版前可在 Actions 中手动运行 Release 工作流演练：对 main 执行同样的回归、打包与校验，但不创建 Release。
+5. [Release 工作流](.github/workflows/release.yml)对标签准确提交运行完整回归；通过后核对标签位于 main、包版本与标签一致、版本页存在，再执行 `npm run zip`，核对 ZIP 的 manifest 版本，用 `npm run package:runtime` 生成运行包 `qc-reframe-runtime.tar.gz` 并附上 `install.sh`，为三者生成只含文件名的 `SHA256SUMS`，在单独步骤中用 `RELEASE_SIGNING_KEY` secret 签名为 `SHA256SUMS.sig`（`scripts/sign-release.mjs` 先用 `install.sh` 内置的公钥验证，不匹配则失败），以版本页首行为标题、全文为正文创建 Release。带 `-` 的标签发布为 prerelease，其余为 latest。回归失败则不发布。发版前可在 Actions 中手动运行 Release 工作流演练：对 main 执行同样的回归、打包与校验，但不创建 Release。
 6. 查询远端确认 Release 状态、附件名称、大小与校验值，确认 latest 指向预期版本。工作流中断后先查询已有状态，再重跑失败的 job，避免重复发布。
+
+发布签名私钥（Ed25519，PKCS8 PEM）只存放在仓库 Actions secret `RELEASE_SIGNING_KEY` 和维护者自己的离线备份中，不进入仓库、日志或对话；对应公钥是 `scripts/install.sh` 中唯一的 `signing_key`。已安装的副本用自己那份 `install.sh` 的公钥验证新 Release，因此不能直接换钥：换钥需要先发布一个同时信任新旧公钥的安装器。私钥丢失时，已安装的用户只能重新运行一键安装命令升级。
 
 Chrome ZIP 不包含本机 bridge 和 skill。首次安装须用一键安装（运行包）或完整仓库，不能在 README 或 Release 中承诺“只导入 ZIP 就可运行”。运行包与 `install.sh` 使用固定文件名，`releases/latest/download/` 始终指向最新正式版；发布后用一键安装命令核对 latest 可下载、校验并启动。只承诺已验证的客户端能力，不保证所有 Codex 客户端都开放第三方扩展安装。
 

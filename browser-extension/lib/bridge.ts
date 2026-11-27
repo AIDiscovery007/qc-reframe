@@ -1,6 +1,7 @@
 import { bridgeTimeout } from "./operation-policy";
+import { extensionChannel } from "./extension-channel";
 
-export const BRIDGE_URL = "http://127.0.0.1:43187";
+export const BRIDGE_URL = `http://127.0.0.1:${extensionChannel.port}`;
 
 export class BridgeError extends Error {
   constructor(message: string, public status: number) { super(message); }

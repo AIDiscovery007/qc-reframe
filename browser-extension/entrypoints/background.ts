@@ -9,8 +9,10 @@ import { pagePanelFile } from "../lib/page-panel";
 import { captureImage } from "../lib/capture";
 import { validImageSizeRequest } from "../lib/image-size.mjs";
 import { splitStartLocation, startCommand, startLocationKey } from "../lib/start-command";
+import { extensionChannel } from "../lib/extension-channel";
 import { validGenerationRatio } from "../lib/generation-session";
 import { agentQuery, isAgentId } from "../lib/agents";
+import { markReopenAfterReload, reopenAfterReload } from "../lib/service-upgrade";
 import type {
   ImageTarget,
   AspectRatio,
@@ -182,9 +184,22 @@ export default defineBackground(() => {
     }
   };
   const drafts = createDraftStore();
+  const upgradeRequest = async <T>(send: () => Promise<T>) => {
+    try { return await send(); }
+    catch (error) {
+      if ((error as Error).message === "Not found") throw new Error("当前本机服务不支持插件内升级（0.8.0 起支持），请按 README 手动更新。");
+      throw error;
+    }
+  };
   const uiMessage = async (message: Record<string, any>, source = "popup", sourceTab?: number, signal?: AbortSignal) => {
     if (message.type === "alchemy:connect" || message.type === "alchemy:query" && message.path === "/health") return openingHealth();
-    if (message.type === "alchemy:start-command") return { command: startCommand((await browser.storage.local.get(startLocationKey))[startLocationKey]) };
+    if (message.type === "alchemy:extension-reload") {
+      // Chrome reloads an unpacked extension from disk; reply first, then come back on the connection settings.
+      await markReopenAfterReload(browser.storage.local);
+      setTimeout(() => browser.runtime.reload(), 100);
+      return;
+    }
+    if (message.type === "alchemy:start-command") return { command: startCommand((await browser.storage.local.get(startLocationKey))[startLocationKey], extensionChannel.name) };
     if (message.type === "alchemy:panel-load") {
       // Inject only into the requesting top frame's isolated world, never into the page world.
       if (sourceTab == null) throw new Error("无效请求");
@@ -304,9 +319,18 @@ export default defineBackground(() => {
       case "alchemy:service-restart":
         try { return await bridge("/restart", token, {}); }
         catch (error) {
-          if ((error as Error).message === "Not found") throw new Error("当前服务尚不支持插件内重启。请在插件目录运行 npm stop，再运行 npm start。");
+          if ((error as Error).message === "Not found") throw new Error(`当前服务尚不支持插件内重启。请在插件目录运行 ${extensionChannel.commands.stop}，再运行 ${extensionChannel.commands.start}。`);
           throw error;
         }
+      case "alchemy:upgrade-status":
+        if (message.check !== undefined && message.check !== "auto" && message.check !== "manual") throw new Error("无效的检查方式");
+        return upgradeRequest(() => bridge(`/upgrade${message.check ? `?check=${message.check}` : ""}`, token));
+      case "alchemy:upgrade-settings":
+        if (typeof message.autoCheck !== "boolean") throw new Error("无效的更新设置");
+        return upgradeRequest(() => bridge("/upgrade/settings", token, { autoCheck: message.autoCheck }));
+      case "alchemy:upgrade-start":
+        if (typeof message.version !== "string" || !/^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(message.version)) throw new Error("无效的升级版本");
+        return upgradeRequest(() => bridge("/upgrade", token, { version: message.version }));
       case "alchemy:cli-check":
       case "alchemy:cli-update":
       case "alchemy:cli-install": {
@@ -520,6 +544,9 @@ export default defineBackground(() => {
         return start(message.id, message.mode, message.referenceJobId, message.reenact, message.projectId, message.instruction, message.inputRevision, message.sessionIds, signal, message.referenceIndex, message.generation);
     }
   };
+  // After a reload that finished an upgrade, return to where the user started it.
+  void reopenAfterReload(browser.storage.local, async () => { await uiMessage({ type: "alchemy:open-workspace", view: "settings", section: "connection" }); })
+    .catch(error => console.error("无法重新打开本机连接设置", error));
   browser.runtime.onConnect.addListener(port => {
     if (port.name !== "alchemy:request") return;
     const sender = port.sender;

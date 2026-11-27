@@ -124,6 +124,8 @@ node agent-tool/ui.mjs evidence --report /absolute/gate.json --sha256 DIGEST --r
 
 生图就绪回归：`node agent-tool/ui.mjs verify --scenario generation-readiness-workspace`，另有 `generation-readiness-workspace-narrow`、`generation-readiness-popup`。使用生产 React 界面和合成健康响应验证渠道缺配置、恢复、旧服务回退、模型验证中、CLI 更新中、断线及逆向模型缺失；工作台同时验证已选项目的批量入口。不访问真实服务或模型，不改 React 内部状态。
 
+插件内升级回归：`node agent-tool/ui.mjs verify --scenarios service-upgrade-available service-upgrade-failed service-upgrade-reload service-upgrade-blocked service-upgrade-check-failed service-upgrade-current service-upgrade-narrow`。使用生产 React 界面与合成升级状态，覆盖侧栏提示、确认与取消、升级后请求重新加载、回滚提示与重试、服务拒绝、检查失败、已是最新、关闭自动检查及窄屏。不访问 GitHub、不运行安装器、不真正重新加载扩展（预览只计数 `alchemy:extension-reload`）。
+
 ## 状态样例、视觉、扩展与门禁
 
 | 命令 | 用途 / 输出 |

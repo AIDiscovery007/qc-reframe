@@ -30,6 +30,9 @@ import { createGalleryStore } from "./gallery.mjs";
 import { openGeneratedImage } from "./image-actions.mjs";
 import { migrateStorage } from "./storage.mjs";
 import { connectionOrigins } from "./connection.mjs";
+import { removeServiceRecord, writeServiceRecord } from "./service-record.mjs";
+import { serviceChannel } from "../lib/channel.mjs";
+import { createUpgradeService } from "./upgrade.mjs";
 import { serviceRoutes } from "./routes/service.mjs";
 import { projectRoutes } from "./routes/projects.mjs";
 import { jobRoutes } from "./routes/jobs.mjs";
@@ -43,6 +46,8 @@ export { decodeImage } from "./http.mjs";
 export async function createBridge({
   dataDir = resolve(process.env.ALCHEMY_DATA_DIR || join(root, ".local")),
   extensionId = process.env.ALCHEMY_EXTENSION_ID,
+  // The release or dev identity: which extension may connect, and what health reports to the extension.
+  channel = serviceChannel(process.env.ALCHEMY_CHANNEL),
   skillPath = resolve(
     process.env.ALCHEMY_SKILL_PATH ||
       join(root, ".agents/skills/alchemy/SKILL.md"),
@@ -63,8 +68,10 @@ export async function createBridge({
   compatibility = defaultCompatibility,
   sessions,
   sessionReadTimeoutMs = 120_000,
+  // Test seams for the GitHub check and the installer; production uses the defaults in upgrade.mjs.
+  upgradeOptions = {},
 } = {}) {
-  const trustedConnections = connectionOrigins(extensionId);
+  const trustedConnections = connectionOrigins(extensionId, channel);
   const instanceId = randomUUID();
   const paths = await migrateStorage(dataDir);
   // `npm start` in this installation opens <root>/.local; any other data folder must travel with the offline start command.
@@ -382,6 +389,8 @@ export async function createBridge({
   // Service-level flags that routes and the batch scheduler read and set.
   const state = { shuttingDown: false, deletionFailed: false, cliStarting: false };
   const cliBusy = () => state.cliStarting || agents.cliBusy;
+  const upgrade = await createUpgradeService({ root, current: version, channel, paths, allowShutdown, busy: () => codexBusy() || cliBusy(),
+    port: () => app.server.address().port, ...upgradeOptions });
   batches = await createBatchStore(join(paths.records, 'batches.json'), ids => { taskFeed.touch(); projects.touch(ids); });
   const generation = createGenerationPreparation({ imageSettings, generationContext, cwd: root, cliBusy, agents, magpieInspector, requireFeature, generationSkillPath });
   const imageCollection = createImageCollection({ images, thumbnails, runtime, records, batches, generationOutputs, jobs, acquireMutation });
@@ -404,7 +413,7 @@ export async function createBridge({
   await imageCollection.collect();
 
   // Everything the route modules may use; `server` is attached once created.
-  const app = { agents, allowShutdown, batchAdmission, batches, cancelJob, cliBusy, codexBusy, codexHost, compatibility, dataDir, gallery, generationOutputs, generationSkillPath, imageAction, imageCollection, imageSettings, images, instanceId, jobs, magpieInspector, projects, publicBatch, requireFeature, restart, restartId, restoreSubjects, root, runtime, startDataDir, save, saveSubjects, sessions, skillPath, startGeneration, state, storedImage, taskFeed, thumbnails, version };
+  const app = { agents, allowShutdown, channel: channel.name, batchAdmission, batches, cancelJob, cliBusy, codexBusy, codexHost, compatibility, dataDir, gallery, generationOutputs, generationSkillPath, imageAction, imageCollection, imageSettings, images, instanceId, jobs, magpieInspector, projects, publicBatch, requireFeature, restart, restartId, restoreSubjects, root, runtime, startDataDir, save, saveSubjects, sessions, skillPath, startGeneration, state, storedImage, taskFeed, thumbnails, upgrade, version };
   const server = createServer(async (req, res) => {
     const submission = new AbortController();
     const abortSubmission = () => submission.abort(bad("请求已取消", 499));
@@ -502,6 +511,8 @@ export async function createBridge({
       if (req.method === "POST") {
         releaseMutation ||= await acquireMutation();
         if (state.shuttingDown) throw bad("服务正在停止，请重新启动后再试。", 503);
+        // The installer stops this service through /shutdown; nothing else may start while it runs.
+        if (upgrade.running && path !== "/shutdown") throw bad("正在升级本机服务，完成后会自动重新启动。", 409);
         if (state.deletionFailed) throw bad("项目清理未完成，请重启本机服务后重试", 503);
       }
       const readSessions = async (action, check = true) => {
@@ -560,15 +571,16 @@ export async function createBridge({
     agents.close();
     runtime.close();
   });
-  return { server, token, tokenPath };
+  return { server, token, tokenPath, runtimeDir: paths.runtime };
 }
 
 if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const { server } = await createBridge({ allowShutdown: process.env.ALCHEMY_MANAGED === "1", restart: prepareRestart, restartId: process.env.ALCHEMY_RESTART_ID });
-  const port = Number(process.env.ALCHEMY_PORT || 43187);
+  const channel = serviceChannel(process.env.ALCHEMY_CHANNEL);
+  const { server, runtimeDir } = await createBridge({ channel, allowShutdown: process.env.ALCHEMY_MANAGED === "1", restart: prepareRestart, restartId: process.env.ALCHEMY_RESTART_ID });
+  const port = Number(process.env.ALCHEMY_PORT || channel.port);
   server.on("error", (error) => {
     console.error(
       error.code === "EADDRINUSE"
@@ -577,9 +589,11 @@ if (
     );
     process.exitCode = 1;
   });
+  server.on("close", () => removeServiceRecord(runtimeDir));
   server.listen(port, "127.0.0.1", () => {
+    writeServiceRecord(runtimeDir, { port, channel: channel.name });
     console.log(
-      `QC-Reframe ${version} 本机服务：http://127.0.0.1:${port}\n已批准的 Reframe 扩展将自动连接。\n通过已配置的本机 Agent 或生图 API 执行，按 Ctrl+C 停止。`,
+      `${channel.shortName} ${version} 本机服务：http://127.0.0.1:${port}\n已批准的 Reframe 扩展将自动连接。\n通过已配置的本机 Agent 或生图 API 执行，按 Ctrl+C 停止。`,
     );
   });
   for (const signal of ["SIGINT", "SIGTERM"])

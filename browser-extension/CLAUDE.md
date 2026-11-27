@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-QC-Reframe：Chrome MV3 扩展（WXT + React 19 + TypeScript）+ 本机 Node bridge（`127.0.0.1:43187`）+ 随仓库分发的 `alchemy` 逆向技能。流程为「网页选图 → 本机 Agent（Codex 或 Pi）逆向提示词 → 所选渠道生图（Codex 内置 / OpenAI 兼容 / Gemini / Magpie 本机网关）」。五条创作路径：`style`、`recreate`、`reenact`、`multi-reenact`、`session`。版本以 `package.json` 为准。
+QC-Reframe：Chrome MV3 扩展（WXT + React 19 + TypeScript）+ 本机 Node bridge（发行版 `127.0.0.1:43187`，开发版 `43197`）+ 随仓库分发的 `alchemy` 逆向技能。流程为「网页选图 → 本机 Agent（Codex 或 Pi）逆向提示词 → 所选渠道生图（Codex 内置 / OpenAI 兼容 / Gemini / Magpie 本机网关）」。五条创作路径：`style`、`recreate`、`reenact`、`multi-reenact`、`session`。版本以 `package.json` 为准。
 
 ## 先读规则
 
@@ -26,7 +26,9 @@ QC-Reframe：Chrome MV3 扩展（WXT + React 19 + TypeScript）+ 本机 Node bri
 
 ```bash
 npm install                       # postinstall 执行 wxt prepare
-npm run dev                       # WXT 开发模式
+npm run dev                       # 开发版扩展 QC-Reframe Dev（WXT 开发模式，.output/chrome-mv3-dev）
+npm run dev:build                 # 开发版扩展一次性构建
+npm run dev:setup | dev:start | dev:stop | dev:status   # 开发版服务：端口 43197、仓库 .local/、com.qc.reframe.dev 启动器
 npm run build                     # 产物 .output/chrome-mv3（prebuild 先生成图标）
 npm run compile                   # tsc --noEmit
 npm test                          # node --test tests/*.test.mjs；须先 build，扩展测试读取当前构建
@@ -47,7 +49,7 @@ node agent-tool/ui.mjs gate --tier browser             # 全部登记场景 + �
 
 `tests/*.browser.js` 不由 `npm test` 运行，而是 `ui.mjs` 场景经 preview 加载的浏览器回归脚本。`prepare/verify/gate/extension/evidence` 共用 `.output/ui-validation.lock`；验证期间不要另行 `npm run build` 或修改受检源码。
 
-本机服务：`npm run setup | start | stop | status | doctor | pair`；`setup` 为 macOS 上已安装的 Chrome、Codex 注册原生按需启动器（2026-11-26 已在 macOS 真机验证：Chrome 与 Codex 内置浏览器打开 Reframe 时各自都能唤醒已停止的服务），也可 `npm run launcher:install -- chrome|codex` 单独注册。`npm run package:runtime` 在构建后生成 Release 运行包，`scripts/install.sh` 是对应的一键安装器。扩展 ID 由 manifest key 固定。只管理自己启动的服务，不杀不明进程、不绕过端口冲突。
+本机服务：`npm run setup | start | stop | status | doctor | pair`；`setup` 为 macOS 上已安装的 Chrome、Codex 注册原生按需启动器（2026-11-26 已在 macOS 真机验证：Chrome 与 Codex 内置浏览器打开 Reframe 时各自都能唤醒已停止的服务），也可 `npm run launcher:install -- chrome|codex` 单独注册。`npm run package:runtime` 在构建后生成 Release 运行包，`scripts/install.sh` 是对应的一键安装器（签名校验、失败回滚、结果写入 `runtime/upgrade-result.json`）；`scripts/sign-release.mjs` 只在 Release 工作流中签名 `SHA256SUMS`。插件内升级见 `bridge/upgrade.mjs`（`GET /upgrade`、`POST /upgrade/settings`、`POST /upgrade`）与 `lib/service-upgrade.ts`。通道身份统一在 `lib/channel.mjs`；同一数据目录只允许一个服务。扩展 ID 由 manifest key 固定。只管理自己启动的服务，不杀不明进程、不绕过端口冲突。
 
 ## 架构要点
 

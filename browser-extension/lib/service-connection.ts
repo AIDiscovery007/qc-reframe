@@ -1,3 +1,4 @@
+import { extensionChannel } from "./extension-channel";
 import { browser } from "wxt/browser";
 import { bridge as fetchBridge, BridgeError, BridgeTransportError } from "./bridge";
 import type { Preferences } from "./types";
@@ -52,7 +53,7 @@ export function createServiceConnection() {
       }
     }
   };
-  const launcherHelp = "请在 QC-Reframe 安装目录运行 npm start 启动本机服务。";
+  const launcherHelp = `请在 ${extensionChannel.shortName} 安装目录运行 ${extensionChannel.commands.start} 启动本机服务。`;
   const ensureStarted = (signal: AbortSignal) => new Promise<void>((resolve, reject) => {
     let port: ReturnType<typeof browser.runtime.connectNative> | undefined;
     let finished = false;
@@ -84,7 +85,7 @@ export function createServiceConnection() {
     try {
       signal.throwIfAborted();
       if (typeof browser.runtime.connectNative !== "function") return fail("此浏览器不支持本机启动器。");
-      port = browser.runtime.connectNative("com.qc.reframe");
+      port = browser.runtime.connectNative(extensionChannel.hostName);
       port.onMessage.addListener(message);
       port.onDisconnect.addListener(disconnected);
       port.postMessage({ action: "ensure-start" });
