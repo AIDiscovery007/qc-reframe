@@ -6,10 +6,11 @@
 
 后续待发布改动见 [unreleased](unreleased.md)。
 
-最新版本：[v0.8.0 · 插件内升级，开发版与发行版分开运行](v0.8.0.md)。
+最新版本：[v0.8.1 · Claude Code 逆向、插件指令与更干净的上下文](v0.8.1.md)。
 
 | 版本 | 更新内容 | 详情 |
 | --- | --- | --- |
+| 0.8.1 | Claude Code 逆向与 CLI 管理、本机 Agent CLI 检测、可自定义的插件指令、逆向与生图只带任务所需的上下文 | [版本说明](v0.8.1.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.8.1) |
 | 0.8.0 | 插件内检查与一键升级、失败自动恢复旧版本、签名的 Release、源码仓库开发版与发行版分开运行 | [版本说明](v0.8.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.8.0) |
 | 0.7.0 | 一条命令安装与运行包、固定扩展 ID 自动连接、macOS Chrome 与 Codex 打开即启动、旧服务与失效启动器自动替换、中英文首页 | [版本说明](v0.7.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.7.0) |
 | 0.6.0 | macOS Codex 按需启动本机服务、网页面板按需加载、本机服务 Agent 适配器与路由重构、扩展模块化瘦身 | [版本说明](v0.6.0.md) · [下载](https://github.com/AIDiscovery007/qc-reframe/releases/tag/v0.6.0) |
