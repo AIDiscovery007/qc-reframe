@@ -69,7 +69,8 @@ export function inspectProtocol(schema) {
     enumIncludes(field("thread/start", "sandbox"), "read-only"), enumIncludes(field("thread/start", "approvalPolicy"), "never")];
   const checks = {
     models,
-    reverse: [...inference, experimental(), hasField("thread/start", "dynamicTools"), hasField("turn/start", "outputSchema"), inputType("localImage"), inputType("skill")],
+    // Reverse replaces Codex's base prompt with the skill snapshot instead of sending a skill input.
+    reverse: [...inference, experimental(), hasField("thread/start", "dynamicTools"), hasField("thread/start", "baseInstructions"), hasField("turn/start", "outputSchema"), inputType("localImage")],
     generation: [...inference, hasMethod("modelProvider/capabilities/read"), inputType("localImage"), inputType("skill")],
     // Older servers return complete embedded turns; pagination is checked only when requested.
     sessions: [hasMethod("initialize"), ...["thread/list", "thread/read"].map(hasMethod)],

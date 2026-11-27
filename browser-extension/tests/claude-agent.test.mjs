@@ -41,7 +41,7 @@ function handle(m) {
   }
   record({ args, message: m, cwd: process.cwd(), system: fs.readFileSync(flag('--system-prompt-file'), 'utf8'), mcp, served,
     manifest: mcp ? JSON.parse(fs.readFileSync(mcp.mcpServers.reframe.args[1], 'utf8')) : null,
-    env: { DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER, CLAUDE_CODE_DISABLE_AUTO_MEMORY: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY } });
+    env: process.env });
   const tools = cfg.tools || [...(has('--json-schema') ? ['StructuredOutput'] : []), ...(mcp ? ['mcp__reframe__alchemy_inspect_image', 'mcp__reframe__alchemy_read_reference'] : [])];
   out({ type: 'system', subtype: 'init', tools, mcp_servers: mcp ? [{ name: 'reframe', status: cfg.mcpStatus || 'connected' }] : [] });
   for (const event of cfg.events || []) out(JSON.parse(JSON.stringify(event).replaceAll('$MODEL', flag('--model'))));
@@ -95,7 +95,8 @@ test("user receives Claude Code results with ordered images, isolated flags, tas
     ["--input-format", "stream-json"], ["--output-format", "stream-json"], ["--json-schema", '{"type":"object"}'],
     ["--allowedTools", "mcp__reframe__alchemy_inspect_image,mcp__reframe__alchemy_read_reference"]]) assert.equal(value(name), expected, name);
   for (const name of ["--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands", "--verbose"]) assert.ok(run.args.includes(name), name);
-  assert.deepEqual(run.env, { DISABLE_AUTOUPDATER: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
+  assert.equal(run.env.DISABLE_AUTOUPDATER, "1");
+  assert.equal(run.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, "1");
   const content = run.message.message.content;
   assert.deepEqual(content.map(block => block.type === "text" ? block.text : block.type), ["任务提示词", "图 1", "image", "图 2", "image"]);
   const sizes = await Promise.all([content[2], content[4]].map(block => sharp(Buffer.from(block.source.data, "base64")).metadata()));
@@ -113,6 +114,24 @@ test("user receives Claude Code results with ordered images, isolated flags, tas
   assert.ok(stages.some(stage => /检查图 2 的局部细节/.test(stage)));
   assert.notEqual(run.cwd, dir);
   await assert.rejects(access(run.cwd), { code: "ENOENT" });
+});
+
+test("user's Claude Code task does not inherit the Claude Code session that started the bridge", async t => {
+  // Given a bridge started from inside a Claude Code session, plus the user's own login folder, API key, gateway, client certificate and proxy.
+  const { dir, withConfig, captured } = await fixture(t);
+  const host = { CLAUDECODE: "1", AI_AGENT: "claude-code_agent", CLAUDE_EFFORT: "xhigh", CLAUDE_PID: "1", CLAUDE_CODE_ENTRYPOINT: "claude-desktop",
+    CLAUDE_CODE_USER_EMAIL: "host@example.test", CLAUDE_CODE_ACCOUNT_UUID: "host-account", CLAUDE_CODE_SESSION_ID: "host-session",
+    CLAUDE_CODE_HOST_SESSION_ID: "host-session", CLAUDE_CODE_CHILD_NOTES_DIR: "/host/notes", CLAUDE_CODE_MESSAGING_SOCKET: "/host/socket",
+    CLAUDE_CODE_MESSAGING_TOKEN: "host-token", CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL: "1", CLAUDE_AGENT_SDK_VERSION: "0.0.0", MCP_CONNECTION_NONBLOCKING: "1" };
+  const own = { CLAUDE_CONFIG_DIR: join(dir, "claude-config"), ANTHROPIC_API_KEY: "sk-ant-own", ANTHROPIC_BASE_URL: "https://gateway.example.test",
+    CLAUDE_CODE_CLIENT_CERT: join(dir, "client.pem"), HTTPS_PROXY: "http://proxy.example.test:8080" };
+  // When a task runs with a model whose effort the user left to the CLI default.
+  await runClaude({ env: { ...withConfig({ events: success() }), ...host, ...own }, input: [], schema: { type: "object" }, modelSettings: { model: "claude-test-1" } });
+  // Then the CLI keeps the user's login, provider and network settings but receives no host identity, session link, effort or tool toggle.
+  const run = await captured();
+  for (const [key, value] of Object.entries(own)) assert.equal(run.env[key], value, key);
+  for (const key of Object.keys(host)) assert.equal(run.env[key], undefined, key);
+  assert.ok(!run.args.includes("--effort"));
 });
 
 test("user verifies a Claude Code model with a tool-free probe", async t => {

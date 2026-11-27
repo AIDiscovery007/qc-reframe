@@ -5,6 +5,7 @@ import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createImageInspection } from "./inspection.mjs";
+import { referenceToolSpec, readReference } from "./skill-resources.mjs";
 
 // Claude accepts at most 2000 px per edge when a request carries many images and about 5 MB of base64 per image.
 export const CLAUDE_IMAGE_LIMITS = { maxEdge: 2000, maxPixels: 4_000_000, maxBytes: 3_750_000 };
@@ -13,8 +14,7 @@ export function createReframeTools({ images, references }) {
   const inspection = createImageInspection(images, CLAUDE_IMAGE_LIMITS);
   const tools = [
     { name: inspection.spec.name, description: inspection.spec.description.split("\nWhen called via functions.exec")[0], inputSchema: inspection.spec.inputSchema },
-    { name: "alchemy_read_reference", description: "Read a reference from the current task's Alchemy skill snapshot. Only the listed reference names are allowed.",
-      inputSchema: { type: "object", additionalProperties: false, properties: { path: { type: "string" } }, required: ["path"] } },
+    referenceToolSpec,
   ];
   async function call(name, args, { signal } = {}) {
     signal?.throwIfAborted();
@@ -23,11 +23,7 @@ export function createReframeTools({ images, references }) {
       return result.contentItems.map(item => item.type === "inputText" ? { type: "text", text: item.text }
         : { type: "image", mimeType: "image/png", data: item.imageUrl.split(",")[1] });
     }
-    if (name === "alchemy_read_reference") {
-      if (!args || typeof args !== "object" || Array.isArray(args) || Object.keys(args).some(key => key !== "path") || !Object.hasOwn(references, args.path))
-        throw new Error("仅允许读取本次技能的参考文档。");
-      return [{ type: "text", text: references[args.path] }];
-    }
+    if (name === referenceToolSpec.name) return [{ type: "text", text: readReference(references, args) }];
     throw new Error("未知工具。");
   }
   return { tools, call };
