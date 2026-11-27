@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, writeFile, readdir, rm, realpath, stat, lstat } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, stat } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
-import { join, dirname, resolve } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePiExecutable } from "./pi-cli.mjs";
+import { taskResources, taskSystemPrompt } from "./skill-resources.mjs";
 
 const extension = fileURLToPath(new URL("./pi-extension.mjs", import.meta.url));
 const isolation = ["--no-session", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-themes", "--no-approve", "--offline"];
@@ -69,38 +70,6 @@ async function invoke({ dir, args, signal, input, manifest, timeoutMs, onEvent, 
   });
 }
 
-async function taskResources(input, dir, probe) {
-  const images = probe ? [] : input.filter(item => item.type === "localImage").map(item => resolve(item.path));
-  const references = {};
-  const skillText = [];
-  let bytes = 0;
-  if (!probe) for (const skill of input.filter(item => item.type === "skill")) {
-    const path = await realpath(skill.path);
-    const text = await readFile(path, "utf8");
-    bytes += Buffer.byteLength(text);
-    if (bytes > 2 * 1024 * 1024) throw new Error("Pi 技能资料超过大小限制。");
-    skillText.push(text);
-    const root = join(dirname(path), "references");
-    const collect = async (directory, prefix) => {
-      for (const entry of await readdir(directory, { withFileTypes: true }).catch(error => { if (error.code === "ENOENT") return []; throw error; })) {
-        const key = `${prefix}/${entry.name}`, file = join(directory, entry.name);
-        if (entry.isDirectory()) await collect(file, key);
-        else if (entry.isFile() && entry.name.endsWith(".md")) {
-          const text = await readFile(file, "utf8");
-          bytes += Buffer.byteLength(text);
-          if (bytes > 2 * 1024 * 1024) throw new Error("Pi 技能资料超过大小限制。");
-          references[key] = text;
-        }
-      }
-    };
-    const info = await lstat(root).catch(error => { if (error.code !== "ENOENT") throw error; });
-    if (info?.isDirectory()) await collect(root, "references");
-  }
-  const manifest = join(dir, "task.json");
-  await writeFile(manifest, JSON.stringify({ images, references }), { mode: 0o600 });
-  return { images, references, skillText, manifest };
-}
-
 async function contextKey(dataDir) {
   const configDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
   const located = await resolvePiExecutable(process.env, dataDir);
@@ -120,11 +89,9 @@ export async function runPi({ input, schema, cwd, signal, onProgress = () => {},
   if (dynamicTools.some(tool => tool.spec?.name !== "alchemy_inspect_image")) throw new Error("Pi 不支持本次请求的工具。");
   const dir = await mkdtemp(join(tmpdir(), "reframe-pi-"));
   try {
-    const { images, references, skillText, manifest } = await taskResources(input, dir, probe);
+    const { images, references, skillText, manifest } = await taskResources(input, dir, { probe, label: "Pi" });
     signal?.throwIfAborted();
-    const system = [instructions, ...skillText,
-      "仅使用本次提供的图片和技能资料。需要参考文档时调用 alchemy_read_reference，path 使用以下名称：", Object.keys(references).join("\n"),
-      schema ? `只返回符合以下 JSON Schema 的 JSON，不使用 Markdown 代码围栏：${JSON.stringify(schema)}` : ""].join("\n\n");
+    const system = taskSystemPrompt({ instructions, skillText, references, schema });
     const systemPath = join(dir, "system.txt");
     await writeFile(systemPath, system, { mode: 0o600 });
     const args = ["--print", "--mode", "json", ...isolation, "--system-prompt", systemPath, "--append-system-prompt", "",

@@ -27,7 +27,7 @@ const configFile = paths.settings;
 const port = Number(process.env.ALCHEMY_PORT || channel.port);
 const url = `http://127.0.0.1:${port}`;
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-const runtimeKeys = ["CODEX_BIN", "PI_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
+const runtimeKeys = ["CODEX_BIN", "PI_BIN", "CLAUDE_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
 const sleep = (ms, signal) => delay(ms, undefined, { signal });
 const readable = async path => { try { await access(path); return true; } catch { return false; } };
 const cliCommand = path => process.platform === "win32" ? `& '${path.replaceAll("'", "''")}'` : `'${path.replaceAll("'", "'\"'\"'")}'`;

@@ -5,6 +5,8 @@ import { createCliManager } from "./cli.mjs";
 import { createPiCliManager } from "./pi-cli.mjs";
 import { runCodex } from "./codex-agent.mjs";
 import { runPi, readPiCatalog, verifyPiModel } from "./pi-agent.mjs";
+import { createClaudeCliManager } from "./claude-cli.mjs";
+import { runClaude, readClaudeCatalog, verifyClaudeModel } from "./claude-agent.mjs";
 
 /** Records and batches created before Agent selection existed were reversed by Codex. */
 export const LEGACY_AGENT = "codex";
@@ -16,7 +18,7 @@ const unsupported = () => Object.assign(new Error("请选择支持的 Agent。")
  * Built-in reverse Agent adapters. Each adapter is
  *   { id, label, models, cli?, run, compatibility? }
  * - models: model store ({ busy, selectedModel, list, refresh, start, selection, invalidate, reset, close })
- * - cli: optional CLI manager ({ busy, status, check, update?, install?, close })
+ * - cli: optional CLI manager ({ busy, peek, status, detect, check, update?, install?, close }); `detect` inspects locally only
  * - run: runner described in agent.mjs (`runAgent`)
  * - compatibility: true when the Agent runs through the Codex app-server and is gated by its compatibility report.
  * A new local Agent joins by adding an adapter here; HTTP routes, admission and UI read the registry.
@@ -33,9 +35,13 @@ export async function builtinAgents({ cwd, dataDir, configDir, compatibility, re
     } finally { resetSessions(); }
   } });
   const piCli = overrides.pi?.cli || createPiCliManager({ dataDir, onUpdated: () => piModels.reset() });
+  const claudeModels = overrides.claude?.models || await createModelStore({ dataDir: configDir, cwd, filename: "claude-model-settings.json",
+    readCatalog: readClaudeCatalog, verify: verifyClaudeModel });
+  const claudeCli = overrides.claude?.cli || createClaudeCliManager({ onUpdated: () => claudeModels.reset() });
   return [
     { id: "codex", label: "Codex", models: codexModels, cli: codexCli, run: runCodex, compatibility: true },
     { id: "pi", label: "Pi", models: piModels, cli: piCli, run: runPi },
+    { id: "claude", label: "Claude Code", models: claudeModels, cli: claudeCli, run: runClaude },
   ];
 }
 
@@ -57,11 +63,21 @@ export async function createAgentRegistry({ dataDir, adapters }) {
     if (!adapter) throw unsupported();
     return adapter;
   };
+  // `cli: null` means not detected yet (or detection failed), never "missing"; only installation facts leave the manager.
+  const installation = cli => {
+    const state = cli?.peek?.();
+    return state ? { installed: !!state.installed, version: state.version || null, source: state.source } : null;
+  };
   const view = () => ({ selected, agents: adapters.map(({ id, label, models, cli }) => ({
-    id, label, model: models.selectedModel, installable: typeof cli?.install === "function",
+    id, label, model: models.selectedModel, installable: typeof cli?.install === "function", cli: installation(cli),
   })) });
   return {
     get, view,
+    /** Inspects every Agent CLI on this machine without update checks; one failure leaves only that Agent unknown. */
+    async detect() {
+      await Promise.allSettled(adapters.map(adapter => adapter.cli?.detect?.()));
+      return view();
+    },
     /** Adapter that owns a frozen snapshot; snapshots without `agent` keep the legacy Codex meaning. */
     frozen: settings => get(settings?.agent ?? LEGACY_AGENT),
     get selected() { return selected; },

@@ -8,7 +8,7 @@
 
 <p align="center"><a href="README.md">English</a> · 简体中文</p>
 
-QC-Reframe 是一个浏览器扩展，加上一个运行在你电脑上的小服务。在任意网页把鼠标停在图片上，点圆形 **R** 按钮，你自己的 Codex（或 Pi）就会细看这张图，写出详细的提示词，这一步叫「逆向」。接着可以直接生成新图，也可以换上你自己的照片做主体。所有内容都保存在你的电脑上。
+QC-Reframe 是一个浏览器扩展，加上一个运行在你电脑上的小服务。在任意网页把鼠标停在图片上，点圆形 **R** 按钮，你自己的 Codex、Pi 或 Claude Code 就会细看这张图，写出详细的提示词，这一步叫「逆向」。接着可以直接生成新图，也可以换上你自己的照片做主体。所有内容都保存在你的电脑上。
 
 | 你的主体 | 参考图 | 生成结果 |
 | :---: | :---: | :---: |
@@ -55,7 +55,7 @@ curl -fsSL https://github.com/AIDiscovery007/qc-reframe/releases/latest/download
 ## 怎么用
 
 1. **打开。** 点浏览器工具栏里的 QC-Reframe 图标，再点 **工作台**。它会自动连上本机服务，不用任何设置。
-2. **选模型（只需第一次）。** 打开 **设置中心 → 插件模型**，选 Codex 或 Pi 和一个模型，点 **验证并使用**。这会发一次很短的测试请求。
+2. **选模型（只需第一次）。** 打开 **设置中心 → 插件模型**，选 Codex、Pi 或 Claude Code 和一个模型，点 **验证并使用**。这会发一次很短的测试请求。
 3. **选图。** 在 Pinterest 或任意网站，把鼠标停在图片上，点圆形 **R** 按钮。选 **立即逆向**，或选 **加入 Reframe** 先存起来。也可以右键图片。
 4. **选路径。** 在工作台打开这张图（存起来的图在 **项目记录 → 待逆向**），选你想要的效果：
    - **提取风格**：上传你自己的照片，换上参考图的画风。
@@ -66,7 +66,7 @@ curl -fsSL https://github.com/AIDiscovery007/qc-reframe/releases/latest/download
 
 ## 须知
 
-- **需要：** Node.js 22.15+、能加载扩展的 Chrome 或其他 Chromium 浏览器，以及已登录的 [Codex CLI](https://developers.openai.com/codex/cli)。Pi 需要 Node.js 22.19+。生图也可以用 OpenAI 兼容 API、Gemini 或本机 Magpie 网关。一条命令安装支持 macOS 和 Linux；Windows 请从源码安装。
+- **需要：** Node.js 22.15+、能加载扩展的 Chrome 或其他 Chromium 浏览器，以及已登录的 [Codex CLI](https://developers.openai.com/codex/cli)。Pi 需要 Node.js 22.19+。Claude Code 需要已登录的 [Claude Code CLI](https://code.claude.com/docs/en/setup)，只用于逆向，不能生图。生图也可以用 OpenAI 兼容 API、Gemini 或本机 Magpie 网关。一条命令安装支持 macOS 和 Linux；Windows 请从源码安装。
 - **重启电脑后：** Mac 上直接打开 QC-Reframe，服务会自己启动。其他系统运行扩展里显示的命令，或 `cd ~/QC-Reframe && npm start`。
 - **更新：** v0.8.0 起，打开 **设置中心 → 本机连接**，点 **升级到** 即可；有新版本时侧栏会显示 **新版本**。扩展会自己重新加载，之后刷新已打开的网页。v0.7.0 或更早版本请再运行一次安装命令，然后在 `chrome://extensions` 点 QC-Reframe 的重新加载按钮，并刷新已打开的网页。项目都会保留。
 - **以前用源码装过 v0.6.0 或更早版本？** 请升级原来那份：把上面的提示词交给 Agent，或按[升级步骤](browser-extension/docs/INSTALL_WITH_CODEX.md#日常启动升级和排错)操作。扩展 ID 现在是固定的，所以要先移除旧的 QC-Reframe 扩展，再加载新的 `.output/chrome-mv3`，只需一次。项目都会保留。

@@ -27,6 +27,7 @@ flowchart TD
   Runtime --> Agent[逆向 Agent 注册表]
   Agent --> Codex[Codex adapter：每任务独立进程]
   Agent --> Pi[Pi adapter：每任务独立进程]
+  Agent --> Claude[Claude Code adapter：每任务独立 claude -p 进程]
   Runtime --> Generation[Codex 或 API 生图]
 ```
 
@@ -71,7 +72,7 @@ flowchart TD
 
 ## 逆向 Agent
 
-`bridge/agents.mjs` 是逆向 Agent 的 seam。`createAgentRegistry({ dataDir, adapters })` 校验并登记 adapter，持久化当前选择（`agent-settings.json`，原子替换），向界面提供 `view()` 目录（ID、名称、当前模型、是否可安装），并以 `frozen(snapshot)` 按任务冻结的 `modelSettings.agent` 解析执行者：缺少字段按 `LEGACY_AGENT`（Codex）解释，未登记 ID 明确失败，不回退到当前选择。`builtinAgents()` 装配现有 Codex 与 Pi adapter；新增本机 Agent 只需在此登记一个对象：
+`bridge/agents.mjs` 是逆向 Agent 的 seam。`createAgentRegistry({ dataDir, adapters })` 校验并登记 adapter，持久化当前选择（`agent-settings.json`，原子替换），向界面提供 `view()` 目录（ID、名称、当前模型、是否可安装及最近一次检测到的 CLI 安装情况），`detect()` 供 `GET /agents?detect=1` 在本机检查所有 adapter 的 CLI（只看安装与版本，不查询更新），未检测或检测失败为 `null`（未知），不等同于未安装；并以 `frozen(snapshot)` 按任务冻结的 `modelSettings.agent` 解析执行者：缺少字段按 `LEGACY_AGENT`（Codex）解释，未登记 ID 明确失败，不回退到当前选择。`builtinAgents()` 装配现有 Codex、Pi 与 Claude Code adapter；新增本机 Agent 只需在此登记一个对象：
 
 ```js
 { id: "my-agent", label: "My Agent", models, cli?, run, compatibility? }
@@ -79,15 +80,17 @@ flowchart TD
 // models：createModelStore 实例（目录、验证、选择、busy、close）；cli 可选，提供 install 时界面显示安装入口
 ```
 
-`bridge/agent.mjs` 只构造 Alchemy 输入、图片顺序、取证工具和输出合同，再调用冻结 adapter 的 `run`，不认识具体 Agent。`codex-agent.mjs` 是 Codex adapter（app-server JSON-RPC，也供模型验证与 Codex 内置生图复用）；`models.mjs` 为每个 adapter 独立保存模型选择，切换不改动全局 CLI 设置或凭据。扩展端 `lib/agents.ts` 只校验 ID 格式并构造 `?agent=` 查询，支持哪些 Agent 由 bridge 注册表决定；界面名称来自目录，不再硬编码 Codex/Pi。
+`bridge/agent.mjs` 只构造 Alchemy 输入、图片顺序、取证工具和输出合同，再调用冻结 adapter 的 `run`，不认识具体 Agent。`codex-agent.mjs` 是 Codex adapter（app-server JSON-RPC，也供模型验证与 Codex 内置生图复用）；`models.mjs` 为每个 adapter 独立保存模型选择，切换不改动全局 CLI 设置或凭据。扩展端 `lib/agents.ts` 只校验 ID 格式并构造 `?agent=` 查询，支持哪些 Agent 由 bridge 注册表决定；界面名称来自目录，不再硬编码 Codex/Pi。设置未完成（未选模型或 Codex 缺失）时，`lib/use-agent-detection.ts` 请求检测；`missingAgentCli`/`setupNotice` 只在所选 Agent 的 CLI 被检测为缺失时列出已安装的其他 Agent，由用户在卡片上切换，不自动改变选择。
 
 `bridge/pi-agent.mjs` 管理 Pi 子进程协议、模型目录、错误与取消；`pi-extension.mjs` 只开放本次图片取证及技能资料读取。图片操作复用 `inspection.mjs`，没有第二套裁切规则。Pi 不提供 Codex 的 OS sandbox，因此通过禁用默认工具、个人扩展和上下文文件限制模型可调用能力；该限制不声称隔离 CLI 自身或模型服务。
 
+`bridge/claude-agent.mjs` 每个任务启动一个 `claude -p` 进程（stream-json 输入输出），只使用 Claude Code 文档列出的参数：`--setting-sources ""` 不加载用户、项目和本地设置（因此不运行 hooks、不读 CLAUDE.md，也不使用设置文件中的 `apiKeyHelper`/`env`），`--tools ""` 关闭内置工具，`--strict-mcp-config` 只加载本次 `--mcp-config`，`--allowedTools` 只放行 Reframe 两个工具，`--no-session-persistence` 不保存会话，`--json-schema` 约束结果。`claude-mcp.mjs` 是这次任务的 stdio MCP 服务，只从私有任务清单读取本次图片和技能资料，取证复用 `inspection.mjs`，并按 Claude 的图片上限（单边 2000px、单图约 3.75MB）缩小输出；图片按图序内联在用户消息中。启动后核对 `system/init` 的工具与 MCP 状态，出现预期外工具或 Reframe 工具未连接时明确失败；响应模型与所选模型不符时停止。账号上下文取自 `claude auth status --json` 与实际可执行文件，变化后要求重新验证。CLI 没有文档化的模型列表命令，模型目录因此读取 stream-json 的 initialize 握手（官方 Agent SDK `supportedModels()` 的同一来源），读取目录不调用模型。
+
 任务和排队批次冻结逆向 Agent/provider/model/推理参数；自动生图另冻结所选生图渠道、模型及 API 配置。两阶段仍由既有 Task Runtime 和 Batch Store 调度，取消、保存失败及重启恢复使用原规则。会话正文读取独立使用 Codex，只把既有显式快照交给所选逆向 Agent。
 
-CLI 管理由 `cli.mjs` 与 `pi-cli.mjs` 分别验证安装来源，复用固定参数的子进程执行器。`/cli/*?agent=<id>` 与 `/models?agent=<id>` 显式指定已登记的管理目标；省略时兼容 Codex。安装更新与任务、模型验证全局互斥，完成后只清除对应 Agent 的模型信任；Codex 更新还复查兼容性并重建会话读取器。
+CLI 管理由 `cli.mjs`、`pi-cli.mjs` 与 `claude-cli.mjs` 分别验证安装来源，复用固定参数的子进程执行器。`/cli/*?agent=<id>` 与 `/models?agent=<id>` 显式指定已登记的管理目标；省略时兼容 Codex。安装更新与任务、模型验证全局互斥，完成后只清除对应 Agent 的模型信任；Codex 更新还复查兼容性并重建会话读取器。
 
-Pi 新安装使用固定官方 npm 包、私有暂存目录和禁用生命周期脚本的安装参数；验证成功后原子替换当前安装指针。外部 npm 安装先核对包身份、真实入口和运行时；具备原生自更新能力时调用原 CLI 的固定 `update --self --no-approve`，由 Pi 从自身安装位置确定原 prefix，不把资源包更新当作 CLI 升级。不支持原生自更新时仍仅允许已验证 npm manager 的原 prefix 更新。更新后复检路径、版本与 Reframe 接口；失败或取消时，已发生部分替换也须清除旧模型信任。App 或无法确认来源的安装不自动覆盖。管理操作不接受任意命令或路径，也不读取或复制登录凭据。设置中的管理目标独立于已保存的逆向 Agent；旧 `section=cli` 和 Pi 恢复入口只定位对应管理区域。
+Pi 新安装使用固定官方 npm 包、私有暂存目录和禁用生命周期脚本的安装参数；验证成功后原子替换当前安装指针。外部 npm 安装先核对包身份、真实入口和运行时；具备原生自更新能力时调用原 CLI 的固定 `update --self --no-approve`，由 Pi 从自身安装位置确定原 prefix，不把资源包更新当作 CLI 升级。不支持原生自更新时仍仅允许已验证 npm manager 的原 prefix 更新。更新后复检路径、版本与 Reframe 接口；失败或取消时，已发生部分替换也须清除旧模型信任。App 或无法确认来源的安装不自动覆盖。Claude Code 只对官方安装器的 `~/.local/bin/claude` 入口（指向 `versions/<版本>`）运行固定的 `claude update`；npm、Homebrew、桌面 App 与自定义安装只显示原渠道的更新方式，并以 npm `stable` 标签作版本参考。管理操作不接受任意命令或路径，也不读取或复制登录凭据。设置中的管理目标独立于已保存的逆向 Agent；旧 `section=cli`、Pi 与 Claude Code 恢复入口只定位对应管理区域。
 
 ## Bridge 装配
 

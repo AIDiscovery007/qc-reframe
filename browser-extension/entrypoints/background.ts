@@ -233,7 +233,7 @@ export default defineBackground(() => {
     switch (message.type) {
       case "alchemy:open-workspace": {
         if (message.view !== undefined && !["tasks", "settings"].includes(message.view)) throw new Error("无效工作台页面");
-        if (message.section !== undefined && (message.view !== "settings" || !["cli", "pi-cli", "models", "generation", "connection"].includes(message.section))) throw new Error("无效设置页面");
+        if (message.section !== undefined && (message.view !== "settings" || !["cli", "pi-cli", "claude-cli", "models", "generation", "connection"].includes(message.section))) throw new Error("无效设置页面");
         const id = crypto.randomUUID();
         // Explicit UI context wins over another view's global selection and mode.
         const draft = message.draft;
@@ -378,7 +378,7 @@ export default defineBackground(() => {
         await savePreferences({ mode: message.mode });
         return;
       case "alchemy:query":
-        if (typeof message.path !== "string" || !/^\/(health|agents|models(?:\?agent=[a-z][a-z0-9-]{0,31})?|cli\/status(?:\?agent=[a-z][a-z0-9-]{0,31})?|jobs(?:\/[\w-]+)?|projects(?:\/[\da-f]{64})?)$/.test(message.path))
+        if (typeof message.path !== "string" || !/^\/(health|agents(?:\?detect=1)?|models(?:\?agent=[a-z][a-z0-9-]{0,31})?|cli\/status(?:\?agent=[a-z][a-z0-9-]{0,31})?|jobs(?:\/[\w-]+)?|projects(?:\/[\da-f]{64})?)$/.test(message.path))
           throw new Error("无效请求");
         return bridge(`${message.path}${showHiddenProjects && ["/projects", "/jobs", "/health"].includes(message.path) ? "?includeHidden=true" : ""}`, token);
       case "alchemy:gallery": {

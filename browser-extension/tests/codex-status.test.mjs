@@ -31,6 +31,13 @@ test("Given a historical Pi CLI failure, recovery opens Pi management without ch
   assert.equal(recoverySection("Pi 模型当前不可用"), "models");
 });
 
+test("Given a Claude Code failure, recovery opens Claude Code CLI management only for installation problems", () => {
+  for (const message of ["找不到 Claude Code CLI，请先安装 Claude Code 或配置 CLAUDE_BIN。", "Claude Code 无法启动，请检查路径", "CLAUDE_BIN 指定的 Claude Code 不存在，请修正配置后重试。"])
+    assert.equal(recoverySection(message), "claude-cli");
+  for (const message of ["Claude Code 未登录，请在终端运行 claude auth login 后刷新模型列表。", "Claude Code 无法使用所选模型，请刷新模型列表后重新选择。", "Claude Code 登录账号或本机程序已变化，请刷新模型列表并重新验证。"])
+    assert.equal(recoverySection(message), "models");
+});
+
 test("Given built-in generation errors, recovery targets Codex CLI before text-model keywords", () => {
   for (const message of ["Codex 内置生图：请先登录", "Codex 内置生图：执行模型缺失，请检查配置", "Codex 内置生图：账号已变化，请重新验证", "Codex 内置生图：IMAGEGEN_SKILL_PATH 不可用"])
     assert.equal(recoverySection(message), "cli");

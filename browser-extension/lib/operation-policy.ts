@@ -89,5 +89,5 @@ export const UI_RESPONSE_TIMEOUT = 35_000;
 export const PORT_KEEP_ALIVE = 20_000;
 export function bridgeTimeout(path: string) {
   return path.startsWith("/sessions") || path.startsWith("/batches") || path.endsWith("/input") || path === "/jobs" ? 120_000
-    : path.startsWith("/models") || path.startsWith("/cli") ? 30_000 : 15_000;
+    : path.startsWith("/models") || path.startsWith("/cli") || path === "/agents?detect=1" ? 30_000 : 15_000;
 }

@@ -63,8 +63,10 @@ export async function createBridge({
   imageAction = openGeneratedImage,
   models,
   piModels,
+  claudeModels,
   cli,
   piCli,
+  claudeCli,
   compatibility = defaultCompatibility,
   sessions,
   sessionReadTimeoutMs = 120_000,
@@ -82,7 +84,7 @@ export async function createBridge({
   sessions ||= createSessionStore({ cwd: root, dataDir: paths.records });
   const agents = await createAgentRegistry({ dataDir: paths.config, adapters: await builtinAgents({
     cwd: root, dataDir, configDir: paths.config, compatibility, resetSessions: () => sessions.resetReader?.(),
-    overrides: { codex: { models, cli }, pi: { models: piModels, cli: piCli } },
+    overrides: { codex: { models, cli }, pi: { models: piModels, cli: piCli }, claude: { models: claudeModels, cli: claudeCli } },
   }) });
   // Codex also hosts session reading and built-in generation, so its CLI state is reported regardless of the reverse Agent.
   const codexHost = agents.get("codex");

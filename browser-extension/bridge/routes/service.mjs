@@ -81,7 +81,12 @@ export async function serviceRoutes(request, app) {
     json(200, req.method === "GET" ? imageSettings.view() : await imageSettings.save(await readBody(req)));
     return true;
   }
-  if (req.method === "GET" && path === "/agents") { validateQuery([]); json(200, agents.view()); return true; }
+  if (req.method === "GET" && path === "/agents") {
+    validateQuery(["detect"]);
+    const detect = query.get("detect");
+    if (detect !== null && detect !== "1") throw bad("无效查询参数");
+    json(200, detect ? await agents.detect() : agents.view()); return true;
+  }
   if (req.method === "POST" && path === "/agents/select") {
     const body = await readBody(req);
     if (!body || Object.keys(body).some(key => key !== "agent")) throw bad("无效 Agent 设置");

@@ -761,6 +761,18 @@ test("user manages Pi and other registered Agents through fixed authenticated me
   assert.equal(calls.at(-1).url, "http://127.0.0.1:43187/cli/install?agent=local-cli");
 });
 
+test("user's workspace may ask the service to detect Agent CLIs only through the fixed detection query", async () => {
+  // Given a paired workspace, When it asks for the Agent catalog with or without detection, Then only the fixed flag is forwarded.
+  const calls = [];
+  const { handlers } = await background(async url => { calls.push(url); return { ok: true, json: async () => ({ selected: "codex", agents: [] }) }; });
+  const sender = { id: "test", url: "chrome-extension://test/workspace.html" };
+  const send = message => new Promise(resolve => handlers.message(message, sender, resolve));
+  for (const path of ["/agents", "/agents?detect=1"]) assert.equal((await send({ type: "alchemy:query", path })).ok, true);
+  for (const path of ["/agents?detect=0", "/agents?detect=1&detect=1", "/agents?detect=1&command=x", "/agents?force=1"])
+    assert.ok((await send({ type: "alchemy:query", path })).error);
+  assert.deepEqual(calls, ["http://127.0.0.1:43187/agents", "http://127.0.0.1:43187/agents?detect=1"]);
+});
+
 test("generation comparison references validate both IDs and retain authentication in the background", async () => {
   const calls = [];
   const { handlers } = await background(async (url, options) => {
@@ -1753,7 +1765,7 @@ test('request port cannot let a content script query local sessions or invoke ar
 test("recovery opens the requested settings section with the unsaved workspace draft", async () => {
   const { handlers, tabs, sessionStorage } = await background(() => assert.fail("recovery navigation must not call Codex"));
   const send = message => new Promise(resolve => handlers.message(message, { id: "test", url: "chrome-extension://test/popup.html" }, resolve));
-  for (const section of ["cli", "pi-cli", "models", "generation", "connection"]) {
+  for (const section of ["cli", "pi-cli", "claude-cli", "models", "generation", "connection"]) {
     const draft = { instructions: { key: "keep my pending edit" } };
     assert.equal((await send({ type: "alchemy:open-workspace", view: "settings", section, draft })).ok, true);
     const url = new URL(tabs.at(-1).url);

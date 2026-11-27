@@ -46,7 +46,7 @@ export type SurfaceSyncEnv = {
 };
 export type SurfaceSync = ReturnType<typeof createSurfaceSync>;
 
-const settingsSections = new Set<RecoverySection>(["models", "generation", "connection", "pi-cli"]);
+const settingsSections = new Set<RecoverySection>(["models", "generation", "connection", "pi-cli", "claude-cli"]);
 
 /**
  * Keeps one Reframe surface (quick panel or workspace) in step with the background: restores

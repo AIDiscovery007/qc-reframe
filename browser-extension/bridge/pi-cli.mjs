@@ -244,5 +244,7 @@ export function createPiCliManager({ env = process.env, dataDir, run = runCliCom
   };
   return { get busy() { return !!controller; }, peek: () => installation ? view() : null,
     async status() { if (!controller && (!installation || now() - inspectedAt >= 10_000)) await discover(); if (!closed && !controller && installation?.version && (lastAttempt === undefined || now() - lastAttempt >= 86_400_000)) void check().catch(() => {}); return view(); },
+    /** Local inspection only, for first-connection detection: never contacts the update service. */
+    async detect() { if (!controller && (!installation || now() - inspectedAt >= 10_000)) await discover(); return view(); },
     check, install: () => begin(true), update: () => begin(false), close() { closed = true; controller?.abort(); } };
 }
