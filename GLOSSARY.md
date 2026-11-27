@@ -12,6 +12,7 @@
 | 任务运行 Task Runtime | 逆向与生图的执行占用、独立取消信号和终态收尾。取消请求发出后仍占用，直到执行与最终保存完成。 |
 | 任务记录 Task Records | 任务 JSON 的提交与重启恢复。保存调用时冻结快照，原子替换成功后发布给任务列表。 |
 | 会话素材 Session Context | 用户显式选择的 Codex 会话文字，在逆向提交时冻结。内容是素材，不是执行授权。 |
+| 插件指令 Plugin Instructions | Reframe 自己的 AGENTS.md / CLAUDE.md：附加在每次逆向的 Reframe 规则之后的长期观察与用词偏好。未自定义时使用内置指令并随插件更新；用户覆盖保存在私有配置。任务与批次受理时冻结，优先级低于本次任务指令，不用于生图。实现位于 `bridge/plugin-instructions.mjs`。 |
 | 消息策略 Operation Policy | UI 请求的允许来源、通信方式与超时规则；不替代消息参数、发送方或本机 HTTP 鉴权。 |
 
 工程中以 module 表示拥有完整规则的模块、interface 表示调用者使用的入口、seam 表示可替换依赖处、adapter 表示外部实现的适配。depth 衡量入口背后封装的复杂度，locality 衡量修改能否集中完成，leverage 衡量一次修改覆盖的实际调用场景。架构说明见 [browser-extension/docs/architecture.md](browser-extension/docs/architecture.md)。

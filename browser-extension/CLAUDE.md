@@ -74,7 +74,7 @@ node agent-tool/ui.mjs gate --tier browser             # 全部登记场景 + �
 
 - **兼容命名**：内部 `alchemy:*` 消息、`qc-alchemy` 服务标识、`ALCHEMY_*` 环境变量和 `alchemy` 技能名保留，禁止全仓机械改名。
 - **快照与旧数据**：在途和历史任务按提交时快照执行，不重算、不改写；旧记录缺少字段时保持旧解释（如图序为「主体在前、参考最后」、缺 Agent 视为 Codex）。存储改动须覆盖旧记录恢复与服务重启。
-- **逆向上下文**：只传 Reframe 任务说明、所选路径技能快照、本次图片、用户任务指令与 Reframe 两个工具；不加载用户或项目的 AGENTS.md/CLAUDE.md、技能、MCP、插件、hooks、记忆或宿主会话环境。Codex 逆向在私有空目录以 `baseInstructions` 运行（`ISOLATION`），Claude Code 过滤宿主会话环境变量。
+- **逆向与生图上下文**：逆向只传 Reframe 任务说明、所选路径技能快照、本次图片、用户任务指令、插件指令（`bridge/plugin-instructions.mjs`，Reframe 自己的 AGENTS.md/CLAUDE.md，默认内置、可在设置中心覆盖、受理时冻结）与 Reframe 两个工具；Codex 内置生图只传 Reframe 生图规则、已确认提示词与排除项、按受理顺序的图片和内置 `image_gen`（不发送 imagegen skill）。都不加载用户或项目的 AGENTS.md/CLAUDE.md、技能、MCP、插件、hooks、记忆或宿主会话环境。Codex 两者都在私有空目录以 `baseInstructions` 运行（`ISOLATION`，生图线程另开 `image_generation`），Claude Code 过滤宿主会话环境变量。
 - **图片顺序**：新输入以 `referenceIndex=0` 将参考图设为图 1；逆向提示词、附图数组、取证编号与生图附图顺序必须一致。改序、改主体或改任务指令后须重新逆向。
 - **不静默回退**：模型、Agent、生图渠道不可用时明确失败，不自动重试、不回退到其他配置或全局默认模型。
 - **迟到响应**：前端按项目/模式/版本上下文与 revision 丢弃旧响应；失败保留原输入。

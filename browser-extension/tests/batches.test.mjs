@@ -14,7 +14,7 @@ async function setup(t, immediate = false) {
   const reverse = [], generation = [];
   const hold = calls => args => new Promise((resolve, reject) => { calls.push({ args, resolve, reject }); args.signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true }); });
   const models = { busy: false, selectedModel: 'test', selection: () => ({ model: 'test', reasoningEffort: 'low' }), invalidate: async () => {}, close() {} };
-  const options = { dataDir: dir, skillPath, generationContext: async () => ({ model: 'test', provider: 'fixture', reasoningEffort: 'low', codexGeneration: true }), generationSkillPath: skillPath, agent: immediate ? async () => { reverse.push({}); return result; } : hold(reverse), generator: immediate ? async () => { generation.push({}); return decodeImage(image); } : hold(generation), models, compatibility: { getCompatibility: async () => ({}), snapshot: () => ({}) } };
+  const options = { dataDir: dir, skillPath, generationContext: async () => ({ model: 'test', provider: 'fixture', reasoningEffort: 'low', codexGeneration: true }), agent: immediate ? async () => { reverse.push({}); return result; } : hold(reverse), generator: immediate ? async () => { generation.push({}); return decodeImage(image); } : hold(generation), models, compatibility: { getCompatibility: async () => ({}), snapshot: () => ({}) } };
   let app = await createBridge(options);
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening');
   const request = async (path, body) => { const res = await fetch(`http://127.0.0.1:${app.server.address().port}${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${app.token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); return { status: res.status, body: await res.json() }; };
@@ -48,6 +48,24 @@ test('batch holds two whole-flow slots, freezes queued inputs and supports idemp
   const stopped = await request(`/batches/${submitted.body.id}/cancel`, { projectId: projects[2].projectId }); assert.equal(stopped.status, 200);
   assert.equal(reverse[2].args.signal.aborted, true);
   reverse[1].resolve(result); await waitFor(() => generation.length === 2); generation[1].resolve(decodeImage(image));
+  await waitFor(async () => (await request('/batches')).body[0].items.every(x => ['completed','cancelled','rejected'].includes(x.status)));
+});
+test('batch items keep the plugin instruction frozen when the batch was accepted', async t => {
+  // Given a saved plugin instruction and an accepted batch with one queued item.
+  const { request, reverse, generation, projects } = await setup(t);
+  const view = (await request('/plugin-instructions')).body;
+  const saved = await request('/plugin-instructions', { text: '批量受理时的指令', revision: view.revision }); assert.equal(saved.status, 200);
+  const submitted = await request('/batches', { requestId: 'instructions', projects: projects.slice(0, 3), language: 'zh' }); assert.equal(submitted.status, 202);
+  await waitFor(() => reverse.length === 2);
+  // When the user edits the instruction before the queued item starts.
+  assert.equal((await request('/plugin-instructions', { text: '之后修改的指令', revision: saved.body.revision })).status, 200);
+  reverse[0].resolve(result); await waitFor(() => generation.length === 1); generation[0].resolve(decodeImage(image));
+  await waitFor(() => reverse.length === 3);
+  // Then every item, including the one that started later, uses the accepted snapshot, and the batch view does not expose it.
+  assert.deepEqual(reverse.map(call => call.args.pluginInstructions), Array(3).fill('批量受理时的指令'));
+  assert.equal(JSON.stringify((await request('/batches')).body).includes('批量受理时的指令'), false);
+  reverse[1].resolve(result); reverse[2].resolve(result);
+  await waitFor(() => generation.length === 3); generation[1].resolve(decodeImage(image)); generation[2].resolve(decodeImage(image));
   await waitFor(async () => (await request('/batches')).body[0].items.every(x => ['completed','cancelled','rejected'].includes(x.status)));
 });
 test('stop remaining cancels queued items without cancelling running flow and skips busy projects', async t => {

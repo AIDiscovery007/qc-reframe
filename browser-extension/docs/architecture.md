@@ -80,15 +80,15 @@ flowchart TD
 // models：createModelStore 实例（目录、验证、选择、busy、close）；cli 可选，提供 install 时界面显示安装入口
 ```
 
-`bridge/agent.mjs` 只构造 Alchemy 输入、图片顺序、取证工具和输出合同，再调用冻结 adapter 的 `run`，不认识具体 Agent。`codex-agent.mjs` 是 Codex adapter（app-server JSON-RPC，也供模型验证与 Codex 内置生图复用）；`models.mjs` 为每个 adapter 独立保存模型选择，切换不改动全局 CLI 设置或凭据。扩展端 `lib/agents.ts` 只校验 ID 格式并构造 `?agent=` 查询，支持哪些 Agent 由 bridge 注册表决定；界面名称来自目录，不再硬编码 Codex/Pi。设置未完成（未选模型或 Codex 缺失）时，`lib/use-agent-detection.ts` 请求检测；`missingAgentCli`/`setupNotice` 只在所选 Agent 的 CLI 被检测为缺失时列出已安装的其他 Agent，由用户在卡片上切换，不自动改变选择。
+`bridge/agent.mjs` 只构造 Alchemy 输入、图片顺序、取证工具和输出合同，再调用冻结 adapter 的 `run`，不认识具体 Agent。`reverseInstructions()` 把受理时冻结的插件指令接在 Reframe 逆向规则之后、放进 `<plugin-instructions>` 边界并声明其优先级低于本次任务指令；三个 adapter 都以这段 `instructions` 构造系统提示，因此插件指令覆盖全部 Agent 与路径，不进入用户输入项。`plugin-instructions.mjs` 读取随插件分发的 `plugin-instructions.md` 与私有覆盖 `config/plugin-instructions.md`，`GET/POST /plugin-instructions` 仅供扩展使用，保存在服务 mutation lock 内按 revision 拒绝旧版本并原子替换。`codex-agent.mjs` 是 Codex adapter（app-server JSON-RPC，也供模型验证与 Codex 内置生图复用）；`models.mjs` 为每个 adapter 独立保存模型选择，切换不改动全局 CLI 设置或凭据。扩展端 `lib/agents.ts` 只校验 ID 格式并构造 `?agent=` 查询，支持哪些 Agent 由 bridge 注册表决定；界面名称来自目录，不再硬编码 Codex/Pi。设置未完成（未选模型或 Codex 缺失）时，`lib/use-agent-detection.ts` 请求检测；`missingAgentCli`/`setupNotice` 只在所选 Agent 的 CLI 被检测为缺失时列出已安装的其他 Agent，由用户在卡片上切换，不自动改变选择。
 
-Codex 逆向与模型验证在每次新建、结束即删除的私有空目录中运行（`withPrivateFolder`）。`thread/start` 以 `baseInstructions` 替换 Codex 自带的基础提示词，内容只有 Reframe 任务说明和所选路径的技能快照；参考资料经 `alchemy_read_reference` 按快照内的名称读取，不再发送 skill 输入项。`config` 只为本次线程叠加 `ISOLATION`：不读项目 AGENTS.md，不附权限、环境、协作模式与 Apps 说明，关闭技能目录、网页搜索、子 Agent、插件、Apps、浏览器、hooks、shell、文件看图、向用户提问和生图，并把当前生效配置里的每个 MCP server 设为 `enabled: false`（按表写入，名称可含点）；不写 `~/.codex`。CLI 没有开关的部分仍会进入上下文：用户全局 `~/.codex/AGENTS.md`，以及模型目录固定的 code-mode 工具（`exec`/`wait`、apply_patch、时钟、MCP 资源列表等；sandbox 只读，且没有可用的 MCP server）。模型目录也在私有目录读取，使账号上下文与逆向一致，不受 bridge 目录的项目设置影响。Codex 内置生图仍在 bridge 目录以 `developerInstructions` 运行，因为它依赖 imagegen skill 与 `image_gen`。兼容性检查要求 `thread/start` 支持 `baseInstructions`，缺失时只禁用逆向。
+Codex 逆向、内置生图与模型验证在每次新建、结束即删除的私有空目录中运行（`withPrivateFolder`）。`thread/start` 以 `baseInstructions` 替换 Codex 自带的基础提示词，内容只有 Reframe 任务说明和所选路径的技能快照；参考资料经 `alchemy_read_reference` 按快照内的名称读取，不再发送 skill 输入项。`config` 只为本次线程叠加 `ISOLATION`：不读项目 AGENTS.md，不附权限、环境、协作模式与 Apps 说明，关闭技能目录、网页搜索、子 Agent、插件、Apps、浏览器、hooks、shell 及其启动时的 shell 环境快照、文件看图与向用户提问，生图只在内置生图线程开启，并把当前生效配置里的每个 MCP server 设为 `enabled: false`（按表写入，名称可含点）；不写 `~/.codex`。CLI 没有开关的部分仍会进入上下文：用户全局 `~/.codex/AGENTS.md`，以及模型目录固定的 code-mode 工具（`exec`/`wait`、apply_patch、时钟、MCP 资源列表等；sandbox 只读，且没有可用的 MCP server）。模型目录也在私有目录读取，使账号上下文与逆向一致，不受 bridge 目录的项目设置影响。内置生图的 `baseInstructions` 只有 Reframe 生图规则，输入只有已确认提示词、排除项和按受理顺序的图片，不发送 skill 输入项，也不提供 Reframe 工具；生图的账号与模型上下文同样在私有目录读取。兼容性检查要求 `thread/start` 支持 `baseInstructions`，缺失时禁用逆向与内置生图，模型列表不受影响。
 
 `bridge/pi-agent.mjs` 管理 Pi 子进程协议、模型目录、错误与取消；`pi-extension.mjs` 只开放本次图片取证及技能资料读取。图片操作复用 `inspection.mjs`，没有第二套裁切规则。Pi 不提供 Codex 的 OS sandbox，因此通过禁用默认工具、个人扩展和上下文文件限制模型可调用能力；该限制不声称隔离 CLI 自身或模型服务。
 
 `bridge/claude-agent.mjs` 每个任务启动一个 `claude -p` 进程（stream-json 输入输出），只使用 Claude Code 文档列出的参数：`--setting-sources ""` 不加载用户、项目和本地设置（因此不运行 hooks、不读 CLAUDE.md，也不使用设置文件中的 `apiKeyHelper`/`env`），`--tools ""` 关闭内置工具，`--strict-mcp-config` 只加载本次 `--mcp-config`，`--allowedTools` 只放行 Reframe 两个工具，`--no-session-persistence` 不保存会话，`--json-schema` 约束结果。`claude-mcp.mjs` 是这次任务的 stdio MCP 服务，只从私有任务清单读取本次图片和技能资料，取证复用 `inspection.mjs`，并按 Claude 的图片上限（单边 2000px、单图约 3.75MB）缩小输出；图片按图序内联在用户消息中。启动后核对 `system/init` 的工具与 MCP 状态，出现预期外工具或 Reframe 工具未连接时明确失败；响应模型与所选模型不符时停止。账号上下文取自 `claude auth status --json`、`-p` 模式下优先生效的环境凭据（API Key、令牌、Bedrock/Vertex/Foundry 变量，只进入单向哈希）、所选云服务共享凭据文件的元数据与实际可执行文件，变化后要求重新验证。子进程不继承启动 bridge 的 Claude Code 会话：`CLAUDE*`、`AI_AGENT`、`MCP_*` 命名空间内只保留登录、提供方与证书设置（`SETTINGS_ENV`），宿主会话的身份、邮箱、消息通道、推理强度和工具开关都不传入；另设 `DISABLE_AUTOUPDATER` 与 `CLAUDE_CODE_DISABLE_AUTO_MEMORY`。CLI 仍固定附带 Agent SDK 身份行，以及环境（cwd 为任务临时目录）、模型与日期提醒。CLI 没有文档化的模型列表命令，模型目录因此读取 stream-json 的 initialize 握手（官方 Agent SDK `supportedModels()` 的同一来源），读取目录不调用模型。
 
-任务和排队批次冻结逆向 Agent/provider/model/推理参数；自动生图另冻结所选生图渠道、模型及 API 配置。两阶段仍由既有 Task Runtime 和 Batch Store 调度，取消、保存失败及重启恢复使用原规则。会话正文读取独立使用 Codex，只把既有显式快照交给所选逆向 Agent。
+任务和排队批次冻结逆向 Agent/provider/model/推理参数与插件指令（批次视图不公开指令正文）；自动生图另冻结所选生图渠道、模型及 API 配置。两阶段仍由既有 Task Runtime 和 Batch Store 调度，取消、保存失败及重启恢复使用原规则。会话正文读取独立使用 Codex，只把既有显式快照交给所选逆向 Agent。
 
 CLI 管理由 `cli.mjs`、`pi-cli.mjs` 与 `claude-cli.mjs` 分别验证安装来源，复用固定参数的子进程执行器。`/cli/*?agent=<id>` 与 `/models?agent=<id>` 显式指定已登记的管理目标；省略时兼容 Codex。安装更新与任务、模型验证全局互斥，完成后只清除对应 Agent 的模型信任；Codex 更新还复查兼容性并重建会话读取器。
 
@@ -102,7 +102,7 @@ bridge 只接受本机 Host；带 Origin 的请求必须是已批准的扩展 Or
 
 ## 生图渠道
 
-`bridge/generation-preparation.mjs` 统一独立生图、连续流程及批次的渠道选择、Codex context 读取、渠道尺寸校验、尺寸快照与依赖检查。`prepare` 为新请求选择配置并计算快照；已受理配置及尺寸直接复用，`restoreBatch` 保留旧批次尺寸的既有解释并检查凭据快照，不重新归一化。Magpie 舍入算法仍归 `lib/image-size.mjs`。`check` 按原配置复查目录或 Codex 能力和技能；原 Magpie 模型下架时自动生图失败，保留已提交提示词，不读取当前渠道替代，也不创建 generation。
+`bridge/generation-preparation.mjs` 统一独立生图、连续流程及批次的渠道选择、Codex context 读取、渠道尺寸校验、尺寸快照与依赖检查。`prepare` 为新请求选择配置并计算快照；已受理配置及尺寸直接复用，`restoreBatch` 保留旧批次尺寸的既有解释并检查凭据快照，不重新归一化。Magpie 舍入算法仍归 `lib/image-size.mjs`。`check` 按原配置复查目录或 Codex 生图能力；原 Magpie 模型下架时自动生图失败，保留已提交提示词，不读取当前渠道替代，也不创建 generation。
 
 选项校验与准备、依赖检查分开，保留各入口的校验顺序：批次预检没有语言字段，同键受理恢复先于当前依赖检查；手动生图先检查任务和提示词资格，在准备之后验证图片，再检查依赖、保存主体并保留运行占用。Codex context 异步读取后重新检查取消、CLI 和模型验证状态。HTTP 与任务编排继续拥有素材、图序、提示词、取消检查及提交点，准备模块不写入输入或调度任务。
 
@@ -168,6 +168,7 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 | 批次预检、受理、同键恢复与响应丢失 | `batch-admission.test.mjs`、`batches.test.mjs` 的真实 HTTP 与临时磁盘集成测试 |
 | CAS、空输入、旧记录 | `project-inputs.test.mjs` 与项目恢复测试 |
 | 发送方及慢请求 | `operation-policy.test.mjs` 与构建后的 `extension.test.mjs` |
+| 插件指令内置/覆盖/清空、冻结与注入边界 | `plugin-instructions.test.mjs`（store 与 `runAgent`）；`bridge.test.mjs`、`batches.test.mjs` 验证任务与批次冻结；`plugin-instructions.browser.js` 验证设置界面 |
 | 逆向 Agent 登记、选择与旧快照 | `agents.test.mjs` 的注册表 interface；`extension.test.mjs` 验证扩展只校验 ID 格式 |
 | 网页浮层与按需面板 | `content-collection.test.mjs`（按需加载、失败提示）；`extension.test.mjs`（bundle 拆分、仅顶层 frame 注入） |
 | 示例与生产一致性 | `preview-contract.test.mjs`：运行实际 preview 脚本并与生产检索契约对照 |

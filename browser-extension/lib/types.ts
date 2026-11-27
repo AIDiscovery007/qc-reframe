@@ -7,6 +7,7 @@ export type SessionPage = { data: SessionSearchResult[]; nextCursor: string | nu
 export type SessionContext = { sources: SessionSummary[]; snapshotId?: string; hash?: string; capturedAt?: string; messageCount?: number; attachmentCount?: number };
 
 export type ImageProvider = "codex" | "openai" | "gemini" | "magpie";
+export type PluginInstructions = { text: string; builtin: string; custom: boolean; revision: string; maxLength: number };
 export type ImageSettings = { provider: ImageProvider; configs: Record<"openai" | "gemini", { baseUrl: string; model: string; hasApiKey: boolean }> & { magpie?: { baseUrl: string; model: string } } };
 
 export type Mode = "style" | "recreate" | "reenact" | "multi-reenact" | "session";

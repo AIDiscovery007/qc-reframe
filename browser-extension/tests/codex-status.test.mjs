@@ -39,7 +39,7 @@ test("Given a Claude Code failure, recovery opens Claude Code CLI management onl
 });
 
 test("Given built-in generation errors, recovery targets Codex CLI before text-model keywords", () => {
-  for (const message of ["Codex 内置生图：请先登录", "Codex 内置生图：执行模型缺失，请检查配置", "Codex 内置生图：账号已变化，请重新验证", "Codex 内置生图：IMAGEGEN_SKILL_PATH 不可用"])
+  for (const message of ["Codex 内置生图：请先登录", "Codex 内置生图：执行模型缺失，请检查配置", "Codex 内置生图：账号已变化，请重新验证", "Codex 内置生图：app-server 无法启动"])
     assert.equal(recoverySection(message), "cli");
   assert.equal(recoverySection("生图 API Key 尚未配置"), "generation");
 });

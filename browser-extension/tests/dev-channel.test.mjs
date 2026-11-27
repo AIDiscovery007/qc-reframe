@@ -60,7 +60,7 @@ async function checkout(t, { runtimePackage = false } = {}) {
   const codex = join(dir, "codex-test");
   await writeFile(codex, '#!/usr/bin/env node\nconsole.log("codex-cli test");\n', { mode: 0o700 });
   const env = { ...process.env, ALCHEMY_DATA_DIR: join(dir, "data"), ALCHEMY_APP_SUPPORT_DIR: join(dir, "app support"),
-    CODEX_BIN: codex, CODEX_HOME: join(dir, "codex-home"), IMAGEGEN_SKILL_PATH: join(dir, "missing-imagegen.md") };
+    CODEX_BIN: codex, CODEX_HOME: join(dir, "codex-home") };
   for (const key of ["ALCHEMY_SKILL_PATH", "ALCHEMY_EXTENSION_ID", "ALCHEMY_CHANNEL", "ALCHEMY_PORT"]) delete env[key];
   const ports = { release: await unusedPort(), dev: await unusedPort() };
   const manage = (channel, command, ...args) => exec(process.execPath,

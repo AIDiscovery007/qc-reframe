@@ -89,7 +89,7 @@ test('user verifies the reverse model while image execution retains its independ
   const seen = [];
   const skillPath = join(dataDir, 'SKILL.md');
   await writeFile(skillPath, '---\nname: alchemy\n---');
-  const app = await createBridge({ dataDir, models, skillPath, generationContext: async () => ({ model: 'cli-image-controller', provider: 'openai', reasoningEffort: 'low', codexGeneration: true }), generationSkillPath: skillPath, allowShutdown: true,
+  const app = await createBridge({ dataDir, models, skillPath, generationContext: async () => ({ model: 'cli-image-controller', provider: 'openai', reasoningEffort: 'low', codexGeneration: true }), allowShutdown: true,
     agent: async (args) => { seen.push(args.modelSettings); return { title: 'test', promptZh: 'subject', promptEn: 'subject', negativePrompt: '', observations: [], uncertainties: [] }; },
     generator: async (args) => { seen.push(args.modelSettings); return { bytes: Buffer.from('image'), extension: 'png' }; },
   });

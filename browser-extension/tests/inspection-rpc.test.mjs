@@ -94,13 +94,14 @@ test("runAgent registers input-scoped inspection and RPC delivers actual ordered
 });
 
 // Only Reframe's task prompt, the selected skill snapshot, the task text, the chosen images and Reframe tools reach the model.
+// Codex also skips capturing the user's shell environment, which a task without shell has no use for.
 const CODEX_ISOLATION = {
   project_doc_max_bytes: 0, include_permissions_instructions: false, include_environment_context: false,
   include_collaboration_mode_instructions: false, include_apps_instructions: false, web_search: "disabled",
   agents: { enabled: false }, skills: { include_instructions: false, bundled: { enabled: false } },
   features: { apps: false, plugins: false, remote_plugin: false, computer_use: false, browser_use: false, browser_use_external: false,
-    in_app_browser: false, goals: false, hooks: false, multi_agent_v2: false, shell_tool: false, sleep_tool: false, skill_search: false,
-    tool_suggest: false, image_generation: false, view_image: false },
+    in_app_browser: false, goals: false, hooks: false, multi_agent_v2: false, shell_tool: false, shell_snapshot: false, sleep_tool: false,
+    skill_search: false, tool_suggest: false, image_generation: false, view_image: false },
   tools: { experimental_request_user_input: { enabled: false } },
 };
 
@@ -145,26 +146,55 @@ test("user's Codex reverse sees only the task prompt, skill snapshot, chosen ima
   assert.ok(stages.includes("正在读取技能参考资料…"));
 });
 
-test("user's Codex model list and model check ignore the bridge folder, while built-in generation keeps its setup", async t => {
+test("user's Codex model list and model check ignore the bridge folder", async t => {
   // Given a verified model.
   const { dir, calls } = await fakeCodex(t, "done();");
   const catalog = await readModelCatalog(dir);
   const modelSettings = { ...catalog.models[0], accountKey: catalog.accountKey, provider: catalog.provider };
-  // When the model is checked and an image is generated.
+  // When the model is checked.
   await runCodex({ cwd: dir, input: [{ type: "text", text: "仅回复 OK。" }], instructions: "连接检查", modelSettings, probe: true });
-  await runCodex({ cwd: dir, input: [], instructions: "生图规则", modelSettings, generation: true });
-  // Then listing and checking run in private folders with only the check prompt, and generation keeps image generation.
+  // Then listing and checking run in private folders with only the check prompt.
   const messages = await calls();
   assert.ok(!messages.find(m => m.method === "config/read").params.cwd.startsWith(dir));
-  const [probe, generation] = messages.filter(m => m.method === "thread/start").map(m => m.params);
+  const probe = messages.find(m => m.method === "thread/start").params;
   assert.ok(!probe.cwd.startsWith(dir));
   assert.equal(probe.baseInstructions, "连接检查");
   assert.equal(probe.developerInstructions, undefined);
   assert.deepEqual(probe.config, { model_reasoning_effort: "low", ...CODEX_ISOLATION, mcp_servers: {} });
-  assert.equal(generation.cwd, dir);
-  assert.equal(generation.baseInstructions, undefined);
-  assert.equal(generation.developerInstructions, "生图规则");
-  assert.deepEqual(generation.config, { model_reasoning_effort: "low" });
+});
+
+test("user's Codex generation sees only the generation rules, confirmed prompt, ordered images and the image tool", async t => {
+  // Given the user's own Codex MCP servers and the bridge folder with its own Codex settings.
+  const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } }).png().toBuffer();
+  const { dir, calls } = await fakeCodex(t, `
+    send({method:'item/completed',params:{threadId:'test',item:{type:'imageGeneration',status:'completed',result:${JSON.stringify(png.toString("base64"))}}}});
+    done();
+  `, "", { mcp_servers: { "computer-use": { command: "a" } } });
+  const reference = join(dir, "reference.png"), subject = join(dir, "subject.png");
+  await writeFile(reference, png); await writeFile(subject, png);
+  const catalog = await readModelCatalog(dir);
+  const modelSettings = { ...catalog.models[0], accountKey: catalog.accountKey, provider: catalog.provider };
+  // When the user generates a confirmed prompt from a reference and a subject image.
+  const result = await runGeneration({ mode: "reenact", imagePath: reference, subjectImagePath: subject, referenceIndex: 0,
+    prompt: "确认的提示词", negativePrompt: "排除项", modelSettings });
+  // Then Codex runs in a private empty folder with Reframe's generation rules in place of its own prompt and only image generation on.
+  assert.deepEqual(result.bytes, png);
+  const messages = await calls();
+  const start = messages.find(m => m.method === "thread/start").params, turn = messages.find(m => m.method === "turn/start").params;
+  assert.ok(!start.cwd.startsWith(dir));
+  assert.equal(messages.filter(m => m.method === "process/started").at(-1).cwd, start.cwd);
+  assert.equal(messages.filter(m => m.method === "config/read").at(-1).params.cwd, start.cwd);
+  await assert.rejects(access(start.cwd), { code: "ENOENT" });
+  assert.equal(start.developerInstructions, undefined);
+  assert.match(start.baseInstructions, /^用户已点击生成图片/);
+  assert.doesNotMatch(start.baseInstructions, /技能|skill/);
+  assert.deepEqual(start.config, { model_reasoning_effort: "low", ...CODEX_ISOLATION,
+    features: { ...CODEX_ISOLATION.features, image_generation: true }, mcp_servers: { "computer-use": { enabled: false } } });
+  assert.equal(start.dynamicTools, undefined);
+  // And the turn carries only the task text with the confirmed prompt and the images in their accepted order.
+  assert.deepEqual(turn.input.map(item => item.type), ["text", "localImage", "localImage"]);
+  assert.deepEqual(turn.input.slice(1).map(item => item.path), [reference, subject]);
+  assert.ok(turn.input[0].text.includes(JSON.stringify({ prompt: "确认的提示词", negativePrompt: "排除项" })));
 });
 
 test("user's Codex reverse stops without a model call when the skill snapshot cannot be read", async t => {
@@ -214,11 +244,9 @@ for (const source of ["base64", "savedPath"]) test(`ephemeral generation returns
   t.after(() => { if (previousHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousHome; });
   await mkdir(join(dir, "generated_images"));
   await writeFile(join(dir, "generated_images/test.png"), png);
-  const skillPath = join(dir, "SKILL.md");
-  await writeFile(skillPath, "---\nname: imagegen\n---\nTest");
   const catalog = await readModelCatalog(dir);
   const modelSettings = { ...catalog.models[0], accountKey: catalog.accountKey, provider: catalog.provider };
-  const result = await runGeneration({ prompt: "red square", skillPath, cwd: dir, modelSettings });
+  const result = await runGeneration({ prompt: "red square", modelSettings });
   assert.deepEqual(result.bytes, png);
   assert.equal(result.extension, "png");
   assert.ok((await calls()).every(m => !["thread/read", "thread/resume"].includes(m.method)));

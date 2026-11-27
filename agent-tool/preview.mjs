@@ -48,7 +48,7 @@ const job = {
   result,
 };
 
-const regressions = Object.fromEntries(['input-operation', 'workspace-image-model', 'image-settings-sync', 'magpie-workflows', 'generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'service-upgrade', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context']
+const regressions = Object.fromEntries(['input-operation', 'workspace-image-model', 'image-settings-sync', 'magpie-workflows', 'generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'service-upgrade', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context', 'plugin-instructions']
   .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
 async function sendScript(req, res, body) {
   res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
@@ -290,6 +290,10 @@ const server = createServer(async (req, res) => {
         let connectionFailures=previewOptions.has('connectionRegression')?1:0;
       let imageSaveFailed=false, magpieSaveFailed=false, magpieChangingDirectoryReads=0;
       const imageSettings={provider:'codex',configs:{magpie:{baseUrl:'http://127.0.0.1:3425',model:''},openai:{baseUrl:'https://api.openai.com/v1',model:'',hasApiKey:false},gemini:{baseUrl:'https://generativelanguage.googleapis.com/v1beta',model:'',hasApiKey:false}}};
+      // Synthetic plugin instruction: the real store, normalization and revision checks are covered by bridge tests.
+      const pluginBuiltin='# Reframe 插件指令（预览）\\n\\n你同时以逆向生图专家与资深视觉设计师的身份工作，把图中可见证据转成专业、具体、可执行的描述。';
+      const pluginInstructions={text:pluginBuiltin,builtin:pluginBuiltin,custom:false,revision:'0'.repeat(64),maxLength:16000};
+      let pluginRevision=0, pluginSaveFailed=previewOptions.get('pluginInstructionsRegression')==='failure';
         const workspaceImageModel=previewOptions.get('workspaceImageModelRegression');
         const imageSettingsSync=previewOptions.get('imageSettingsSyncRegression');
         if(workspaceImageModel){imageSaveFailed=true;magpieSaveFailed=true;imageSettings.provider='magpie';imageSettings.configs.magpie.model='fixture/gpt-image-2';}
@@ -509,6 +513,14 @@ const server = createServer(async (req, res) => {
             const removed=message.baseUrl.endsWith(':3429')&&++magpieChangingDirectoryReads>2;
             return {ok:true,value:{version:'fixture',models:[{id:stale?'old/image':removed?'fixture/replacement':imageSettingsSync?'fixture/gpt-image-2':'fixture/image',name:stale?'旧目录':'Fixture Image',inputImages:false}]}};
           }
+          if(message.type==='alchemy:plugin-instructions')return previewOptions.get('pluginInstructionsRegression')==='legacy'?{error:'Not found'}:{ok:true,value:structuredClone(pluginInstructions)};
+          if(message.type==='alchemy:plugin-instructions-save') {
+            if(pluginSaveFailed){pluginSaveFailed=false;return {error:'插件指令保存失败（预览）'};}
+            if(message.revision!==pluginInstructions.revision)return {error:'插件指令已在其他窗口更新，请重新载入后再保存。'};
+            const text=message.text.replace(/\\r\\n?/g,'\\n').trim();
+            Object.assign(pluginInstructions,{text,custom:text!==pluginInstructions.builtin,revision:String(++pluginRevision).padStart(64,'0')});
+            return {ok:true,value:structuredClone(pluginInstructions)};
+          }
           if(message.type==='alchemy:image-settings-save') {
             if(!imageSaveFailed){imageSaveFailed=true;return {error:'生图设置保存失败（预览）'};}
             const value=message.settings;if(value.provider==='magpie'&&!magpieSaveFailed){magpieSaveFailed=true;return {error:'Magpie 保存失败（预览）'};}imageSettings.provider=value.provider;
@@ -715,6 +727,8 @@ const server = createServer(async (req, res) => {
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/generation-readiness-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('imageSettingsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/image-settings-regression.js"></script></body>'));
+    if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('pluginInstructionsRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/plugin-instructions-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('agentSettingsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/agent-settings-regression.js"></script></body>'));
     if (['/workspace.html', '/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('connectionRegression'))

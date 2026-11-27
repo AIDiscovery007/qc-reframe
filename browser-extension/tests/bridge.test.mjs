@@ -93,7 +93,7 @@ async function setup(t, agent = async () => result, generator) {
   const skillPath = join(dir, "SKILL.md");
   await writeFile(join(dir, "model-settings.json"), JSON.stringify({ model: "test-model", accountKey: "test" }));
   await writeFile(skillPath, "---\nname: alchemy\n---\nTest skill");
-  const app = await createBridge({ dataDir: dir, skillPath, agent, generator, generationContext: async () => ({ model: 'test-model', provider: 'fixture', reasoningEffort: 'low', codexGeneration: true }), generationSkillPath: skillPath });
+  const app = await createBridge({ dataDir: dir, skillPath, agent, generator, generationContext: async () => ({ model: 'test-model', provider: 'fixture', reasoningEffort: 'low', codexGeneration: true }) });
   app.server.listen(0, "127.0.0.1");
   await once(app.server, "listening");
   const url = `http://127.0.0.1:${app.server.address().port}`;
@@ -127,14 +127,18 @@ async function waitGeneration(request, id, status) {
   assert.fail(`Generation did not reach ${status}`);
 }
 
-test("imagegen receives exact prompt, exclusions, explicit skill and ordered real images", () => {
-  const args = { imagePath: "/reference.png", subjectImagePath: "/subject.png", prompt: "保留图 1 的睁眼表情", negativePrompt: "不改变双手姿态", skillPath: "/imagegen/SKILL.md" };
+test("user's Codex generation receives the exact prompt, exclusions and ordered real images without any skill", () => {
+  // Given a confirmed prompt with a subject and a reference image.
+  const args = { imagePath: "/reference.png", subjectImagePath: "/subject.png", prompt: "保留图 1 的睁眼表情", negativePrompt: "不改变双手姿态" };
+  // When the generation input is built, Then it holds only the task text and the images in order.
   const input = generationInput(args);
+  assert.deepEqual(input.map((item) => item.type), ["text", "localImage", "localImage"]);
   assert.deepEqual(input.filter((x) => x.type === "localImage").map((x) => x.path), [args.subjectImagePath, args.imagePath]);
-  assert.deepEqual(input.at(-1), { type: "skill", name: "imagegen", path: args.skillPath });
+  assert.doesNotMatch(input[0].text, /\$imagegen|技能|skill/);
   assert.ok(input[0].text.includes(JSON.stringify({ prompt: args.prompt, negativePrompt: args.negativePrompt })));
+  // Given no images, Then only the task text remains.
   const textOnly = generationInput({ ...args, prompt: "一只猫，柔和的色块", imagePath: undefined, subjectImagePath: undefined });
-  assert.deepEqual(textOnly.map((item) => item.type), ["text", "skill"]);
+  assert.deepEqual(textOnly.map((item) => item.type), ["text"]);
   assert.match(textOnly[0].text, /纯文生图/);
   assert.ok(textOnly[0].text.includes(JSON.stringify({ prompt: "一只猫，柔和的色块", negativePrompt: args.negativePrompt })));
   assert.throws(() => generationInput({ ...args, prompt: "Draw [SUBJECT]" }), /补充主体/);
@@ -240,7 +244,7 @@ for (const mode of ["style", "reenact", "recreate"]) test(`${mode} generates fro
     await waitGeneration(request, created.id, "completed");
     assert.equal(calls[2].imagePath, undefined, "text-to-image works without the saved reference");
     assert.equal(calls[2].subjectImagePath, undefined);
-    assert.deepEqual(generationInput(calls[2]).map((item) => item.type), ["text", "skill"]);
+    assert.deepEqual(generationInput(calls[2]).map((item) => item.type), ["text"]);
   }
   assert.equal(calls.length, paired ? 2 : 3);
 });
@@ -305,6 +309,24 @@ test("generation rejects generic prompts, prevents duplicates and preserves canc
   const after = await waitGeneration(request, created.id, "cancelled");
   assert.equal(after.status, "completed");
   assert.equal(after.generations[0].extension, undefined);
+});
+
+test("user can generate with built-in Codex when no imagegen skill is installed", async (t) => {
+  // Given the Codex imagegen skill is missing from this machine.
+  const previous = process.env.IMAGEGEN_SKILL_PATH;
+  process.env.IMAGEGEN_SKILL_PATH = join(tmpdir(), "reframe-missing-imagegen", "SKILL.md");
+  t.after(() => { if (previous === undefined) delete process.env.IMAGEGEN_SKILL_PATH; else process.env.IMAGEGEN_SKILL_PATH = previous; });
+  const calls = [];
+  const { request } = await setup(t, async () => ({ ...result, promptZh: "确定的主体" }), async (args) => { calls.push(args); return { bytes: decodeImage(image).bytes, extension: "png" }; });
+  const created = await (await request("/jobs", submit({ mode: "recreate" }))).json();
+  await waitFor(request, created.id, "completed");
+  // When the user generates the reversed prompt.
+  assert.equal((await request(`/jobs/${created.id}/generations`, { method: "POST", body: '{"language":"zh"}' })).status, 202);
+  // Then the image is generated and no skill file is handed to the generator.
+  const done = await waitGeneration(request, created.id, "completed");
+  assert.equal(done.generations[0].extension, "png");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].skillPath, undefined);
 });
 
 test("generation failures preserve analysis and never invent an image", async (t) => {
@@ -1000,4 +1022,44 @@ for (const change of ["edit", "cancel", "disk failure"]) test(`automatic handoff
   } finally {
     release.resolve(); fs.promises.rename = rename; syncBuiltinESMExports();
   }
+});
+
+test("user's saved plugin instruction reaches the reverse tasks submitted after it, and edits never reach a running task", async (t) => {
+  // Given a reverse Agent that keeps the first task open.
+  const calls = [];
+  const s = await setup(t, (args) => new Promise((resolve) => calls.push({ args, resolve })));
+  const initial = await (await s.request("/plugin-instructions")).json();
+  assert.equal(initial.custom, false);
+  assert.ok(initial.text.length > 0);
+  // When the user saves an instruction and then submits a task.
+  const saved = await s.request("/plugin-instructions", { method: "POST", body: JSON.stringify({ text: "第一版指令", revision: initial.revision }) });
+  assert.equal(saved.status, 200);
+  const first = await (await s.request("/jobs", submit({ mode: "recreate" }))).json();
+  for (let i = 0; i < 80 && !calls.length; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  // And edits it while that task runs, once with a stale revision and once correctly.
+  const stale = await s.request("/plugin-instructions", { method: "POST", body: JSON.stringify({ text: "旧窗口", revision: initial.revision }) });
+  assert.equal(stale.status, 409);
+  const edited = await s.request("/plugin-instructions", { method: "POST", body: JSON.stringify({ text: "第二版指令", revision: (await saved.json()).revision }) });
+  assert.equal(edited.status, 200);
+  // Then the running task keeps the instruction it was submitted with, and the next task uses the edit.
+  assert.equal(calls[0].args.pluginInstructions, "第一版指令");
+  calls[0].resolve(result);
+  await waitFor(s.request, first.id, "completed");
+  const second = await (await s.request("/jobs", submit({ mode: "recreate" }))).json();
+  for (let i = 0; i < 80 && calls.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(calls[1].args.pluginInstructions, "第二版指令");
+  calls[1].resolve(result);
+  await waitFor(s.request, second.id, "completed");
+  // And the instruction is not written into the task record.
+  assert.doesNotMatch(await readFile(join(s.dir, "records", `${first.id}.json`), "utf8"), /第一版指令/);
+});
+
+test("user's plugin instruction requests reject unknown queries and malformed bodies", async (t) => {
+  const { request } = await setup(t);
+  // Given the current instruction.
+  const view = await (await request("/plugin-instructions")).json();
+  // When a request carries a query or an invalid body, Then it is rejected and nothing changes.
+  assert.equal((await request("/plugin-instructions?x=1")).status, 400);
+  assert.equal((await request("/plugin-instructions", { method: "POST", body: JSON.stringify({ text: 1, revision: view.revision }) })).status, 400);
+  assert.deepEqual(await (await request("/plugin-instructions")).json(), view);
 });
