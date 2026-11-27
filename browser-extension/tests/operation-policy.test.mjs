@@ -34,6 +34,6 @@ test("session requests cannot inherit UI or object-prototype permissions; legacy
 
 test("bridge keeps slow read/write deadlines separate from management and ordinary requests", () => {
   for (const path of ["/sessions/list", "/sessions/index", "/projects/project/input", "/jobs"]) assert.equal(bridgeTimeout(path), 120_000);
-  for (const path of ["/models/verify", "/cli/update"]) assert.equal(bridgeTimeout(path), 30_000);
-  for (const path of ["/health", "/projects", "/jobs/job/generations"]) assert.equal(bridgeTimeout(path), 15_000);
+  for (const path of ["/models/verify", "/cli/update", "/agents?detect=1"]) assert.equal(bridgeTimeout(path), 30_000);
+  for (const path of ["/health", "/projects", "/jobs/job/generations", "/agents"]) assert.equal(bridgeTimeout(path), 15_000);
 });

@@ -9,17 +9,19 @@ import { createBridge } from '../bridge/server.mjs';
 async function setup(t) {
   const dir = await mkdtemp(join(tmpdir(), 'reframe-agent-cli-'));
   const calls = [];
-  const manager = agent => ({ busy: false, close() {},
+  const manager = (agent, installed = true) => ({ busy: false, close() {}, detected: null,
+    peek() { return this.detected; },
+    async detect() { calls.push(`${agent}:detect`); return this.detected = { agent, installed, version: installed ? '1.0.0' : null, executable: installed ? `/${agent}` : null, source: installed ? 'npm' : 'missing', latestVersion: '9.9.9' }; },
     status: async () => ({ agent, installed: true, version: agent === 'pi' ? '0.84.2' : '0.162.0', executable: `/${agent}`, source: 'npm' }),
     check: async () => { calls.push(`${agent}:check`); return { agent }; },
     update: async () => { calls.push(`${agent}:update`); return { agent }; },
     install: async () => { calls.push(`${agent}:install`); return { agent }; },
   });
-  const cli = manager('codex'), piCli = manager('pi');
+  const cli = manager('codex', false), piCli = manager('pi'), claudeCli = manager('claude');
   const store = () => ({ busy: false, close() {}, selection: () => ({ model: 'kept' }), list: async () => ({}), start: async () => ({}), refresh: async () => ({}) });
-  const models = store(), piModels = store();
+  const models = store(), piModels = store(), claudeModels = store();
   let probes = 0;
-  const app = await createBridge({ dataDir: dir, cli, piCli, models, piModels,
+  const app = await createBridge({ dataDir: dir, cli, piCli, claudeCli, models, piModels, claudeModels,
     compatibility: { snapshot: () => ({}), getCompatibility: async () => { probes++; return {}; } } });
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening');
   t.after(async () => { app.server.closeAllConnections(); await new Promise(r => app.server.close(r)); await rm(dir, { recursive: true, force: true }); });
@@ -99,4 +101,26 @@ test('user cannot start inference while Pi installation is still discovering its
   } finally { release.resolve(); }
   assert.equal((await installing).status, 202);
   assert.equal((await s.request('/models?agent=pi')).status, 200);
+});
+
+test('user opening the workspace learns which Agent CLIs are installed without update checks or a switch', async t => {
+  // Given Codex is selected but missing, while Pi and Claude Code are installed.
+  const s = await setup(t);
+  assert.deepEqual((await s.request('/agents')).body.agents.map(agent => agent.cli), [null, null, null]);
+  // When the extension asks for detection.
+  const detected = await s.request('/agents?detect=1');
+  // Then every CLI is inspected locally, only installation facts are returned, and the selection is unchanged.
+  assert.equal(detected.status, 200);
+  assert.equal(detected.body.selected, 'codex');
+  assert.deepEqual(detected.body.agents.map(({ id, cli }) => [id, cli]), [
+    ['codex', { installed: false, version: null, source: 'missing' }],
+    ['pi', { installed: true, version: '1.0.0', source: 'npm' }],
+    ['claude', { installed: true, version: '1.0.0', source: 'npm' }],
+  ]);
+  assert.deepEqual(s.calls.sort(), ['claude:detect', 'codex:detect', 'pi:detect']);
+  assert.deepEqual((await s.request('/agents')).body, detected.body);
+  // When the detection flag is malformed, Then the request is refused without inspecting again.
+  for (const path of ['/agents?detect=0', '/agents?detect=true', '/agents?detect=1&detect=1', '/agents?force=1'])
+    assert.equal((await s.request(path)).status, 400);
+  assert.equal(s.calls.length, 3);
 });

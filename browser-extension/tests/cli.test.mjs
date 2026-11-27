@@ -413,3 +413,20 @@ test("npm package upgrades invalidate model context even when the JS executable 
     assert.notEqual((await readModelContext(request, dir)).accountKey, before.accountKey);
   } finally { if (saved === undefined) delete process.env.CODEX_BIN; else process.env.CODEX_BIN = saved; }
 });
+
+test("user's first-connection detection inspects the installed CLI without asking the update service", async () => {
+  // Given an installed Codex whose release check has never run.
+  let inspections = 0, latest = 0, time = Date.now();
+  const manager = createCliManager({ now: () => time, inspect: async () => { inspections++; return { installed: true, version: "0.100.0", executable: "/bin/codex", source: "npm" }; },
+    latest: async () => { latest++; return "0.101.0"; } });
+  // When detection runs twice within the cache window and again after it.
+  assert.equal((await manager.detect()).installed, true);
+  await manager.detect();
+  time += 10_000;
+  await manager.detect();
+  await tick();
+  // Then only local inspections ran, the cache bounded them, and no update check started.
+  assert.equal(inspections, 2);
+  assert.equal(latest, 0);
+  assert.equal(manager.peek().version, "0.100.0");
+});

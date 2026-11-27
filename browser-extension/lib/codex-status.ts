@@ -1,5 +1,5 @@
 import type { AgentId } from "./agents";
-export type RecoverySection = "cli" | "pi-cli" | "models" | "generation" | "connection";
+export type RecoverySection = "cli" | "pi-cli" | "claude-cli" | "models" | "generation" | "connection";
 export type Compatibility = {
   checkedAt?: string | null;
   error?: string;
@@ -21,6 +21,8 @@ export type CliStatus = {
 export function recoverySection(message = ""): RecoverySection | undefined {
   if (/Codex 内置生图/.test(message)) return "cli";
   if (/生图 API|API Key|生图渠道|Gemini/.test(message)) return "generation";
+  if (/Claude Code.*(?:CLI|安装|版本|升级|更新|无法运行|无法启动|路径)|CLAUDE_BIN/i.test(message)) return "claude-cli";
+  if (/Claude Code/.test(message)) return "models";
   if (/Pi.*(?:CLI|安装|版本|升级|更新|无法运行|无法启动|路径)/i.test(message)) return "pi-cli";
   if (/Pi|逆向 Agent/.test(message)) return "models";
   if (/本机服务|配对码|图片逆向技能|ALCHEMY_SKILL_PATH|IMAGEGEN_SKILL_PATH/.test(message)) return "connection";

@@ -18,7 +18,7 @@ import { setMotionPreference, type MotionPreference } from "../../lib/motion-pre
 import { logo } from "../../lib/brand";
 
 const sections = { reminders: "任务提醒", appearance: "界面与动效", models: "插件模型", generation: "生图渠道", connection: "本机连接", storage: "本地数据" };
-export type SettingsSection = keyof typeof sections | "cli" | "pi-cli";
+export type SettingsSection = keyof typeof sections | "cli" | "pi-cli" | "claude-cli";
 
 export default function SettingsCenter({ section: selectedSection, onSectionChange: setSection, connected, serviceBusy, onClose, onConnected, onUpgradeStatus, onSaveImageSettings, imageSettingsRevision }: {
   section?: SettingsSection;
@@ -42,7 +42,7 @@ export default function SettingsCenter({ section: selectedSection, onSectionChan
     catch { setMotionError("动效设置保存失败，请重试。"); }
     finally { setSavingMotion(false); }
   };
-  const section = (selectedSection === "cli" || selectedSection === "pi-cli") ? "models" : selectedSection || "models";
+  const section = (selectedSection === "cli" || selectedSection === "pi-cli" || selectedSection === "claude-cli") ? "models" : selectedSection || "models";
   const [cli, setCli] = useState<CliStatus>();
   const updating = cli?.operation?.status === "running";
 
@@ -82,7 +82,7 @@ export default function SettingsCenter({ section: selectedSection, onSectionChan
           <p className="fine" role="status">{savingMotion ? "正在保存…" : preference === "system" ? `当前：${reduced ? "减少动态效果" : "完整动效"}` : ""}</p>
           {motionError && <div className="settings-info settings-error" role="alert">{motionError}</div>}
         </section>}
-        {section === "models" && <section aria-label="模型设置">{connected ? <AgentSettings onSelected={() => setSection("models")} recoveryAgent={selectedSection === "cli" ? "codex" : selectedSection === "pi-cli" ? "pi" : undefined} loginCommand={cli?.instructions?.loginCommand} serviceBusy={serviceBusy || updating} /> : <><h3>选择创作模型</h3><div className="settings-info">本机服务未连接，恢复后将自动接入。</div><button className="primary" onClick={() => setSection("connection")}>检查本机服务</button></>}</section>}
+        {section === "models" && <section aria-label="模型设置">{connected ? <AgentSettings onSelected={() => setSection("models")} recoveryAgent={selectedSection === "cli" ? "codex" : selectedSection === "pi-cli" ? "pi" : selectedSection === "claude-cli" ? "claude" : undefined} loginCommand={cli?.instructions?.loginCommand} serviceBusy={serviceBusy || updating} /> : <><h3>选择创作模型</h3><div className="settings-info">本机服务未连接，恢复后将自动接入。</div><button className="primary" onClick={() => setSection("connection")}>检查本机服务</button></>}</section>}
         {section === "generation" && (connected ? <ImageGenerationSettings onSave={onSaveImageSettings} settingsRevision={imageSettingsRevision} /> : <section><h3>生图渠道</h3><p className="settings-info">本机服务未连接，恢复后将自动接入。</p><button className="primary" onClick={() => setSection("connection")}>检查本机服务</button></section>)}
         <div hidden={section !== "connection"}><ServiceRestart connected={connected} busy={serviceBusy || updating} onConnected={onConnected} /><ServiceUpgrade connected={connected} busy={serviceBusy || updating} onStatus={onUpgradeStatus} /></div>
         {section === "storage" && <section aria-labelledby="storage-title">

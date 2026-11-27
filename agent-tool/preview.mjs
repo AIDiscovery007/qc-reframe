@@ -315,6 +315,7 @@ const server = createServer(async (req, res) => {
         const cli={detectedAt:new Date().toISOString(),checkedAt:new Date().toISOString(),installed:true,version:'0.100.0',latestVersion:'0.101.0',executable:'/example/bin/codex',source:'npm',canUpdate:true,updateAvailable:true,command:'npm install -g @openai/codex@latest',instructions:{message:'升级后确认 Reframe 使用的 CLI 路径。',loginCommand:"'/example/bin/codex' login"},compatibility:{features:Object.fromEntries(['models','reverse','generation','sessions'].map(key=>[key,{status:'supported'}]))}};
         const piCli={agent:'pi',installed:false,version:null,latestVersion:'0.60.0',executable:null,source:'missing',canInstall:true,canUpdate:false,updateAvailable:false,instructions:{message:'安装 Pi 后重新检测。'}};
         let piInstallFailed=false;
+        if(previewOptions.get('agentDetection')==='pi')Object.assign(piCli,{installed:true,version:'0.84.2',executable:'/example/bin/pi',source:'npm',canInstall:false,instructions:{message:'安装或更新后，请重新验证 Pi 模型。'}});
         const cliScenario=previewOptions.get('cli');
         if(cliScenario==='standalone')Object.assign(cli,{source:'standalone',version:'0.159.2',latestVersion:'0.159.2',canUpdate:false,updateAvailable:false,command:'/example/bin/codex update'});
         if(['custom','app'].includes(cliScenario))Object.assign(cli,{source:cliScenario,comparisonReference:'npm-stable',canUpdate:false,command:null,reason:cliScenario==='app'?'请在 Codex App 中检查更新；稳定版仅作参考。':'请通过原安装方式更新；稳定版仅作参考。'});
@@ -516,6 +517,7 @@ const server = createServer(async (req, res) => {
             return {ok:true,value:structuredClone(imageSettings)};
           }
           if(message.type==='alchemy:query'&&message.path==='/agents')return previewOptions.get('agentSettingsRegression')==='legacy'?{error:'Not found'}:{ok:true,value:structuredClone(agents)};
+          if(message.type==='alchemy:query'&&message.path==='/agents?detect=1')return previewOptions.get('agentSettingsRegression')==='legacy'?{error:'Not found'}:{ok:true,value:{...structuredClone(agents),agents:agents.agents.map(agent=>{const state=agent.id==='codex'?cli:piCli;return {...structuredClone(agent),cli:{installed:state.installed,version:state.version,source:state.source}};})}};
           if(message.type==='alchemy:agent-select'){
             await new Promise(resolve=>setTimeout(resolve,200));
             if(previewOptions.has('agentSettingsRegression')&&!agentSelectFailed){agentSelectFailed=true;return {error:'Agent 设置保存失败（预览）'};}

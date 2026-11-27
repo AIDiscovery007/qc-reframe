@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-QC-Reframe：Chrome MV3 扩展（WXT + React 19 + TypeScript）+ 本机 Node bridge（发行版 `127.0.0.1:43187`，开发版 `43197`）+ 随仓库分发的 `alchemy` 逆向技能。流程为「网页选图 → 本机 Agent（Codex 或 Pi）逆向提示词 → 所选渠道生图（Codex 内置 / OpenAI 兼容 / Gemini / Magpie 本机网关）」。五条创作路径：`style`、`recreate`、`reenact`、`multi-reenact`、`session`。版本以 `package.json` 为准。
+QC-Reframe：Chrome MV3 扩展（WXT + React 19 + TypeScript）+ 本机 Node bridge（发行版 `127.0.0.1:43187`，开发版 `43197`）+ 随仓库分发的 `alchemy` 逆向技能。流程为「网页选图 → 本机 Agent（Codex、Pi 或 Claude Code）逆向提示词 → 所选渠道生图（Codex 内置 / OpenAI 兼容 / Gemini / Magpie 本机网关）」。五条创作路径：`style`、`recreate`、`reenact`、`multi-reenact`、`session`。版本以 `package.json` 为准。
 
 ## 先读规则
 
@@ -67,7 +67,7 @@ node agent-tool/ui.mjs gate --tier browser             # 全部登记场景 + �
 - `task-runtime.mjs`（占用/取消，最终保存后才释放）+ `task-records.mjs`（冻结快照、串行原子写入；任务 feed 只发布已提交快照；重启时把中断任务标记失败）。
 - `batch-admission.mjs` / `generation-preparation.mjs`：受理时冻结素材、图序、Agent/模型、渠道配置与尺寸；之后的设置变化不影响已受理任务。
 - `images.mjs`：按 SHA256 内容寻址的不可变图片；`image-collection.mjs` 在门禁满足（无未提交记录、无占用、迁移完成）时才回收。
-- `agents.mjs` 是逆向 Agent 注册表：`builtinAgents()` 登记 adapter `{ id, label, models, cli?, run, compatibility? }`，`frozen(snapshot)` 按任务快照解析（缺字段为 Codex，未登记明确失败）。`agent.mjs` 与 Agent 无关，只调用 adapter 的 `run`；Codex adapter 在 `codex-agent.mjs`（`codex-rpc.mjs` app-server JSON-RPC，默认 `ephemeral` 线程），Pi 在 `pi-agent.mjs`；`inspection.mjs` 提供逆向专用的只读图像取证工具。
+- `agents.mjs` 是逆向 Agent 注册表：`builtinAgents()` 登记 adapter `{ id, label, models, cli?, run, compatibility? }`，`frozen(snapshot)` 按任务快照解析（缺字段为 Codex，未登记明确失败）。`agent.mjs` 与 Agent 无关，只调用 adapter 的 `run`；Codex adapter 在 `codex-agent.mjs`（`codex-rpc.mjs` app-server JSON-RPC，默认 `ephemeral` 线程），Pi 在 `pi-agent.mjs`，Claude Code 在 `claude-agent.mjs`（`claude -p` stream-json，工具由 `claude-mcp.mjs` 提供）；`inspection.mjs` 提供逆向专用的只读图像取证工具。
 - `storage.mjs` 管理 `.local/`（`config/ records/ images/ logs/ runtime/`）及旧布局迁移。
 
 ## 跨模块不变量

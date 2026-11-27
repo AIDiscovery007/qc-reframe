@@ -86,9 +86,10 @@ export async function registerLauncher({ root, dataDir, port, env, uninstall, br
   const origins = [...connectionOrigins(env.ALCHEMY_EXTENSION_ID, channel)].map(origin => `${origin}/`);
   // The browser's PATH, Node options and ALCHEMY_* variables are not authority.
   // Capture only installation configuration, never account credentials or tokens.
-  const keys = ["HOME", "PATH", "TMPDIR", "LANG", "CODEX_HOME", "CODEX_BIN", "PI_BIN", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
+  // USER lets Claude Code find its macOS keychain login; it is an account name, not a credential.
+  const keys = ["HOME", "USER", "PATH", "TMPDIR", "LANG", "CODEX_HOME", "CODEX_BIN", "PI_BIN", "CLAUDE_BIN", "CLAUDE_CONFIG_DIR", "ALCHEMY_SKILL_PATH", "IMAGEGEN_SKILL_PATH", "ALCHEMY_EXTENSION_ID"];
   const fixed = { ...Object.fromEntries(keys.filter(key => typeof env[key] === "string").map(key => [key, env[key]])), ALCHEMY_DATA_DIR: dataDir, ALCHEMY_PORT: String(port),
-    // The release launcher stays byte-identical to earlier versions; only the dev launcher names its channel.
+    // Only the dev launcher names its channel; the release launcher keeps its earlier form.
     ...(channel.name === "release" ? {} : { ALCHEMY_CHANNEL: channel.name }) };
   const command = ["/usr/bin/env", "-i", ...Object.entries(fixed).map(([key, value]) => `${key}=${value}`), process.execPath, join(root, "scripts/manage.mjs"), "native-host", JSON.stringify(origins)];
   const script = `#!/bin/sh\n${owner}exec ${command.map(quote).join(" ")} "$@"\n`;

@@ -8,7 +8,7 @@
 
 <p align="center">English · <a href="README.zh-CN.md">简体中文</a></p>
 
-QC-Reframe is a browser extension with a small service on your computer. Hover over any image on the web and click the round **R** button. Your own Codex (or Pi) agent studies the image and writes a detailed prompt for it; the app calls this "reversing". Then generate a new image, with your own photo as the subject if you like. Everything stays on your computer.
+QC-Reframe is a browser extension with a small service on your computer. Hover over any image on the web and click the round **R** button. Your own Codex, Pi or Claude Code agent studies the image and writes a detailed prompt for it; the app calls this "reversing". Then generate a new image, with your own photo as the subject if you like. Everything stays on your computer.
 
 | Your subject | Reference | Result |
 | :---: | :---: | :---: |
@@ -57,7 +57,7 @@ It downloads the latest release, checks it, installs it to `~/QC-Reframe` and st
 The app's labels are in Chinese, so each step shows the Chinese text in brackets.
 
 1. **Open it.** Click the QC-Reframe icon in the browser toolbar, then **Workspace** (工作台). It connects to the service by itself, with no setup.
-2. **Pick a model (first time only).** Open **Settings** (设置中心) → **Models** (插件模型). Choose Codex or Pi and a model, then click **Verify and use** (验证并使用). This sends one short test request.
+2. **Pick a model (first time only).** Open **Settings** (设置中心) → **Models** (插件模型). Choose Codex, Pi or Claude Code and a model, then click **Verify and use** (验证并使用). This sends one short test request.
 3. **Grab an image.** On Pinterest or any website, hover over an image and click the round **R** button. Choose **Reverse now** (立即逆向), or **Add to Reframe** (加入 Reframe) to save it for later. You can also right-click the image.
 4. **Choose a path.** In the workspace, open the image (saved images are in **Projects** (项目记录) → **To reverse** (待逆向)). Pick what you want:
    - **Extract style** (提取风格): upload your own photo and give it the look of the reference.
@@ -68,7 +68,7 @@ The app's labels are in Chinese, so each step shows the Chinese text in brackets
 
 ## Good to know
 
-- **You need:** Node.js 22.15+, Chrome or another Chromium browser that can load extensions, and the [Codex CLI](https://developers.openai.com/codex/cli), logged in. Pi needs Node.js 22.19+. Images can also be generated with an OpenAI-compatible API, Gemini or a local Magpie gateway. The one-command install works on macOS and Linux; on Windows, install from source.
+- **You need:** Node.js 22.15+, Chrome or another Chromium browser that can load extensions, and the [Codex CLI](https://developers.openai.com/codex/cli), logged in. Pi needs Node.js 22.19+. Claude Code needs the [Claude Code CLI](https://code.claude.com/docs/en/setup), logged in; it reverses images but cannot generate them. Images can also be generated with an OpenAI-compatible API, Gemini or a local Magpie gateway. The one-command install works on macOS and Linux; on Windows, install from source.
 - **After a restart:** on a Mac, just open QC-Reframe and the service starts by itself. On other systems, run the command the extension shows, or `cd ~/QC-Reframe && npm start`.
 - **Update:** from v0.8.0, open **Settings** (设置中心) → **Local connection** (本机连接) and click **Upgrade** (升级到). A **New version** (新版本) hint appears in the sidebar when one is out. The extension reloads by itself; refresh open pages afterwards. On v0.7.0 or earlier, run the install command again, then click reload on QC-Reframe in `chrome://extensions` and refresh open pages. Your projects stay.
 - **Installed v0.6.0 or earlier from source?** Update that copy instead: give your agent the prompt above, or follow the [upgrade steps](browser-extension/docs/INSTALL_WITH_CODEX.md#日常启动升级和排错). The extension now has a fixed ID, so remove the old QC-Reframe extension once and load the new `.output/chrome-mv3`. Your projects are kept.

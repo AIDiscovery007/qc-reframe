@@ -5,7 +5,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 
 const conflict = (message) => Object.assign(new Error(message), { status: 409 });
 const parseVersion = (text) => String(text).trim().match(/^(?:codex(?:-cli)?\s+)?(\d+\.\d+\.\d+(?:-[\w.-]+)?)$/)?.[1] || null;
-const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`;
+export const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`;
 export function newerVersion(latest, current) {
   const a = parseVersion(latest), b = parseVersion(current);
   if (!a || !b) return false;
@@ -118,21 +118,41 @@ export async function latestRelease(source, fetcher = fetch) {
   return version;
 }
 
-export function createCliManager({ inspect = inspectCodex, run = runCliCommand, latest = latestRelease, onUpdated = async () => {}, now = Date.now } = {}) {
+/**
+ * What differs between managed CLIs: display name, docs, the fixed upgrade command and guidance.
+ * Installation detection and version lookup are passed to the manager separately as `inspect` and `latest`.
+ */
+export const codexProduct = {
+  name: "Codex",
+  url: "https://developers.openai.com/codex/cli/",
+  command: installation => !installation?.manager ? null : installation.source === "standalone" ? `${quote(installation.executable)} update` : installation.source === "homebrew"
+    ? `${quote(installation.manager)} update && ${quote(installation.manager)} upgrade --cask codex`
+    : `${quote(installation.manager)} install --global --prefix ${quote(installation.prefix)} @openai/codex@latest --registry=https://registry.npmjs.org`,
+  loginCommand: executable => `${quote(executable)} login`,
+  comparisonReference: source => ["app", "custom"].includes(source) ? "npm-stable" : undefined,
+  message: installation => installation?.source === "app" ? "请通过桌面 App 检查更新。稳定版 CLI 仅供版本比较，不代表此 App 可升级。"
+    : installation?.reason || "使用当前安装来源升级后，重新检查并验证模型。",
+  async upgrade(run, target, options) {
+    if (target.source === "standalone") await run(target.executable, ["update"], options);
+    else if (target.source === "homebrew") {
+      await run(target.manager, ["update"], options);
+      await run(target.manager, ["upgrade", "--cask", "codex"], options);
+    } else await run(target.manager, ["install", "--global", "--prefix", target.prefix, "@openai/codex@latest", "--registry=https://registry.npmjs.org"], options);
+  },
+};
+
+export function createCliManager({ inspect = inspectCodex, run = runCliCommand, latest = latestRelease, onUpdated = async () => {}, now = Date.now, product = codexProduct } = {}) {
   let installation, inspectedAt = 0, inspection, checking, checkedAt, latestVersion = null, checkError, operation, controller, lastAttempt = 0, closed = false;
   const view = () => {
-    const command = !installation?.manager ? null : installation.source === "standalone" ? `${quote(installation.executable)} update` : installation.source === "homebrew"
-      ? `${quote(installation.manager)} update && ${quote(installation.manager)} upgrade --cask codex`
-      : `${quote(installation.manager)} install --global --prefix ${quote(installation.prefix)} @openai/codex@latest --registry=https://registry.npmjs.org`;
+    const command = product.command(installation);
     return { installed: installation?.installed || false, version: installation?.version || null,
     executable: installation?.executable || null, source: installation?.source || "missing", reason: installation?.reason,
     detectedAt: inspectedAt ? new Date(inspectedAt).toISOString() : null,
     command,
-    comparisonReference: ["app", "custom"].includes(installation?.source) ? "npm-stable" : undefined,
-    instructions: { url: "https://developers.openai.com/codex/cli/", ...(command ? { command } : {}),
-      ...(installation?.executable ? { loginCommand: `${quote(installation.executable)} login` } : {}),
-      message: installation?.source === "app" ? "请通过桌面 App 检查更新。稳定版 CLI 仅供版本比较，不代表此 App 可升级。"
-        : installation?.reason || "使用当前安装来源升级后，重新检查并验证模型。" },
+    comparisonReference: product.comparisonReference(installation?.source),
+    instructions: { url: product.url, ...(command ? { command } : {}),
+      ...(installation?.executable ? { loginCommand: product.loginCommand(installation.executable) } : {}),
+      message: product.message(installation) },
     latestVersion, checkedAt, checkError, updateAvailable: newerVersion(latestVersion, installation?.version),
     canUpdate: !!installation?.manager && !!installation.version && newerVersion(latestVersion, installation.version) && !controller,
     operation };
@@ -168,30 +188,30 @@ export function createCliManager({ inspect = inspectCodex, run = runCliCommand, 
       if (!closed && !controller && installation?.installed && installation.version && (!lastAttempt || now() - lastAttempt >= 86_400_000)) void check(false).catch(() => {});
       return view();
     },
+    /** Local inspection only, for first-connection detection: never contacts the update service. */
+    async detect() {
+      if (!controller) await discover();
+      return view();
+    },
     check,
     async update() {
       if (closed) throw conflict("本机服务已停止，请重新启动后再试。");
-      if (controller) throw conflict("Codex 正在升级，请等待完成。");
+      if (controller) throw conflict(`${product.name} 正在升级，请等待完成。`);
       await check();
       if (closed) throw conflict("本机服务已停止，请重新启动后再试。");
-      if (controller) throw conflict("Codex 正在升级，请等待完成。");
+      if (controller) throw conflict(`${product.name} 正在升级，请等待完成。`);
       if (!view().canUpdate) throw conflict(checkError || installation.reason || "当前没有可升级的版本，请先检查更新。");
       controller = new AbortController();
       const signal = controller.signal, target = { ...installation }, requestedVersion = latestVersion;
-      operation = { status: "running", stage: "正在升级 Codex…", startedAt: new Date().toISOString() };
+      operation = { status: "running", stage: `正在升级 ${product.name}…`, startedAt: new Date().toISOString() };
       void (async () => {
         let refreshStarted = false, upgraded = false;
         try {
-          const options = { env: target.managerEnv, signal, timeout: 10 * 60_000 };
-          if (target.source === "standalone") await run(target.executable, ["update"], options);
-          else if (target.source === "homebrew") {
-            await run(target.manager, ["update"], options);
-            await run(target.manager, ["upgrade", "--cask", "codex"], options);
-          } else await run(target.manager, ["install", "--global", "--prefix", target.prefix, "@openai/codex@latest", "--registry=https://registry.npmjs.org"], options);
+          await product.upgrade(run, target, { env: target.managerEnv, signal, timeout: 10 * 60_000 });
           operation.stage = "正在检查升级结果与刷新模型…";
           await discover(true);
           if (installation.executable !== target.executable || installation.source !== target.source || !installation.version || newerVersion(requestedVersion, installation.version) || installation.version === target.version)
-            throw new Error("升级后的 Codex 路径或版本不符合预期，请检查原安装；未切换到其他 CLI。");
+            throw new Error(`升级后的 ${product.name} 路径或版本不符合预期，请检查原安装；未切换到其他 CLI。`);
           upgraded = true;
           refreshStarted = true;
           await onUpdated();
@@ -203,7 +223,7 @@ export function createCliManager({ inspect = inspectCodex, run = runCliCommand, 
           if (!refreshStarted && (installation?.version !== target.version || installation?.executable !== target.executable)) {
             try { await onUpdated(); } catch (failure) { recoveryError = failure; }
           }
-          operation = { ...operation, status: "failed", stage: upgraded ? "Codex 已升级，复检未完成" : "升级未完成",
+          operation = { ...operation, status: "failed", stage: upgraded ? `${product.name} 已升级，复检未完成` : "升级未完成",
             error: `${error.message}${recoveryError ? `；复检失败：${recoveryError.message}` : ""}`, finishedAt: new Date().toISOString() };
         } finally { controller = undefined; }
       })();

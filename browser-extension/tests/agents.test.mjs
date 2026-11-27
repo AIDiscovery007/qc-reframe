@@ -4,6 +4,7 @@ import { mkdtemp, rm, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAgentRegistry, LEGACY_AGENT } from '../bridge/agents.mjs';
+import { missingAgentCli, setupNotice } from '../lib/agents.ts';
 
 const store = (model, extra = {}) => ({ selectedModel: model, busy: false, selection: () => ({ model }), close() {}, ...extra });
 const run = async () => ({ text: '{}' });
@@ -50,9 +51,9 @@ test('user sees every registered Agent with its own label, model and install cap
   options.adapters.push({ id: 'local-cli', label: 'Local CLI', models: store(null), run });
   const registry = await createAgentRegistry(options);
   assert.deepEqual(registry.view(), { selected: 'codex', agents: [
-    { id: 'codex', label: 'Codex', model: 'codex-model', installable: false },
-    { id: 'pi', label: 'Pi', model: 'pi-model', installable: true },
-    { id: 'local-cli', label: 'Local CLI', model: null, installable: false },
+    { id: 'codex', label: 'Codex', model: 'codex-model', installable: false, cli: null },
+    { id: 'pi', label: 'Pi', model: 'pi-model', installable: true, cli: null },
+    { id: 'local-cli', label: 'Local CLI', model: null, installable: false, cli: null },
   ] });
   await registry.select('local-cli');
   assert.equal(registry.get().label, 'Local CLI');
@@ -91,4 +92,56 @@ test('user cannot start the service with invalid or duplicate Agent adapters', a
   await assert.rejects(createAgentRegistry({ dataDir, adapters: [{ id: 'Bad Id', label: 'x', models: store(null), run }] }), /适配器/);
   await assert.rejects(createAgentRegistry({ dataDir, adapters: [{ id: 'a', label: 'x', models: store(null) }] }), /适配器/);
   await assert.rejects(createAgentRegistry({ dataDir, adapters: [{ id: 'a', label: 'x', models: store(null), run }, { id: 'a', label: 'y', models: store(null), run }] }), /重复/);
+});
+
+test('user sees which Agent CLIs are installed after one local detection, and a failed detection stays unknown', async t => {
+  // Given Codex missing, Pi installed and a third Agent whose detection fails.
+  const options = await setup(t);
+  const detected = [];
+  const cli = (id, state) => {
+    let last = null;
+    return { busy: false, close() {}, peek: () => last, detect: async () => {
+      detected.push(id);
+      if (!state) throw new Error('spawn failed');
+      last = { ...state, executable: `/bin/${id}`, latestVersion: '9.9.9', instructions: { message: 'private' } };
+      return last;
+    } };
+  };
+  options.adapters[0].cli = cli('codex', { installed: false, version: null, source: 'missing' });
+  options.adapters[1].cli = cli('pi', { installed: true, version: '0.84.2', source: 'npm' });
+  options.adapters.push({ id: 'local-cli', label: 'Local CLI', models: store(null), run, cli: cli('local-cli') });
+  const registry = await createAgentRegistry(options);
+  // Before detection nothing is known, so no Agent is reported missing.
+  assert.deepEqual(registry.view().agents.map(agent => agent.cli), [null, null, null]);
+  // When the catalog is detected.
+  const catalog = await registry.detect();
+  // Then every CLI was inspected once, only installation facts reach the catalog, and the failure stays unknown.
+  assert.deepEqual(detected, ['codex', 'pi', 'local-cli']);
+  assert.deepEqual(catalog.agents.map(agent => agent.cli), [
+    { installed: false, version: null, source: 'missing' },
+    { installed: true, version: '0.84.2', source: 'npm' },
+    null,
+  ]);
+  assert.equal(catalog.selected, 'codex');
+  assert.deepEqual(registry.view(), catalog);
+});
+
+test('user is offered installed Agents only when the selected Agent CLI is detected missing, and nothing is switched', () => {
+  const agent = (id, label, cli) => ({ id, label, model: null, cli });
+  const installed = { installed: true, version: '1.0.0', source: 'npm' }, missing = { installed: false, version: null, source: 'missing' };
+  const catalog = { selected: 'codex', agents: [agent('codex', 'Codex', missing), agent('pi', 'Pi', null), agent('claude', 'Claude Code', installed)] };
+  // Given Codex missing, Pi unknown and Claude Code installed, When the notice is built, Then only Claude Code is offered.
+  const found = missingAgentCli(catalog, 'codex');
+  assert.deepEqual(found, { agent: 'codex', label: 'Codex', alternatives: ['Claude Code'] });
+  assert.deepEqual(setupNotice(found), { text: '未找到 Codex CLI，本机已安装 Claude Code，可在插件模型中切换', action: '切换 Agent', section: 'models' });
+  // Given no other installed Agent, Then the missing CLI points to its own management section.
+  const alone = missingAgentCli({ selected: 'claude', agents: [agent('codex', 'Codex', missing), agent('claude', 'Claude Code', missing)] }, 'claude');
+  assert.deepEqual(setupNotice(alone), { text: '未找到 Claude Code CLI，请先完成安装', action: '检查 Claude Code', section: 'claude-cli' });
+  assert.deepEqual(setupNotice({ agent: 'codex', label: 'Codex', alternatives: [] }), { text: '未找到 Codex CLI，请先完成安装', action: '检查 Codex', section: 'cli' });
+  assert.equal(setupNotice({ agent: 'local-cli', label: 'Local CLI', alternatives: [] }).section, 'models');
+  // Given an installed, undetected or stale selection, or an older service without detection, Then no CLI is claimed missing.
+  for (const [value, selected] of [[{ ...catalog, selected: 'claude' }, 'claude'], [{ ...catalog, selected: 'pi' }, 'pi'], [catalog, 'pi'],
+    [{ selected: 'codex', agents: [{ id: 'codex', label: 'Codex', model: null }] }, 'codex'], [undefined, 'codex']])
+    assert.equal(missingAgentCli(value, selected), undefined);
+  assert.deepEqual(setupNotice(undefined), { text: '先为 QC-Reframe 选择并验证模型', action: '选择模型', section: 'models' });
 });

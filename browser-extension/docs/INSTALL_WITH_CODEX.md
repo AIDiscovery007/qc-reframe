@@ -76,7 +76,7 @@ cd qc-reframe/browser-extension
 
 脚本会在 PATH 及 macOS 常见的 Codex/ChatGPT App 资源目录查找 CLI。无法找到时，通过 `CODEX_BIN` 指定真实可执行文件的绝对路径；不修改用户全局 PATH 或 Codex 配置。Windows 上请让 Codex 定位可直接启动的 `codex.exe`，不要将 npm 的 `.cmd` 包装文件设为 `CODEX_BIN`。首发自动化在 macOS 验证，其他系统需单独确认。
 
-如需 Pi 逆向，可在连接后通过「插件模型」顶部卡片选择 Pi 并安装；一键安装要求 Node.js 22.19+ 和 npm，仍需完成对应提供方登录及模型验证。自定义路径使用 `PI_BIN`。会话读取仍使用 Codex，生图渠道独立配置；不要通过切换逆向 Agent 推断生图已就绪。
+如需 Pi 逆向，可在连接后通过「插件模型」顶部卡片选择 Pi 并安装；一键安装要求 Node.js 22.19+ 和 npm，仍需完成对应提供方登录及模型验证。自定义路径使用 `PI_BIN`。如需 Claude Code 逆向，先按官方说明安装并运行 `claude auth login`，再选择 Claude Code 卡片并验证模型；自定义路径使用 `CLAUDE_BIN`，macOS 上已注册的启动器须重新运行 `npm run setup`。会话读取仍使用 Codex，生图渠道独立配置；不要通过切换逆向 Agent 推断生图已就绪。
 
 ## 3. 初始化并启动
 
@@ -148,7 +148,7 @@ npm run setup
 
 ## 5. 自动连接并打开
 
-从本次安装的 `.output/chrome-mv3` 目录加载扩展后，打开工作台即自动连接本机服务，无需查看或填写配对码。Codex、Pi 及后续接入本机服务的 Agent 共用这条连接；当前 Agent、模型和 CLI 状态在「插件模型」查看。macOS 的 Chrome、Codex 注册本机启动器后，打开界面可按需启动服务；未注册或不支持时，界面显示可复制的启动命令，由安装者在终端运行。启动器不会代替用户完成 CLI 登录或安装。
+从本次安装的 `.output/chrome-mv3` 目录加载扩展后，打开工作台即自动连接本机服务，无需查看或填写配对码。Codex、Pi、Claude Code 及后续接入本机服务的 Agent 共用这条连接；当前 Agent、模型和 CLI 状态在「插件模型」查看。macOS 的 Chrome、Codex 注册本机启动器后，打开界面可按需启动服务；未注册或不支持时，界面显示可复制的启动命令，由安装者在终端运行。启动器不会代替用户完成 CLI 登录或安装。
 
 扩展 manifest 带固定公钥，从任何目录或 ZIP 加载的 QC-Reframe 扩展 ID 都是 `lmnmccbogohpiagjbmpaiagaoddhkpgf`，服务只向该 ID 及安装者明确批准的 ID 提供既有凭据。公钥是公开的，开发者模式下其他扩展也可声明同一 ID，请只加载可信来源的 QC-Reframe。普通网页、未知扩展及无 Origin 的请求均不能获取凭据；服务其他接口仍要求认证。升级不会更换已有 token，不将 token 放入扩展构建产物、页面 DOM 或日志。`npm run pair` 仅保留为兼容旧扩展的维护命令，当前界面不提供手工配对入口。
 

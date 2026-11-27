@@ -358,3 +358,12 @@ test('user retains both Pi installations when the active pointer changes before 
   assert.ok(await lstat(join(root,candidate,'node_modules')));
   for(const name of ['npm-cache','npm-user','npm-global']) assert.ok(await lstat(join(root,candidate,name)));
 });
+test('user\'s first-connection detection inspects Pi locally without asking the update service',async t=>{
+  // Given an installed Pi whose release check has never run.
+  let time=100000,inspections=0,calls=0; const dataDir=await directory(t);
+  const m=createPiCliManager({dataDir,now:()=>time,inspect:async()=>{inspections++;return {installed:true,version:'0.84.2',source:'custom',executable:'/pi'};},runtime:async()=>null,latest:async()=>{calls++;return '0.85.0';}});
+  // When detection runs twice within the cache window and again after it.
+  assert.equal((await m.detect()).installed,true); await m.detect(); time+=10000; await m.detect(); await new Promise(r=>setImmediate(r));
+  // Then only bounded local inspections ran and no release query started.
+  assert.equal(inspections,2); assert.equal(calls,0); assert.equal(m.peek().version,'0.84.2'); m.close();
+});

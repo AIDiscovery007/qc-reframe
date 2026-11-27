@@ -78,13 +78,13 @@
 | `lib/reverse-action.ts`、`lib/workspace-handoff.ts`、`lib/prompt-export.ts` | 逆向资格、提交参数与按任务取消锁；交接草稿组装与串行打开工作台；按冻结图序导出提示词。 |
 | `lib/generation-session.ts`、`lib/use-generation.ts` | 工作台与快捷界面共用的生图资格、提交、取消和资源读取，以及 React adapter。 |
 | `lib/operation-policy.ts` | UI 请求来源、通信方式及超时的共同目录；不能替代发送方、参数与 HTTP 鉴权。 |
-| `bridge/cli.mjs`、`bridge/pi-cli.mjs` | 分别识别 Codex/Pi 安装来源、版本与更新，复用固定参数的进程执行器；安装更新与模型验证和任务全局互斥。 |
+| `bridge/cli.mjs`、`bridge/pi-cli.mjs`、`bridge/claude-cli.mjs` | 分别识别 Codex/Pi/Claude Code 安装来源、版本与更新，复用固定参数的进程执行器；安装更新与模型验证和任务全局互斥。 |
 | `bridge/server.mjs`、`bridge/routes/`、`bridge/http.mjs` | 本机 HTTP 服务装配、鉴权与 mutation lock；路由按服务/项目/任务拆分，请求体与图片解码集中在 http.mjs。 |
 | `bridge/batch-scheduler.mjs` | 批次公开视图与空闲时启动下一项的调度泵。 |
 | `bridge/projects.mjs`、`bridge/images.mjs`、`bridge/storage.mjs` | 任务与项目持久化、共享图片存储、迁移与回收。 |
 | `bridge/task-runtime.mjs`、`bridge/task-records.mjs` | 独立任务占用/取消/收尾，任务快照有序原子保存、提交发布及重启恢复。 |
 | `bridge/agents.mjs` | 逆向 Agent 注册表：登记 adapter、持久化选择、按任务快照解析执行者；新增本机 Agent 在 `builtinAgents()` 登记。 |
-| `bridge/agent.mjs`、`bridge/codex-agent.mjs`、`bridge/codex-rpc.mjs`、`bridge/pi-agent.mjs` | 与 Agent 无关的逆向输入、图片顺序与结果校验；Codex（app-server JSON-RPC）与 Pi（子进程）adapter。 |
+| `bridge/agent.mjs`、`bridge/codex-agent.mjs`、`bridge/codex-rpc.mjs`、`bridge/pi-agent.mjs`、`bridge/claude-agent.mjs`、`bridge/claude-mcp.mjs` | 与 Agent 无关的逆向输入、图片顺序与结果校验；Codex（app-server JSON-RPC）、Pi（子进程）与 Claude Code（`claude -p` 加本次任务的 MCP 工具）adapter。 |
 | `bridge/sessions.mjs`、`entrypoints/workspace/SessionPicker.tsx` | 本机会话列表与整会话选择、正文过滤及私有快照；通过既有后台与 bridge 鉴权链路访问。 |
 | `bridge/inspection.mjs` | 逆向专用只读图像工具；仅按当次输入编号裁切、放大和取样，内存返回图像与元信息。 |
 | `bridge/models.mjs`、`bridge/model-context.mjs` | 动态模型目录、真实验证、选择保存与账号/CLI 上下文检查。 |
@@ -108,7 +108,7 @@
 - 逆向模型目录取自插件实际调用的对应 CLI；列表出现不等于账号有权限。验证成功才保存插件选择，失败保留原有效选择；账号、登录、提供方或 CLI 变化需重新确认上下文。不要硬编码“可用模型”，不要悄悄回退到全局默认模型。
 - CLI 管理只允许固定认证端点，不接受用户传入命令或路径。Codex 已确认来源的独立版/npm/Homebrew 可更新；独立版校验包元数据与稳定入口，固定执行原 CLI 的 codex update。Pi 新安装及受管更新使用本机私有 runtime，验证成功后切换安装指针；Pi 外部 npm 安装须核实官方包、原入口、原 prefix 和配套 Node/npm 真实路径，更新前后复检来源与运行时；确认原 CLI 支持本体升级时优先使用原入口的原生升级，无此能力时仅在 npm 真实 prefix 匹配原安装后，通过该 manager 将固定官方版本更新到原 prefix。App/custom 或无法确认来源的安装保留原安装方式。检测对应 manager 与运行时，安装更新与两类 Agent 的任务/模型验证全局互斥；完成后复检安装并清除对应 Agent 的模型信任，失败如实报告，已发生部分替换也不得保留旧信任；Pi 外部 npm 更新一旦启动写入，失败或取消也清除 Pi 模型信任。定时检查只读，安装更新由用户显式触发；Pi 具体安装条件及模块边界见[架构的逆向 Agent](docs/architecture.md#逆向-agent)。
 - 独立安装的 Codex CLI 与桌面 App 更新是两回事；检查 `CODEX_BIN` 实际指向。API / 协议变化需核对实际 CLI 能力和官方文档，不根据模型名字推断支持情况。
-- 逆向 Agent 支持 Codex 与 Pi，配置与协议职责见 [架构的逆向 Agent](docs/architecture.md#逆向-agent)。任务、排队批次与自动生图分别冻结所需配置，未知或不可用 Agent 明确失败，不静默回退；旧任务缺少 Agent 字段按 Codex 解释。设置「插件模型」集中逆向 Agent、对应模型和 CLI 管理；CLI 管理只跟随顶部 Agent 卡片，不另设管理目标。旧 `cli`/`pi-cli` 及恢复入口只打开「插件模型」并聚焦当前管理区域，不改变持久化的逆向 Agent 或生图渠道；检查另一 Agent 须由用户明确切换顶部卡片，迟到响应不得覆盖新选择。会话来源仍使用 Codex。
+- 逆向 Agent 支持 Codex、Pi 与 Claude Code，配置与协议职责见 [架构的逆向 Agent](docs/architecture.md#逆向-agent)。任务、排队批次与自动生图分别冻结所需配置，未知或不可用 Agent 明确失败，不静默回退；旧任务缺少 Agent 字段按 Codex 解释。设置「插件模型」集中逆向 Agent、对应模型和 CLI 管理；CLI 管理只跟随顶部 Agent 卡片，不另设管理目标。旧 `cli`/`pi-cli`/`claude-cli` 及恢复入口只打开「插件模型」并聚焦当前管理区域，不改变持久化的逆向 Agent 或生图渠道；检查另一 Agent 须由用户明确切换顶部卡片，迟到响应不得覆盖新选择。会话来源仍使用 Codex。
 - Agent 通过显式图片和技能输入运行。Codex 保留只读 sandbox 与不自动批准交互式工具；Pi 禁用内建工具、个人扩展与上下文文件，只加载 Reframe 的取证与技能资料工具，不宣称具备 OS sandbox。逆向输出统一结构校验，不把模型文本当成控制命令。
 - 逆向注册 `alchemy_inspect_image` 动态工具；只接受本次输入图号与区域参数，不接受路径或 URL，使用 EXIF 校正后的原图像素坐标。工具在内存中裁切、放大和采样，不写文件；仅处理本会话已注册的工具调用，其他交互请求仍拒绝。生图与模型验证不注册此工具。技能的观察验收条件统一维护在 `references/workflow.md`，最终 observations 是摘要，不是分析深度上限。
 - `functions.exec` 可能将动态工具返回值转成元信息与 PNG data URL 拼接的字符串；工具说明携带经过测试的 `showInspection` 示例，兼容字符串和结构化图像块，禁止将整个返回值或 base64 打印成文字。展示失败优先复用当前结果，不重新调用图片工具。进度区分整图、局部目标倍率与失败；调用成功不等于模型已经查看图像，真实验收须检查视觉输入。

@@ -28,8 +28,10 @@ export function showInspection(result, text, image) {
 }
 
 // Paths come only from the actual localImage input list, never tool arguments.
-export function createImageInspection(imagePaths) {
+// Limits default to Codex's; an Agent with a smaller per-image payload passes its own edge and PNG byte caps.
+export function createImageInspection(imagePaths, { maxEdge = 2048, maxPixels = 4_000_000, maxBytes = Infinity } = {}) {
   const paths = [...imagePaths];
+  const pixelLabel = maxPixels % 1_000_000 ? `${maxPixels} pixels` : `${maxPixels / 1_000_000} million pixels`;
   return {
     spec: {
       type: "function",
@@ -51,7 +53,7 @@ Retain the result in the current cell if display handling fails; repair the disp
             },
             required: ["x", "y", "width", "height"],
           },
-          scale: { type: "number", minimum: 1, maximum: 4, description: "Requested magnification; output is capped at 2048 per edge and 4 million pixels." },
+          scale: { type: "number", minimum: 1, maximum: 4, description: `Requested magnification; output is capped at ${maxEdge} per edge and ${pixelLabel}${Number.isFinite(maxBytes) ? ", and shrunk further when the PNG would exceed the Agent's image size limit" : ""}.` },
           sample: { type: "boolean", description: "Sample original ROI RGB median/min/max before resizing. Requires bbox of at most 1 million pixels. Transparent pixels excluded; partial alpha kept without background compositing." },
         },
         required: ["image"],
@@ -86,16 +88,25 @@ Retain the result in the current cell if display handling fails; repair the disp
           !["x", "y", "width", "height"].every(k => Number.isInteger(bbox[k])) ||
           bbox.x < 0 || bbox.y < 0 || bbox.width < 1 || bbox.height < 1 || bbox.x + bbox.width > width || bbox.y + bbox.height > height)
         throw new Error(`bbox 必须在 EXIF 校正后的 ${width} × ${height} 原图像素范围内，包含整数 x、y、width、height。`);
-      const factor = Math.min(scale, 2048 / bbox.width, 2048 / bbox.height, Math.sqrt(4_000_000 / (bbox.width * bbox.height)));
-      const outputWidth = Math.max(1, Math.floor(bbox.width * factor));
-      const outputHeight = Math.max(1, Math.floor(bbox.height * factor));
+      let factor = Math.min(scale, maxEdge / bbox.width, maxEdge / bbox.height, Math.sqrt(maxPixels / (bbox.width * bbox.height)));
+      let outputWidth = Math.max(1, Math.floor(bbox.width * factor));
+      let outputHeight = Math.max(1, Math.floor(bbox.height * factor));
       if (args.sample && (!args.bbox || bbox.width * bbox.height > 1_000_000))
         throw new Error("颜色采样需要 bbox，且区域不能超过 100 万原图像素；请选择更小的代表性区域。");
       const crop = sharp(source, { limitInputPixels: 64_000_000 }).autoOrient()
         .extract({ left: bbox.x, top: bbox.y, width: bbox.width, height: bbox.height })
         .withIccProfile("srgb");
-      const png = await crop.clone().resize(outputWidth, outputHeight, { kernel: "nearest", fit: "fill" }).png().toBuffer();
+      let png = await crop.clone().resize(outputWidth, outputHeight, { kernel: "nearest", fit: "fill" }).png().toBuffer();
       signal?.throwIfAborted();
+      // Noisy crops compress poorly; shrink until the PNG fits instead of letting the Agent reject the whole request.
+      while (png.length > maxBytes && (outputWidth > 1 || outputHeight > 1)) {
+        factor *= Math.max(0.5, Math.min(0.9, Math.sqrt(maxBytes / png.length) * 0.95));
+        outputWidth = Math.max(1, Math.floor(bbox.width * factor));
+        outputHeight = Math.max(1, Math.floor(bbox.height * factor));
+        png = await crop.clone().resize(outputWidth, outputHeight, { kernel: "nearest", fit: "fill" }).png().toBuffer();
+        signal?.throwIfAborted();
+      }
+      if (png.length > maxBytes) throw new Error("检查结果超过 Agent 的图片大小限制，请选择更小的区域。");
       let sample;
       if (args.sample) {
         const pixels = await crop.clone().ensureAlpha().raw().toBuffer();

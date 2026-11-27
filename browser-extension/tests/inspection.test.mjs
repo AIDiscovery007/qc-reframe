@@ -133,3 +133,22 @@ for (const stage of ["metadata", "toBuffer"]) test(`cancellation during ${stage}
   await assert.rejects(tool.call({ image: 1 }, { signal: controller.signal }), error => error === reason);
   assert.equal(calls, 1, "pre-cancelled calls do no image work");
 });
+
+test("user's inspection result shrinks to fit an Agent image byte limit or fails explicitly", async t => {
+  // Given a noisy region whose full-size PNG exceeds the Agent's per-image byte limit.
+  const noise = Buffer.alloc(600 * 600 * 3);
+  for (let i = 0, x = 1; i < noise.length; i++) { x = (Math.imul(x, 1103515245) + 12345) >>> 0; noise[i] = x >>> 24; }
+  const bytes = await sharp(noise, { raw: { width: 600, height: 600, channels: 3 } }).png().toBuffer();
+  const { path } = await fixture(t, bytes);
+  // When the inspection runs with that limit.
+  const limited = await createImageInspection([path], { maxBytes: 200_000 }).call({ image: 1 });
+  // Then the PNG fits, the reported scale matches the actual output and the kernel stays nearest-neighbour.
+  const output = info(limited).output;
+  assert.ok(decode(limited).length <= 200_000);
+  assert.ok(output.scaleX < 1 && output.width < 600);
+  const metadata = await sharp(decode(limited)).metadata();
+  assert.deepEqual([metadata.width, metadata.height], [output.width, output.height]);
+  assert.match(JSON.stringify(info(limited)), /nearest/);
+  // When no size could fit, Then the task is told to pick a smaller region instead of receiving an oversized image.
+  await assert.rejects(createImageInspection([path], { maxBytes: 10 }).call({ image: 1 }), /图片大小限制/);
+});

@@ -23,6 +23,8 @@ import useProjectLibrary from "./useProjectLibrary";
 import { useMotion } from "../../lib/use-motion";
 import { pollWhileVisible } from "../../lib/visible-poll";
 import { useUpgradeHint } from "../../lib/use-upgrade-hint";
+import { useAgentDetection } from "../../lib/use-agent-detection";
+import { setupNotice } from "../../lib/agents";
 import { createPortal } from "react-dom";
 import { normalizeImage } from "../../lib/image";
 import NewProject from "../workspace/NewProject";
@@ -129,6 +131,10 @@ export default function App({ embedded = false, workspace = false }: { embedded?
   const [service, setService] = useState(initialServiceStatus);
   const { connected, connectionText, cliBusy, cliStatus, modelBusy, reverseAgent, selectedModel } = service;
   const upgrade = useUpgradeHint(workspace && connected);
+  const codexMissing = reverseAgent === "codex" && !!cliStatus && !cliStatus.installed;
+  const setupIncomplete = connected && (!selectedModel || codexMissing);
+  const detectedCli = useAgentDetection(setupIncomplete && !settings, reverseAgent);
+  const notice = setupNotice(detectedCli ?? (codexMissing ? { agent: "codex", label: "Codex", alternatives: [] } : undefined));
   const [serviceBusy, setServiceBusy] = useState(false);
   const [channel, setChannel] = useState(initialGenerationChannel);
   const generationSettings = useRef<ReturnType<typeof createGenerationSettings> | undefined>(undefined);
@@ -571,9 +577,9 @@ export default function App({ embedded = false, workspace = false }: { embedded?
         <div className="error" role="alert">{connectionText} <RecoveryAction error={connectionText} /></div>
       )}
       {!settings && !embedded && !connected && connectionText !== initialServiceStatus.connectionText && <StartCommand />}
-      {connected && (!selectedModel || reverseAgent === "codex" && cliStatus && !cliStatus.installed) && !settings && <div className="model-notice">
-        <span>{reverseAgent === "codex" && cliStatus && !cliStatus.installed ? "未找到 Codex CLI，请先完成安装" : "先为 QC-Reframe 选择并验证模型"}</span>
-        <button className="text-button" onClick={() => openRecovery(reverseAgent === "codex" && cliStatus && !cliStatus.installed ? "cli" : "models")}>{reverseAgent === "codex" && cliStatus && !cliStatus.installed ? "检查 Codex" : "选择模型"}</button>
+      {setupIncomplete && !settings && <div className="model-notice">
+        <span>{notice.text}</span>
+        <button className="text-button" onClick={() => openRecovery(notice.section)}>{notice.action}</button>
       </div>}
 
       {(visibilityNotice || (!tasksOpen && visibilityError)) && <ProjectVisibilityToast notice={visibilityNotice} error={tasksOpen ? "" : visibilityError} busy={busy} containerRef={visibilityFeedback}
