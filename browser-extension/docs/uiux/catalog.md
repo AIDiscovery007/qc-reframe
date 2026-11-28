@@ -152,6 +152,8 @@
 | service-upgrade-blocked | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=blocked | upgradeRegression |
 | service-upgrade-check-failed | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=check-failed | upgradeRegression |
 | service-upgrade-current | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=current | upgradeRegression |
+| service-upgrade-found | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=found | upgradeRegression |
+| service-upgrade-skip | workspace 1440×1000 | /workspace.html?state=library&upgradeRegression=skip | upgradeRegression |
 | service-upgrade-narrow | workspace 320×740 | /workspace.html?state=library&upgradeRegression=narrow | upgradeRegression |
 | workspace-image-model-switch | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=switch&generationDelay=60000&reverseDelay=60000 | workspaceImageModelRegression |
 | workspace-image-model-empty | workspace 1440×1000 | /workspace.html?state=projects&count=4&mode=style&workspaceImageModelRegression=empty&generationDelay=60000&reverseDelay=60000 | workspaceImageModelRegression |

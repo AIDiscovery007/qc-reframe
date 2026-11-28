@@ -174,7 +174,8 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 | 示例与生产一致性 | `preview-contract.test.mjs`：运行实际 preview 脚本并与生产检索契约对照 |
 | 通道身份、数据目录占用与 `dev:*` 拒绝 | `dev-channel.test.mjs`（临时目录与 `ALCHEMY_APP_SUPPORT_DIR`） |
 | 升级检查、受理与安装器回滚 | `upgrade.test.mjs`（模拟 GitHub 与固定安装器参数）、`runtime-package.test.mjs`（本机假 Release 的升级、签名与回滚） |
-| 扩展跟随升级与重新加载 | `service-upgrade.test.mjs` 直接导入 `lib/service-upgrade.ts`；`extension.test.mjs` 验证消息与 reload 后重新打开；`service-upgrade.browser.js` 验证卡片 |
+| 扩展跟随升级与重新加载 | `service-upgrade.test.mjs` 直接导入 `lib/service-upgrade.ts`；`extension.test.mjs` 验证消息与 reload 后重新打开；`service-upgrade.browser.js` 验证卡片、主动检查与跳过 |
+| 新版本提醒与图标 | `upgrade-reminder.test.mjs`（VM 与假 `browser`：闹钟、每版本一次通知、通知按钮、跳过失败、离线、权限拒绝）；`reminder-background.test.mjs` 验证图标优先级 |
 
 测试优先通过真实 interface 注入 request、execute 或文件系统故障，验证可观察行为。App 的同步与编排规则已移入上述 module，测试直接导入；只读取 App 源码检查组件回调接线（`callbackProps`），不再提取闭包执行。新增规则放进对应 module，不为测试重新暴露 App 私有闭包。预览也不泛化成适配器框架；出现第二个真实实现和实际分歧后再深化 seam。
 
@@ -200,8 +201,8 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 
 `bridge/upgrade.mjs` 是升级的唯一服务端 module，`routes/service.mjs` 只做装配：
 
-- `GET /upgrade[?check=auto|manual]`：返回当前、最新、能否升级与原因、是否升级中和安装器的上次结果。`auto` 在开关打开且距上次检查满一天时请求 GitHub，`manual` 每分钟最多一次，不带参数从不联网。检查结果与开关持久化在 `config/upgrade.json`。GitHub 请求只访问固定地址，拒绝重定向、超过 1 MB 的响应、预发布、草稿和与标签不一致的页面链接。
-- `POST /upgrade/settings {autoCheck}`；`POST /upgrade {version}` 返回 202 与 `{version, startedAt}`。受理前重新确认 GitHub 最新版本等于请求版本且高于当前版本，并检查运行包、平台、托管方式、通道与忙碌状态。随后以固定参数分离启动本安装的 `scripts/install.sh`（`QC_REFRAME_VERSION` 固定目标、`QC_REFRAME_REQUIRE_SIGNATURE=1`），输出写入 `logs/upgrade.log`。安装器运行期间，`server.mjs` 拒绝除 `/shutdown` 外的所有 POST。
+- `GET /upgrade[?check=auto|manual]`：返回当前、最新、能否升级与原因、是否升级中和安装器的上次结果。`auto` 在开关打开且距上次检查满一小时时请求 GitHub，`manual` 每分钟最多一次，不带参数从不联网。最新版本带 `notes`：Release 正文中围栏外的二级标题去掉 Markdown 后的纯文本，排除「升级方式与数据」「验证与已知限制」，最多 6 条、每条 60 字符。状态另含 `skippedVersion` 与 `remind`（有新版本、开关打开且未跳过）。检查结果、开关与跳过的版本持久化在 `config/upgrade.json`。GitHub 请求只访问固定地址，拒绝重定向、超过 1 MB 的响应、预发布、草稿和与标签不一致的页面链接。
+- `POST /upgrade/settings` 每次只接受 `{autoCheck}` 或 `{skippedVersion}`（版本号或 `null`，只能跳过当前最新版本）；`POST /upgrade {version}` 返回 202 与 `{version, startedAt}`。受理前重新确认 GitHub 最新版本等于请求版本且高于当前版本，并检查运行包、平台、托管方式、通道与忙碌状态。随后以固定参数分离启动本安装的 `scripts/install.sh`（`QC_REFRAME_VERSION` 固定目标、`QC_REFRAME_REQUIRE_SIGNATURE=1`），输出写入 `logs/upgrade.log`。安装器运行期间，`server.mjs` 拒绝除 `/shutdown` 外的所有 POST。
 - `scripts/install.sh` 验证签名与 SHA-256 后停止服务，把旧条目移到 `.qc-reframe-previous/`，`setup` 或 `start` 失败时移回并重启旧服务；结果写入 `runtime/upgrade-result.json`。替换期间存在 `.qc-reframe-install-pending` 或 `.qc-reframe-previous` 时，`manage.mjs` 的自动启动（启动器）拒绝唤醒。
-- 扩展端：`lib/service-upgrade.ts` 是纯规则（提示、跟随、结果文案、reload 后重新打开），`ServiceUpgrade.tsx` 只负责卡片与确认框，`lib/use-upgrade-hint.ts` 提供侧栏提示。`alchemy:upgrade-*` 与 `alchemy:extension-reload` 只接受扩展页面的 message transport。成功后后台在 `storage.local` 记下 `upgradeReopenAt` 再 `runtime.reload()`；新后台启动时消费该记录，两分钟内才重新打开「设置中心 › 本机连接」。
+- 扩展端：`lib/service-upgrade.ts` 是纯规则（提示、跟随、结果文案、reload 后重新打开），`ServiceUpgrade.tsx` 只负责卡片与确认框，`lib/use-upgrade-hint.ts` 提供侧栏提示。`lib/upgrade-reminder.ts` 用 `chrome.alarms` 每 30 分钟以已保存令牌请求 `GET /upgrade?check=auto`（闹钟已存在时不重建；无令牌或服务不可达时跳过，不唤醒服务），按 `remind` 在 `storage.local` 记下要提示的版本并对每个版本只发一次系统通知（「查看并升级」「跳过此版本」）；扩展页面读到的状态也经它更新，已在界面看到的版本不再通知。图标只由 `lib/reminder-background.ts` 绘制：未读任务结果数量优先，其次 `NEW`。`alchemy:upgrade-*` 与 `alchemy:extension-reload` 只接受扩展页面的 message transport。成功后后台在 `storage.local` 记下 `upgradeReopenAt` 再 `runtime.reload()`；新后台启动时消费该记录，两分钟内才重新打开「设置中心 › 本机连接」。
 - `scripts/sign-release.mjs` 在 Release 工作流的单独步骤中用 `RELEASE_SIGNING_KEY` 签名 `SHA256SUMS`，并先用 `install.sh` 内置公钥验证，避免发布已安装副本会拒绝的签名。

@@ -41,7 +41,7 @@ node --test --test-concurrency=1 agent-tool/*.test.mjs agent-tool/ui/*.test.mjs 
 node agent-tool/ui.mjs gate --tier browser --no-build   # 全部登记场景＋隔离真实扩展；有已审阅基线时用 full
 ```
 
-前置条件是扩展 npm 依赖与 Playwright Chromium 已安装。远端工作流须实际运行后才算 CI 通过；main 上失败时 CI 自动开启或更新 `CI: main 回归失败` issue。发布标签由 [release 工作流](../.github/workflows/release.yml) 先对准确提交运行同一回归，通过后才构建 ZIP、校验版本并创建 Release。
+前置条件是扩展 npm 依赖与 Playwright Chromium 已安装。产品测试只访问自己在本机启动的服务：`npm test` 经 `tests/support/offline.mjs` 拒绝非本机地址的 `fetch`，避免本机装有真实 Codex 时每次回归向 GitHub 查询版本、耗尽同一 IP 每小时 60 次的未认证额度；需要外部响应的测试改用本机假服务或注入的 fetch。远端工作流须实际运行后才算 CI 通过；main 上失败时 CI 自动开启或更新 `CI: main 回归失败` issue。发布标签由 [release 工作流](../.github/workflows/release.yml) 先对准确提交运行同一回归，通过后才构建 ZIP、校验版本并创建 Release。
 
 ## 界面预览
 

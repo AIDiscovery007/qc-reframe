@@ -1,6 +1,7 @@
 import { openWorkspace } from "./workspace-navigation";
 import { browser } from 'wxt/browser';
 import type { bridge as Bridge } from './bridge';
+import { UPGRADE_BADGE_KEY } from './upgrade-reminder';
 import { markRemindersRead, newReminderState, reconcileReminders, reminderSummary, reminderTone, type ReminderState, type TaskNotice } from './task-reminders';
 
 const key = 'taskReminders';
@@ -35,12 +36,18 @@ export function startReminderService(bridge: typeof Bridge) {
     const showHidden = (await browser.storage.session.get('showHiddenProjects')).showHiddenProjects === true;
     return items.filter(item => showHidden || !item.hidden);
   };
+  // The one owner of the toolbar icon: unread task results first, then a new release to point out, then nothing.
+  const drawBadge = async (state: ReminderState) => {
+    const unread = await shown(state.unread);
+    const upgrade = (await browser.storage.local.get(UPGRADE_BADGE_KEY))[UPGRADE_BADGE_KEY];
+    const release = !unread.length && typeof upgrade === 'string' ? upgrade : '';
+    await browser.action.setBadgeText({ text: unread.length ? String(Math.min(unread.length, 99)) : release ? 'NEW' : '' });
+    await browser.action.setBadgeBackgroundColor({ color: unread.some(item => item.status === 'failed') ? '#b64a3d' : '#ffd440' });
+    await browser.action.setTitle({ title: unread.length ? `Reframe · ${unread.length} 项结果未查看` : release ? `QC-Reframe ${release} 可用 · 打开设置中心升级` : '打开 QC-Reframe' });
+  };
   const save = async (state: ReminderState) => {
     await browser.storage.local.set({ [key]: state });
-    const unread = await shown(state.unread);
-    await browser.action.setBadgeText({ text: unread.length ? String(Math.min(unread.length, 99)) : '' });
-    await browser.action.setBadgeBackgroundColor({ color: unread.some(item => item.status === 'failed') ? '#b64a3d' : '#ffd440' });
-    await browser.action.setTitle({ title: unread.length ? `Reframe · ${unread.length} 项结果未查看` : '打开 QC-Reframe' });
+    await drawBadge(state);
   };
   const audio = async (preferences: ReminderState['preferences']) => {
     if (!audioSupported) throw new Error('此浏览器暂不支持后台声音，界面提醒仍然可用。');
@@ -197,5 +204,7 @@ export function startReminderService(bridge: typeof Bridge) {
     if (!state.pending.length) state.due = 0;
     await save(state); schedule(state);
   });
-  return { wake, projectsChanged };
+  /** Redraws the icon after the release to point out changed. */
+  const refreshBadge = () => serial(async () => drawBadge(await read()));
+  return { wake, projectsChanged, refreshBadge };
 }

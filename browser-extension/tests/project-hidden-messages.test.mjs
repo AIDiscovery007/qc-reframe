@@ -64,6 +64,7 @@ function background(local = { preferences: { token: "private-token" } }) {
     AbortController, AbortSignal, setTimeout, clearTimeout,
     require: name => (name in ownedModules ? instantiate(ownedModules[name], { "wxt/browser": { browser }, "./bridge": { ...bridgeModule, bridge }, "./extension-channel": channelModule }) : undefined) ?? ({
       "../lib/reminder-background": { startReminderService: () => ({ wake: async () => {}, projectsChanged: async () => {} }) },
+      "../lib/upgrade-reminder": { startUpgradeReminder: () => ({ seen: async () => {} }) },
       "wxt/browser": { browser }, "../lib/bridge": { ...bridgeModule, bridge },
       "../lib/operation-policy": operationPolicy, "../lib/extension-channel": channelModule, "../lib/service-upgrade": serviceUpgrade,
       "../lib/image-size.mjs": { validImageSizeRequest }, "../lib/generation-session": { validGenerationRatio },

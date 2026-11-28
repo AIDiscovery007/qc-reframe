@@ -44,7 +44,7 @@
 **检查**
 
 - bridge 只请求固定地址 `https://api.github.com/repos/AIDiscovery007/qc-reframe/releases/latest`，限时 10 秒，响应不超过 1 MB，拒绝重定向。只接受 `vX.Y.Z` 格式的标签，并且不是预发布。
-- 检查结果和开关保存在 `.local/config/upgrade.json`，服务重启后仍有效。打开工作台时请求自动检查：开关打开且距上次检查满一天才联系 GitHub。手动「检查更新」同一分钟内最多请求一次。请求不带任何用户数据，GitHub 能看到的是 IP 和 User-Agent（`QC-Reframe/版本号`）。
+- 检查结果和开关保存在 `.local/config/upgrade.json`，服务重启后仍有效。打开工作台时请求自动检查：开关打开且距上次检查满一天才联系 GitHub（2026-11-28 起改为每小时并增加后台提醒，见[主动检查更新与新版本提醒](2026-11-28-upgrade-check-and-reminder.md)）。手动「检查更新」同一分钟内最多请求一次。请求不带任何用户数据，GitHub 能看到的是 IP 和 User-Agent（`QC-Reframe/版本号`）。
 - `GET /upgrade` 返回当前版本、最新版本（版本号、标题、Release 页面链接、发布时间）、检查时间、能否升级及原因、上次升级结果。更新说明只给链接，不渲染 Release 正文。
 
 **受理（`POST /upgrade { version }`）**

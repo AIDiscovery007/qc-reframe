@@ -107,7 +107,7 @@ UI 改动用 `npm run preview` 检查相关状态，再按任务需要验收实�
 ## 发布新版本：先提交，再发布
 
 1. 确定目标版本，更新 `package.json` 和 `package-lock.json` 中的根版本。WXT 从包版本生成 manifest；同步中英文 README、安装 Prompt、克隆标签、下载链接和安装指引，不复制旧版功能日志到首页。
-2. 新增 `docs/releases/v版本号.md` 并更新索引。说明是否需要重启服务、重新加载扩展、刷新网页，以及数据或配置是否迁移；没有实际验证的环节如实标注。用于 GitHub Release 正文的图片链接使用对应标签下的公开完整地址，避免相对路径失效或后续 main 改动替换历史图片。
+2. 新增 `docs/releases/v版本号.md` 并更新索引。说明是否需要重启服务、重新加载扩展、刷新网页，以及数据或配置是否迁移；没有实际验证的环节如实标注。用于 GitHub Release 正文的图片链接使用对应标签下的公开完整地址，避免相对路径失效或后续 main 改动替换历史图片。版本页的二级标题（`##`）就是插件「本机连接」显示的更新要点：每个标题写成一句用户可读的变化，最多显示前 6 个、每个 60 字符以内；「升级方式与数据」「验证与已知限制」这两节固定标题不显示。发布正式 Release 即向已安装的用户推送新版本提醒，只推 main、预发布或草稿不会提醒。
 3. 经 PR 合入 main，确认该提交的 `ci` 检查通过。
 4. 在该 main 提交创建 `v版本号` 标签并单独推送。不要修改既有标签来补发不同内容。
 5. [Release 工作流](.github/workflows/release.yml)对标签准确提交运行完整回归；通过后核对标签位于 main、包版本与标签一致、版本页存在，再执行 `npm run zip`，核对 ZIP 的 manifest 版本，用 `npm run package:runtime` 生成运行包 `qc-reframe-runtime.tar.gz` 并附上 `install.sh`，为三者生成只含文件名的 `SHA256SUMS`，在单独步骤中用 `RELEASE_SIGNING_KEY` secret 签名为 `SHA256SUMS.sig`（`scripts/sign-release.mjs` 先用 `install.sh` 内置的公钥验证，不匹配则失败），以版本页首行为标题、全文为正文创建 Release。带 `-` 的标签发布为 prerelease，其余为 latest。回归失败则不发布。发版前可在 Actions 中手动运行 Release 工作流演练：对 main 执行同样的回归、打包与校验，但不创建 Release。

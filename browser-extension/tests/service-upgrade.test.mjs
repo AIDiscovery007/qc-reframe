@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  newerVersion, upgradeHint, waitForUpgrade, upgradeOutcomeMessage, markReopenAfterReload, reopenAfterReload, REOPEN_KEY,
+  newerVersion, upgradeHint, remindedVersion, waitForUpgrade, upgradeOutcomeMessage, markReopenAfterReload, reopenAfterReload, REOPEN_KEY,
 } from "../lib/service-upgrade.ts";
 
 const status = (overrides = {}) => ({
@@ -31,9 +31,28 @@ test("user is offered an upgrade only for a newer release, and a reload once the
   assert.equal(upgradeHint("0.8.0", status({ current: "0.9.0" })), "reload");
   assert.equal(upgradeHint("0.8.0", status({ current: "0.9.0", latest: release("1.0.0"), available: true })), "reload");
   assert.equal(upgradeHint("0.9.0", status()), undefined, "an extension newer than its service is not an upgrade");
+  // And a release the user skipped, or any release while automatic checks are off, is not pointed out; a service from
+  // before reminders existed sends no `remind` and keeps offering what is available.
+  assert.equal(upgradeHint("0.8.0", status({ latest: release("0.9.0"), available: true, remind: false, skippedVersion: "0.9.0" })), undefined);
+  assert.equal(upgradeHint("0.8.0", status({ latest: release("0.9.0"), available: true, remind: true })), "available");
   assert.equal(newerVersion("0.10.0", "0.9.9"), true);
   assert.equal(newerVersion("1.0.0", "1.0.0"), false);
   for (const invalid of ["v1.0.0", "1.0", "01.0.0", "", undefined]) assert.equal(newerVersion(invalid, "0.0.1"), false);
+});
+
+// Scenario: user is reminded of a new release without opening the extension
+//   Given the status the background reads from the service
+//   When a newer release should be pointed out
+//   Then the reminder names that release; otherwise there is none, also while the extension still needs a reload
+test("user is reminded only of a release the service says to point out", () => {
+  assert.equal(remindedVersion("0.8.0", undefined), null);
+  assert.equal(remindedVersion("0.8.0", status({ latest: release("0.9.0"), available: true, remind: true })), "0.9.0");
+  assert.equal(remindedVersion("0.8.0", status({ latest: release("0.9.0"), available: true, remind: false })), null);
+  // An older service sends no `remind` and cannot report the user's opt-out, so it never earns a background reminder.
+  assert.equal(remindedVersion("0.8.0", status({ latest: release("0.9.0"), available: true, autoCheck: false })), null);
+  assert.equal(remindedVersion("0.8.0", status({ latest: release("0.9.0"), available: true })), null);
+  assert.equal(remindedVersion("0.8.0", status({ latest: release("0.8.0") })), null);
+  assert.equal(remindedVersion("0.8.0", status({ current: "0.9.0", latest: release("1.0.0"), available: true, remind: true })), null);
 });
 
 // Scenario: user waits while the upgrade runs

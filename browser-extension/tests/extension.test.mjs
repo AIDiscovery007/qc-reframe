@@ -331,6 +331,7 @@ async function background(fetch = async () => ({ ok: true, json: async () => ({ 
     alarms: { create: async () => {}, onAlarm: { addListener() {} } },
     runtime: {
       id: "test",
+      getManifest: () => ({ version: "0.8.0" }),
       getContexts: async () => [],
       getURL: (path) => `chrome-extension://test${path}`,
       onConnect: { addListener: fn => { handlers.connect = fn; } },
@@ -386,6 +387,8 @@ async function background(fetch = async () => ({ ok: true, json: async () => ({ 
     },
   };
   setup(chrome, handlers);
+  // The new-release reminder checks once as the worker starts; answer that here so each test sees only its own requests.
+  let starting = true;
   runInNewContext(await readFile(new URL("background.js", build), "utf8"), {
     chrome,
     console,
@@ -394,10 +397,13 @@ async function background(fetch = async () => ({ ok: true, json: async () => ({ 
     TextEncoder,
     URLSearchParams,
     setTimeout, clearTimeout, setInterval, clearInterval,
-    fetch: (url, options) => String(url).includes("/task-feed") ? Promise.resolve({ ok: true, json: async () => ({ revision: "test", tasks: [] }) }) : fetch(url, options),
+    fetch: (url, options) => String(url).includes("/task-feed") ? Promise.resolve({ ok: true, json: async () => ({ revision: "test", tasks: [] }) })
+      : starting && String(url).endsWith("/upgrade?check=auto") ? Promise.resolve({ ok: false, status: 503, json: async () => ({ error: "not in this test" }) })
+      : fetch(url, options),
     ...globals,
   });
   await new Promise(resolve => setImmediate(resolve));
+  starting = false;
   assert.equal(typeof handlers.message, "function");
   return { handlers, messages, tabs, chrome, sessionStorage };
 }
@@ -1442,6 +1448,10 @@ test("user's upgrade requests reach only the fixed upgrade endpoints, from exten
   await send({ type: "alchemy:upgrade-settings", autoCheck: false, extra: "ignored" });
   assert.ok(calls.at(-1).url.endsWith("/upgrade/settings"));
   assert.deepEqual(JSON.parse(calls.at(-1).options.body), { autoCheck: false });
+  for (const skippedVersion of ["0.9.0", null]) {
+    await send({ type: "alchemy:upgrade-settings", skippedVersion, autoCheck: "ignored" });
+    assert.deepEqual(JSON.parse(calls.at(-1).options.body), { skippedVersion });
+  }
   await send({ type: "alchemy:upgrade-start", version: "0.9.0", path: "/shutdown", command: "rm" });
   assert.ok(calls.at(-1).url.endsWith("/upgrade"));
   assert.equal(calls.at(-1).options.method, "POST");
@@ -1452,6 +1462,8 @@ test("user's upgrade requests reach only the fixed upgrade endpoints, from exten
     { type: "alchemy:upgrade-status", check: "daily" },
     { type: "alchemy:upgrade-settings", autoCheck: "no" },
     { type: "alchemy:upgrade-settings" },
+    { type: "alchemy:upgrade-settings", skippedVersion: "v0.9.0" },
+    { type: "alchemy:upgrade-settings", skippedVersion: "0.9.0/../x" },
     { type: "alchemy:upgrade-start", version: "v0.9.0" },
     { type: "alchemy:upgrade-start", version: "0.9.0/../../shutdown" },
     { type: "alchemy:upgrade-start" },
@@ -1882,11 +1894,15 @@ async function reminderBackground(respond) {
   const storage = { preferences: { token: 'expired', mode: 'reenact' } };
   class Clock extends Date { static now() { return now; } }
   const bg = await background(undefined, { ...clock, Date: Clock, fetch: async (url, options) => {
+    // The upgrade reminder's startup check is covered by upgrade-reminder.test.mjs.
+    if (new URL(url).pathname === '/upgrade') return reminderResponse({ error: 'not in this test' }, 503);
     const call = { path: new URL(url).pathname, token: options.headers.Authorization };
     calls.push(call);
     return respond(call);
   } }, (chrome, handlers) => {
-    chrome.alarms.onAlarm.addListener = fn => { handlers.alarm = fn; };
+    // Task and upgrade reminders each listen for their own alarm.
+    const alarmListeners = [];
+    chrome.alarms.onAlarm.addListener = fn => { alarmListeners.push(fn); handlers.alarm = event => alarmListeners.forEach(listener => listener(event)); };
     chrome.storage.onChanged.addListener = fn => { handlers.storage = fn; };
     chrome.storage.local.get = async () => structuredClone(storage);
     chrome.storage.local.remove = async key => { delete storage[key]; };

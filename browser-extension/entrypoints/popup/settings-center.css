@@ -28,6 +28,10 @@
 .settings-update-card p { font-size: 11px; color: #786b51; line-height: 1.8; }
 .settings-center-content .settings-update-card .primary { background: var(--ink); color: #fff; margin-top: 16px; box-shadow: none; max-width: 220px; }
 .settings-center-content .settings-update-card .primary:disabled { background: #ded8c5; color: #847b69; }
+.settings-center .settings-cli-actions .secondary { width: auto; min-width: 112px; margin: 0; padding: 10px 18px; background: var(--surface); }
+.settings-release-notes { margin: 4px 0 0; font-size: 11px; color: #786b51; }
+.settings-release-notes strong { color: var(--ink); }
+.settings-release-notes ul { margin: 4px 0 0; padding-left: 18px; line-height: 1.8; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 0; font-size: 12px; }
 .settings-row .settings-label { color: var(--muted); font-size: 11px; }
 .settings-row button { padding: 2px 0; border: 0; background: none; font-size: 11px; text-decoration: underline; text-underline-offset: 4px; }
