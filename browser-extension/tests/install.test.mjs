@@ -456,6 +456,63 @@ test("updated manager controls an old running service without moving data, then 
   }
 });
 
+// A managed service that drops the connection instead of answering while `drops(phase)` holds, and exits after `dropsBeforeExit`
+// drops once stopping. Phase is "running" before /shutdown and "stopping" after it.
+async function droppingService(t, f, { drops, dropsBeforeExit = Infinity }) {
+  await mkdir(join(f.dir, "config"), { recursive: true });
+  await writeFile(join(f.dir, "config", "token"), "dropping-token");
+  const state = { phase: "running", shutdowns: 0, dropped: 0 };
+  const service = createServer((req, res) => {
+    if (drops(state.phase)) {
+      state.dropped++;
+      req.socket.destroy();
+      if (state.phase === "stopping" && state.dropped >= dropsBeforeExit) { service.close(); service.closeAllConnections(); }
+      return;
+    }
+    res.setHeader("Content-Type", "application/json");
+    if (req.url === "/shutdown") { state.shutdowns++; state.phase = "stopping"; res.end('{"stopped":true}'); return; }
+    res.end(JSON.stringify({ service: "qc-alchemy", version: "0.0.0", ready: true, managed: true, active: 0 }));
+  });
+  service.listen(Number(f.env.ALCHEMY_PORT), "127.0.0.1");
+  await once(service, "listening");
+  t.after(() => { service.closeAllConnections(); service.close(); });
+  return state;
+}
+
+test("user stops a service that drops a connection while it exits and stop waits until it is gone", { skip: process.platform === "win32" }, async t => {
+  // Given a running managed service that, once asked to stop, drops the next connections before its port closes.
+  const f = await installation(t);
+  const service = await droppingService(t, f, { drops: phase => phase === "stopping", dropsBeforeExit: 2 });
+  // When the user stops it.
+  const stopped = await f.run("stop");
+  // Then the dropped connections count as "still exiting", and stop reports success once the port refuses connections.
+  assert.match(stopped.stdout, /本机服务已停止/);
+  assert.equal(service.shutdowns, 1);
+  assert.equal(service.dropped, 2);
+  await assert.rejects(f.run("status"), error => /本机服务未运行/.test(error.stdout));
+});
+
+test("user's stop fails explicitly when a service keeps dropping connections and never exits", { skip: process.platform === "win32" }, async t => {
+  // Given a managed service that accepts /shutdown but then drops every connection and never closes its port.
+  const f = await installation(t);
+  const service = await droppingService(t, f, { drops: phase => phase === "stopping" });
+  // When the user stops it.
+  // Then stop does not claim success: it says the request was sent but the service has not exited.
+  await assert.rejects(f.run("stop"), error => /尚未退出/.test(error.stderr) && !/本机服务已停止/.test(error.stdout));
+  assert.equal(service.shutdowns, 1);
+  assert.ok(service.dropped > 1);
+});
+
+test("user's stop does not send a shutdown when it cannot confirm what is running on the port", { skip: process.platform === "win32" }, async t => {
+  // Given a listener on the service port that drops every connection before any stop was requested.
+  const f = await installation(t);
+  const service = await droppingService(t, f, { drops: () => true });
+  // When the user stops it.
+  // Then stop refuses because the state is unknown, and sends no shutdown.
+  await assert.rejects(f.run("stop"), error => /无法确认/.test(error.stderr));
+  assert.equal(service.shutdowns, 0);
+});
+
 test("startup refuses an unrelated listener without changing its files or stopping it", { skip: process.platform === "win32" }, async t => {
   const { dir, env, run } = await installation(t);
   const other = createServer((req, res) => { res.writeHead(401); res.end("other service"); });

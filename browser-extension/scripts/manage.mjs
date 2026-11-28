@@ -83,7 +83,14 @@ async function token() {
   return (await readStoredConfig(dataDir, "token"))?.trim() || "";
 }
 
-async function probe(signal) {
+const EXITING = Symbol("exiting");
+const DROPPED = new Set(["ECONNRESET", "EPIPE", "UND_ERR_SOCKET", "UND_ERR_CLOSED"]);
+
+/**
+ * The service's health, or null once the port refuses connections. With `exiting`, for a service already asked to stop, a
+ * dropped connection returns EXITING: an exiting service may drop a connection it accepted instead of refusing it.
+ */
+async function probe(signal, { exiting = false } = {}) {
   signal?.throwIfAborted();
   let response;
   try {
@@ -92,6 +99,7 @@ async function probe(signal) {
   } catch (error) {
     signal?.throwIfAborted();
     if (error.cause?.code === "ECONNREFUSED") return null;
+    if (exiting && DROPPED.has(error.cause?.code)) return EXITING;
     throw new Error(`无法确认 ${url} 的状态，未启动或停止任何现有服务。`);
   }
   if (!response.ok) throw new Error(`端口 ${port} 已被其他服务或另一份 QC-Reframe 安装占用，未改动现有服务。`);
@@ -168,7 +176,7 @@ async function stopService(signal) {
   });
   const value = await response.json();
   if (!response.ok) throw new Error(value.error || "停止失败");
-  for (let i = 0; i < 20; i++) { if (!await probe(signal)) return; await sleep(100, signal); }
+  for (let i = 0; i < 20; i++) { if (!await probe(signal, { exiting: true })) return; await sleep(100, signal); }
   throw new Error("停止请求已发送，但服务尚未退出，请检查 npm run status。");
 }
 
