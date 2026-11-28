@@ -51,7 +51,9 @@ export function upgradeHint(extensionVersion: string, status: UpgradeStatus | un
 
 /** The release the icon and the system notification should point out, if any. */
 export function remindedVersion(extensionVersion: string, status: UpgradeStatus | undefined) {
-  return upgradeHint(extensionVersion, status) === "available" ? status!.latest?.version ?? null : null;
+  // Unlike the sidebar hint, a background reminder needs the service's explicit `remind`: an older service sends none
+  // and cannot report that the user turned reminders off.
+  return status?.remind === true && upgradeHint(extensionVersion, status) === "available" ? status.latest?.version ?? null : null;
 }
 
 /** True for a reply that has the shape of an upgrade status, so a stray reply cannot clear or set a reminder. */

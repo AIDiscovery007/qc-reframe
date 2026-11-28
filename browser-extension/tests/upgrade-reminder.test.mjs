@@ -91,9 +91,6 @@ test("user opens or skips the release from the reminder", async () => {
   await h.button("reframe-tasks", 1);
   assert.deepEqual(h.opened, []);
   assert.equal(h.calls.length, 1, "other notifications are not ours");
-  await h.click("reframe-upgrade");
-  await h.button("reframe-upgrade", 0);
-  assert.deepEqual(h.opened, ["connection", "connection"]);
   // When skipping fails, Then the reminder stays so the user can skip in settings.
   await h.button("reframe-upgrade", 1);
   assert.deepEqual(h.calls.at(-1), { path: "/upgrade/settings", token: "test-only", body: { skippedVersion: "0.9.0" } });
@@ -104,6 +101,15 @@ test("user opens or skips the release from the reminder", async () => {
   assert.equal(h.local.upgradeBadge, undefined);
   assert.equal(h.badges.at(-1), null);
   assert.ok(h.cleared.includes("reframe-upgrade"));
+  // When the user clicks the notification or 查看并升级, Then settings open and the notification is withdrawn.
+  for (const open of [shown => shown.click("reframe-upgrade"), shown => shown.button("reframe-upgrade", 0)]) {
+    const shown = await harness();
+    await open(shown);
+    assert.deepEqual(shown.opened, ["connection"]);
+    assert.ok(shown.cleared.includes("reframe-upgrade"));
+    await shown.button("reframe-upgrade", 1);
+    assert.equal(shown.calls.length, 1, "a withdrawn notification skips nothing");
+  }
 });
 
 // Scenario: user whose service is stopped is not disturbed
@@ -134,6 +140,29 @@ test("user is not disturbed when unpaired, offline, opted out, denied notificati
   const upgraded = await harness({ local: { preferences: { token: "test-only" }, upgradeBadge: "0.9.0", upgradeNotified: "0.9.0" }, reply: () => status({ current: "0.9.0", available: false, remind: false }) });
   assert.equal(upgraded.local.upgradeBadge, undefined);
   assert.deepEqual(upgraded.notices, []);
+});
+
+// Scenario: user skips only the release the notification names
+//   Given a notification for 0.9.0 is still shown
+//   When settings then report 0.10.0 and the user clicks 跳过此版本 on the old notification
+//   Then the old notification is gone and nothing is skipped; a newer release is skipped only from its own notification
+test("user skips only the release the notification names", async () => {
+  let latest = "0.9.0";
+  const h = await harness({ reply: (path, body) => path === "/upgrade/settings"
+    ? status({ latest: release(latest), skippedVersion: body.skippedVersion, remind: false }) : status({ latest: release(latest) }) });
+  assert.equal(h.notices.at(-1).title, "QC-Reframe 0.9.0 可用");
+  latest = "0.10.0";
+  await h.service.seen(status({ latest: release("0.10.0") }));
+  assert.ok(h.cleared.includes("reframe-upgrade"), "the 0.9.0 notification is withdrawn");
+  await h.button("reframe-upgrade", 1);
+  assert.equal(h.calls.filter(call => call.path === "/upgrade/settings").length, 0, "a stale click skips nothing");
+  assert.equal(h.local.upgradeBadge, "0.10.0");
+  // When the next release gets its own notification, Then skipping it skips exactly that release.
+  latest = "0.11.0";
+  await h.alarm("reframe-upgrade-check");
+  assert.equal(h.notices.at(-1).title, "QC-Reframe 0.11.0 可用");
+  await h.button("reframe-upgrade", 1);
+  assert.deepEqual(h.calls.at(-1).body, { skippedVersion: "0.11.0" });
 });
 
 // Scenario: user skips a release from settings

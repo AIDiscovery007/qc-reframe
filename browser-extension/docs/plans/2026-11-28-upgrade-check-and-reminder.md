@@ -89,7 +89,13 @@
 
 - **user skips a release from the reminder**
   When 点通知上的「跳过此版本」
-  Then 服务记录跳过，通知关闭，`NEW` 消失；服务不可达时 `NEW` 保留，可在设置页跳过
+  Then 服务记录跳过通知上写的那个版本，通知关闭，`NEW` 消失；服务不可达时 `NEW` 保留，可在设置页跳过
+  And 通知显示后若出现更新的版本，旧通知被撤回，点旧通知不会跳过任何版本（PR 评审发现）
+
+- **user on an older service is not reminded in the background**
+  Given 本机服务较旧，状态里没有 `remind`，无法说明用户是否关闭了提醒
+  When 后台检查
+  Then 不显示 `NEW`、不弹通知；侧栏仍按原兼容规则提示新版本
 
 - **user keeps seeing unread task results on the icon**
   Given 有 2 个未查看的任务结果且有新版本

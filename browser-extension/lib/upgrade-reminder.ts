@@ -10,6 +10,8 @@ const PERIOD_MINUTES = 30;
 export const UPGRADE_BADGE_KEY = "upgradeBadge";
 // The last release a system notification was shown for, or that the user already saw in the extension.
 const NOTIFIED_KEY = "upgradeNotified";
+// The release the visible notification names; its buttons act on this release only.
+const NOTICE_KEY = "upgradeNotice";
 
 type Options = {
   bridge: typeof Bridge; extensionVersion(): string;
@@ -32,13 +34,15 @@ export function startUpgradeReminder({ bridge, extensionVersion, refreshBadge, o
   /** Applies a status to the icon; `notify` shows the system notification once per release. */
   const apply = (status: UpgradeStatus, notify: boolean) => serial(async () => {
     const version = remindedVersion(extensionVersion(), status);
-    const stored = await browser.storage.local.get([UPGRADE_BADGE_KEY, NOTIFIED_KEY]);
+    const stored = await browser.storage.local.get([UPGRADE_BADGE_KEY, NOTIFIED_KEY, NOTICE_KEY]);
     if (stored[UPGRADE_BADGE_KEY] !== (version ?? undefined)) {
       if (version) await browser.storage.local.set({ [UPGRADE_BADGE_KEY]: version });
       else await browser.storage.local.remove(UPGRADE_BADGE_KEY);
       await refreshBadge();
     }
-    if (!version) { await browser.notifications.clear(notificationId).catch(() => {}); return; }
+    // A notification naming another release is withdrawn, so its buttons never act on a release it does not show.
+    if (!version || stored[NOTICE_KEY] !== undefined && stored[NOTICE_KEY] !== version) await withdraw();
+    if (!version) return;
     if (stored[NOTIFIED_KEY] === version) return;
     // Record first so a restarting worker never shows the same release twice.
     await browser.storage.local.set({ [NOTIFIED_KEY]: version });
@@ -47,6 +51,7 @@ export function startUpgradeReminder({ bridge, extensionVersion, refreshBadge, o
       await browser.notifications.create(notificationId, { type: "basic", iconUrl: browser.runtime.getURL("/icon/128.png"),
         title: `QC-Reframe ${version} 可用`, message: "可在设置中心升级，项目、图片与配对都会保留。",
         buttons: [{ title: "查看并升级" }, { title: "跳过此版本" }], priority: 0, requireInteraction: false });
+      await browser.storage.local.set({ [NOTICE_KEY]: version });
     } catch { /* The icon keeps saying NEW when the system cannot show a notification. */ }
   });
 
@@ -58,8 +63,12 @@ export function startUpgradeReminder({ bridge, extensionVersion, refreshBadge, o
     catch { return; } // A stopped service is not woken for a check; any earlier reminder stays.
     if (isUpgradeStatus(status)) await apply(status, true);
   };
+  const withdraw = async () => {
+    await browser.notifications.clear(notificationId).catch(() => {});
+    await browser.storage.local.remove(NOTICE_KEY);
+  };
   const skip = async () => {
-    const { [UPGRADE_BADGE_KEY]: version } = await browser.storage.local.get(UPGRADE_BADGE_KEY);
+    const { [NOTICE_KEY]: version } = await browser.storage.local.get(NOTICE_KEY);
     const saved = await token();
     if (typeof version !== "string" || !saved) return;
     let status: unknown;
@@ -68,7 +77,7 @@ export function startUpgradeReminder({ bridge, extensionVersion, refreshBadge, o
     if (isUpgradeStatus(status)) await apply(status, false);
   };
   const open = async () => {
-    await browser.notifications.clear(notificationId).catch(() => {});
+    await withdraw();
     await openSettings();
   };
 

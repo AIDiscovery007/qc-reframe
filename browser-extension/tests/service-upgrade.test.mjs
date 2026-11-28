@@ -48,6 +48,9 @@ test("user is reminded only of a release the service says to point out", () => {
   assert.equal(remindedVersion("0.8.0", undefined), null);
   assert.equal(remindedVersion("0.8.0", status({ latest: release("0.9.0"), available: true, remind: true })), "0.9.0");
   assert.equal(remindedVersion("0.8.0", status({ latest: release("0.9.0"), available: true, remind: false })), null);
+  // An older service sends no `remind` and cannot report the user's opt-out, so it never earns a background reminder.
+  assert.equal(remindedVersion("0.8.0", status({ latest: release("0.9.0"), available: true, autoCheck: false })), null);
+  assert.equal(remindedVersion("0.8.0", status({ latest: release("0.9.0"), available: true })), null);
   assert.equal(remindedVersion("0.8.0", status({ latest: release("0.8.0") })), null);
   assert.equal(remindedVersion("0.8.0", status({ current: "0.9.0", latest: release("1.0.0"), available: true, remind: true })), null);
 });
