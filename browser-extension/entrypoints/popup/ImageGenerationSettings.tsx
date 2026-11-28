@@ -65,7 +65,8 @@ export default function ImageGenerationSettings({ onSave, settingsRevision }: { 
       } catch (e) { if (alive.current && current === revision.current) setCatalogError((e as Error).message === "Not found" ? "请更新并重启本机服务，以启用 Magpie。" : (e as Error).message); }
       finally { if (alive.current && current === revision.current) setChecking(false); }
     }, 200);
-    return () => { clearTimeout(timer); revision.current++; };
+    // The check ends with its effect: a check queued just before a provider switch must not leave saving blocked.
+    return () => { clearTimeout(timer); revision.current++; setChecking(false); };
   }, [provider, baseUrl, saved, refresh]);
   const catalogHint = !validAddress ? "请填写有效的 Magpie 本机地址。" : checking ? "正在读取生图模型…" : catalogError
     ? `${catalogError} 请检查地址和 Magpie 服务后刷新重试。` : !catalog ? "准备读取生图模型…"

@@ -46,14 +46,32 @@ const assertProvider = provider => {
   const options = [...sizes().options].map(node => node.value);
   assert(options.includes(option(provider)) && !options.includes(option(provider === 'magpie' ? 'codex' : 'magpie')), '尺寸控件应同步已保存渠道，不能被迟到健康响应回滚');
 };
-const openSettings = async (waitReady = true) => {
+// Given a slow device whose commit of the loaded settings yields before React runs its effects, When the user picks a
+// provider in that gap, Then the Magpie catalog check started for the loaded provider cannot keep saving blocked.
+const switchAsSettingsLoad = async (load, provider) => {
+  await wait(() => load.claimed && section()?.querySelector('select'), '设置应开始读取当前渠道');
+  const select = section().querySelector('select'); let slowed = false;
+  select.removeAttribute = function (name) {
+    if (name === 'disabled') { slowed = true; const end = performance.now() + 30; while (performance.now() < end); }
+    return Element.prototype.removeAttribute.call(this, name);
+  };
+  const switched = new Promise(resolve => new MutationObserver((_, observer) => {
+    if (select.disabled) return; observer.disconnect(); fill(select, provider); resolve();
+  }).observe(select, { attributeFilter: ['disabled'] }));
+  load.release(); await switched; delete select.removeAttribute;
+  assert(slowed, '回归应在设置载入的提交中模拟慢设备');
+};
+const openSettings = async (waitReady = true, switchOnLoad) => {
+  const load = switchOnLoad && hold(message => message.type === 'alchemy:image-settings' && !!section());
   find('[aria-label="设置中心"]').click();
   await wait(() => find('.settings-center-nav'), '设置应打开');
   button('生图渠道', find('.settings-center-nav')).click();
+  if (load) await switchAsSettingsLoad(load, switchOnLoad);
   await wait(() => section()?.querySelector('select') && (!waitReady || !section().querySelector('select').disabled), '设置应读出当前渠道');
 };
 const choose = async provider => {
-  fill(section().querySelector('select'), provider);
+  // Picking the option already shown fires no change event in a browser, so only a different provider is filled.
+  if (section().querySelector('select').value !== provider) fill(section().querySelector('select'), provider);
   if (provider === 'magpie') {
     await wait(() => section().querySelector('[aria-label="生图模型"]') && !section().querySelector('[aria-label="生图模型"]').disabled, 'Magpie 模型目录应加载');
     fill(section().querySelector('[aria-label="生图模型"]'), 'fixture/gpt-image-2');
@@ -134,7 +152,7 @@ const run = async () => {
     await wait(() => stale.record?.response, '旧健康请求应已取样并挂起');
     assert(stale.record.response.value.generationProvider === 'codex', '旧响应确实来自原渠道');
   }
-  await openSettings();
+  await openSettings(true, target === 'codex' ? target : undefined);
   if (scenario === 'reopen-draft') {
     // Given an unfinished Magpie save, When the user reopens settings and edits Gemini, Then later sync must preserve the entire draft.
     await choose('magpie'); const firstSave = hold(message => message.type === 'alchemy:image-settings-save', true);
