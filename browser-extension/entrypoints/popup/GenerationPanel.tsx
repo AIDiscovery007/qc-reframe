@@ -14,6 +14,9 @@ import AsyncAction from "./AsyncAction";
 import { logo } from "../../lib/brand";
 import GenerationSizeFields from "./GenerationSizeFields";
 import { generationSizeDescription, inheritedGenerationSize } from "../../lib/generation-size";
+import type { EditRequest } from "../../lib/recreate-edit.mjs";
+import SelectField from "./SelectField";
+import RecreateEditDialog, { editDraftFrom, emptyEditDraft, type EditDraft } from "./RecreateEditDialog";
 
 export const GenerationEffectContext = createContext<ComponentType<{ running: boolean; image: string; failed: boolean }> | null>(null);
 
@@ -30,9 +33,15 @@ export default function GenerationPanel({ modelControl, generationModel, pixelSi
   const [modal, setModal] = useState<Generation>();
   const infoDialog = useRef<HTMLDialogElement>(null);
   const [selected, setSelected] = useState(targetGeneration || "");
-  useEffect(() => { if (targetGeneration) { setSelected(targetGeneration); setSize(inheritedGenerationSize(pixelSize, job.generations?.find(item => item.id === targetGeneration))); onTargetSelected?.(); } }, [targetGeneration, onTargetSelected]);
+  useEffect(() => { if (targetGeneration) { const target = job.generations?.find(item => item.id === targetGeneration); setSelected(targetGeneration); setSize(inheritedGenerationSize(pixelSize, target)); setEditMode(editChoice && !!target?.edit); onTargetSelected?.(); } }, [targetGeneration, onTargetSelected]);
   const previous = job.generations?.find(item => item.id === targetGeneration) || job.generations?.at(-1) || job.autoGeneration;
   const [size, setSize] = useState(() => inheritedGenerationSize(pixelSize, previous));
+  // 完整复刻在工作台可选「文生图」或「原图编辑」；查看某条记录时沿用它的方式，与尺寸一致。
+  const editChoice = workspace && job.mode === "recreate";
+  const [editMode, setEditMode] = useState(() => editChoice && !!previous && "edit" in previous && !!previous.edit);
+  const [editDraft, setEditDraft] = useState<EditDraft>();
+  const [editOpen, setEditOpen] = useState(false);
+  const [editAttempted, setEditAttempted] = useState(false);
   useEffect(() => {
     if (pixelSize) onImageSizeChange?.(size);
     else onAspectRatioChange?.(size);
@@ -45,7 +54,9 @@ export default function GenerationPanel({ modelControl, generationModel, pixelSi
   const generation = generations.find((item) => item.id === selected) || generations.at(-1);
   const controls = useGeneration({ job, lang, disabled, subjectImage, subjects, generation, compare, requestPending,
     pixelSize, ...(pixelSize ? { imageSize: size } : { aspectRatio: size }), onUpdate, onRequestState });
-  const { asset, original, comparisonError, imageError, running, recovery, multi, inputsReady, generic, incomplete } = controls;
+  const { asset, original, comparisonError, imageError, running, recovery, multi, inputsReady, generic, incomplete, editable } = controls;
+  const editing = editChoice && editMode;
+  const editProfile = editable ? job.result?.editProfile : undefined;
   const busy = controls.busy || requestPending;
   const submitting = controls.submitting || requestPending;
   const error = controls.error || requestError;
@@ -68,6 +79,17 @@ export default function GenerationPanel({ modelControl, generationModel, pixelSi
     if (!cancel) { setCompare(false); setSelected(""); }
     if (await controls.act(cancel)) setSelected(cancel ? [...generations].reverse().find(item => item.status === "completed")?.id || "" : "");
   };
+  const generate = () => {
+    if (recovery || !editing) { void act(); return; }
+    if (busy || !controls.canGenerate || !editProfile) return;
+    setEditDraft(draft => draft || editDraftFrom(generation?.edit) || emptyEditDraft());
+    setEditAttempted(false); setEditOpen(true);
+  };
+  const submitEdit = async (edit: EditRequest) => {
+    if (busy || !controls.canGenerate || !editProfile) return;
+    setEditAttempted(true); setCompare(false); setSelected("");
+    if (await controls.act(false, edit)) { setSelected(""); setEditOpen(false); setEditDraft(undefined); }
+  };
 
   const copyPath = async () => {
     setCopyError("");
@@ -84,12 +106,17 @@ export default function GenerationPanel({ modelControl, generationModel, pixelSi
     }
   };
 
-  const ratioControls = <GenerationSizeFields modelControl={modelControl} generationModel={generationModel} key={`${pixelSize}:${selected}`} pixelSize={pixelSize} value={size} onChange={setSize} workspace={workspace} disabled={disabled || busy || !!running || !!recovery} />;
-  const generateButton = <button className="primary generate-button" disabled={busy || (recovery ? !!running : !controls.canGenerate)} aria-busy={busy || !!running}
-    title={`使用${job.mode === "recreate" ? "" : job.mode === "session" ? "参考风格与" : "当前主体图、参考模板与"}${lang === "zh" ? "中文" : "英文"}提示词生成，包含排除项。使用设置中选择的生图渠道。`} onClick={() => act()}>
-    {!running && !busy && <Icon name="image" />}{recovery ? busy ? "正在保存…" : "重试保存" : running ? workspace ? "图片生成中…" : "生成中，完成后提醒" : busy ? "正在提交…" : generations.length ? workspace ? "再生成图片" : "再生成一张" : "生成图片"}{!workspace && <Icon name="arrow" />}
+  const modeControl = editChoice ? <SelectField label="生图方式" aria-label="生图方式" title="文生图只发送提示词；原图编辑附原图，只修改你填写的元素" value={editMode ? "edit" : "text"}
+    disabled={disabled || busy || !!running || !!recovery} onChange={event => setEditMode(event.target.value === "edit")}>
+    <option value="text">文生图</option><option value="edit">原图编辑</option>
+  </SelectField> : undefined;
+  const ratioControls = <GenerationSizeFields modeControl={modeControl} modelControl={modelControl} generationModel={generationModel} key={`${pixelSize}:${selected}`} pixelSize={pixelSize} value={size} onChange={setSize} workspace={workspace} disabled={disabled || busy || !!running || !!recovery} />;
+  const generateDisabled = busy || (recovery ? !!running : !controls.canGenerate || (editing && !editProfile));
+  const generateButton = <button className="primary generate-button" disabled={generateDisabled} aria-busy={busy || !!running}
+    title={editing ? "附原图，只按你填写的修改项编辑生成。使用设置中选择的生图渠道。" : `使用${job.mode === "recreate" ? "" : job.mode === "session" ? "参考风格与" : "当前主体图、参考模板与"}${lang === "zh" ? "中文" : "英文"}提示词生成，包含排除项。使用设置中选择的生图渠道。`} onClick={generate}>
+    {!running && !busy && <Icon name="image" />}{recovery ? busy ? "正在保存…" : "重试保存" : running ? workspace ? "图片生成中…" : "生成中，完成后提醒" : busy ? "正在提交…" : editing ? "填写修改并生成" : generations.length ? workspace ? "再生成图片" : "再生成一张" : "生成图片"}{!workspace && <Icon name="arrow" />}
   </button>;
-  const warning = recovery ? "图片已生成，保存尚未完成。重试保存不会再次生图；服务重启后未落盘的结果可能无法恢复。" : disabledReason || ((generic || incomplete) ? "请先上传主体图，生成专属提示词。" : !inputsReady ? multi ? "请添加至少 2 张可用的主体图。" : "请先上传可用的主体图。" : "");
+  const warning = recovery ? "图片已生成，保存尚未完成。重试保存不会再次生图；服务重启后未落盘的结果可能无法恢复。" : disabledReason || (editing && !editProfile ? "此版本没有可编辑元素，请重新逆向后再使用原图编辑。" : "") || ((generic || incomplete) ? "请先上传主体图，生成专属提示词。" : !inputsReady ? multi ? "请添加至少 2 张可用的主体图。" : "请先上传可用的主体图。" : "");
   const generationControls = <>{ratioControls}{generateButton}{workspace && warning && <p className="hint">{warning}</p>}{workspace && error && <p className="error" role="alert">{error} <RecoveryAction error={error} /></p>}</>;
   const action = hideActions ? null : actionsTarget ? createPortal(generationControls, actionsTarget) : workspace ? generationControls : <>{ratioControls}<AsyncAction status={running?.stage || (busy ? "正在提交…" : undefined)} onCancel={running ? () => act(true) : undefined} cancelling={busy}>{generateButton}</AsyncAction></>;
   const dimensions = image && asset?.width && asset?.height ? <p className="generation-dimensions">实际图片：{asset.width} × {asset.height} px · {imageRatio(asset.width, asset.height)}</p> : null;
@@ -99,7 +126,7 @@ export default function GenerationPanel({ modelControl, generationModel, pixelSi
       const subject = original.subjects?.find(item => item.id === id);
       return <figure key={id}><ImagePreview src={subject?.subjectImage || original.image} alt={subject ? `本次主体 ${index + 1}` : "本次参考模板"} loading="lazy" /><figcaption>图 {index + 1} · {subject ? subject.role : "参考模板"}{subject?.detail && <small>{subject.detail}</small>}</figcaption></figure>;
     })}
-  </div> : <figure><ImagePreview src={original.image} alt="本次生成的原始输入" /><figcaption>{job.mode === "recreate" ? "逆向参考图（未发送生图）" : job.mode === "session" ? "本次风格参考图" : "本次主体图"}</figcaption></figure>
+  </div> : <figure><ImagePreview src={original.image} alt="本次生成的原始输入" /><figcaption>{job.mode === "recreate" ? generation?.edit ? "原图（已发送生图）" : "逆向参考图（未发送生图）" : job.mode === "session" ? "本次风格参考图" : "本次主体图"}</figcaption></figure>
     : <p role="status">{comparisonError || "正在读取原图…"}</p>;
   const copyNotice = copyError && <div className="error" role="alert">{copyError}{imagePath && <p className="file-path">{imagePath}</p>}</div>;
 
@@ -119,12 +146,12 @@ export default function GenerationPanel({ modelControl, generationModel, pixelSi
       <h3>{generation?.resultSavePending ? "图片等待保存" : generation?.status === "failed" ? "图片生成失败" : generation?.status === "cancelled" ? "图片生成已取消" : "图片暂不可用"}</h3>
       <p data-reminder-task={drawerOpen && generation?.status === "failed" && !imageError && !error ? generation.id : undefined} role={generation?.status === "failed" || imageError ? "alert" : "status"}>{imageError || error || (generation?.status === "failed" ? generation.error || (generation.resultSavePending ? "请重试保存现有图片。" : "请重新生成图片。") : "可以重新生成，或查看其他生成记录。")}</p>
       <RecoveryAction error={imageError || error || generation?.error} />
-      {workspace && <button className="outline-button" disabled={busy || (recovery ? !!running : !controls.canGenerate)} onClick={() => act()}>{recovery ? "重试保存" : "重新生成"}</button>}
+      {workspace && <button className="outline-button" disabled={generateDisabled} onClick={generate}>{recovery ? "重试保存" : "重新生成"}</button>}
     </div> : !GenerationEffect && generation?.status === "completed" ? <p role="status">正在读取生成图片…</p> : null}{GenerationEffect && drawerOpen && generation && !compare && !submitting && <GenerationEffect key={assetKey} running={generation.status === "running"} image={image}
       failed={generation.status === "failed" || generation.status === "cancelled" || !!imageError} />}</div>
     <div className="result-footer">
     {!workspace && caption}
-    <div className="result-history" aria-label="生成记录">{generations.map((item, index) => <GenerationThumbnail key={`${job.id}:${item.id}`} jobId={job.id} generation={item} index={index} active={generation?.id === item.id} image={generation?.id === item.id ? image : ""} onSelect={() => { setSelected(item.id); setSize(inheritedGenerationSize(pixelSize, item)); setCompare(false); }} />)}</div>
+    <div className="result-history" aria-label="生成记录">{generations.map((item, index) => <GenerationThumbnail key={`${job.id}:${item.id}`} jobId={job.id} generation={item} index={index} active={generation?.id === item.id} image={generation?.id === item.id ? image : ""} onSelect={() => { setSelected(item.id); setSize(inheritedGenerationSize(pixelSize, item)); setEditMode(editChoice && !!item.edit); setCompare(false); }} />)}</div>
     <div className="result-controls">
     {workspace && caption}
     {copyNotice}
@@ -141,10 +168,12 @@ export default function GenerationPanel({ modelControl, generationModel, pixelSi
       <div className="generation-details">
         <p className="hint">{generationSizeDescription(modal)}{modal.gatewayReportedModel ? ` · 网关返回模型：${modal.gatewayReportedModel}` : ""}</p>
         <p className="hint">模型：{modal.model || job.model || "未记录"} · 语言：{modal.language === "zh" ? "中文" : "英文"}</p>
-        <p className="hint">输入：{job.mode === "recreate" ? "纯文字，不附参考图" : job.mode === "session" ? "风格参考图 + 会话专属提示词" : multi ? `${modal.subjects?.length || 0} 张主体图 + 参考模板` : "生成时的主体图 + 参考图"}</p>
+        <p className="hint">输入：{job.mode === "recreate" ? modal.edit ? `原图 + ${modal.edit.changes.length + (modal.edit.note ? 1 : 0)} 项修改` : "纯文字，不附参考图" : job.mode === "session" ? "风格参考图 + 会话专属提示词" : multi ? `${modal.subjects?.length || 0} 张主体图 + 参考模板` : "生成时的主体图 + 参考图"}</p>
         <div className="prompt-box"><div className="prompt-text">{modal.prompt || "此记录未保存提示词快照。"}</div><div className="negative"><p>排除项：{modal.negativePrompt || "无"}</p></div></div>
       </div>
     </dialog>}
+    {editOpen && editProfile && <RecreateEditDialog profile={editProfile} lang={lang} draft={editDraft || emptyEditDraft()} busy={busy} error={editAttempted ? error : ""}
+      onDraft={setEditDraft} onCancel={() => setEditOpen(false)} onSubmit={edit => void submitEdit(edit)} />}
   </section>;
 
 }

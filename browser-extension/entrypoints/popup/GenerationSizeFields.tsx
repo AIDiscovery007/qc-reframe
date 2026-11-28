@@ -7,8 +7,8 @@ import SelectField from "./SelectField";
 
 const ratios = ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"];
 
-export default function GenerationSizeFields({ modelControl, generationModel, pixelSize = false, value, onChange, disabled, workspace = false }: {
-  modelControl?: ReactNode; generationModel?: string; pixelSize?: boolean; value?: ImageSize; onChange(size?: ImageSize): void; disabled?: boolean; workspace?: boolean;
+export default function GenerationSizeFields({ modeControl, modelControl, generationModel, pixelSize = false, value, onChange, disabled, workspace = false }: {
+  modeControl?: ReactNode; modelControl?: ReactNode; generationModel?: string; pixelSize?: boolean; value?: ImageSize; onChange(size?: ImageSize): void; disabled?: boolean; workspace?: boolean;
 }) {
   const presets: { label: string; key: string; value: ImageSize; group?: string }[] = pixelSize ? magpieSizePresets(generationModel).map(item => ({ ...item, key: `${item.value.width}:${item.value.height}` }))
     : ratios.map(ratio => ({ label: ratio, key: ratio, value: parseImageDimensions(...ratio.split(":") as [string, string]) }));
@@ -40,6 +40,7 @@ export default function GenerationSizeFields({ modelControl, generationModel, pi
           : presets.filter(option => !option.group).map(option => <option key={option.key} value={option.key}>{option.label}</option>))}
         <option value="custom">自定义</option>
       </SelectField>
+      {modeControl}
       {modelControl}
       {choice === "custom" && <div className="custom-ratio">
         <label>宽<input type="number" inputMode={pixelSize ? "decimal" : "numeric"} required={!pixelSize} min={pixelSize ? undefined : 1} max={pixelSize ? undefined : 10000} step={pixelSize ? "any" : 1} value={width} disabled={disabled} aria-label={pixelSize ? "像素宽" : "比例宽"} aria-invalid={touched && !valid} aria-describedby={pixelSize ? undefined : hintId} onBlur={() => setTouched(true)} onChange={event => { setWidth(event.target.value); onChange(parse(event.target.value, height)); }} /></label>

@@ -61,7 +61,7 @@ The app's labels are in Chinese, so each step shows the Chinese text in brackets
 3. **Grab an image.** On Pinterest or any website, hover over an image and click the round **R** button. Choose **Reverse now** (立即逆向), or **Add to Reframe** (加入 Reframe) to save it for later. You can also right-click the image.
 4. **Choose a path.** In the workspace, open the image (saved images are in **Projects** (项目记录) → **To reverse** (待逆向)). Pick what you want:
    - **Extract style** (提取风格): upload your own photo and give it the look of the reference.
-   - **Full recreate** (完整复刻): describe the reference image itself.
+   - **Full recreate** (完整复刻): describe the reference image itself. In the workspace you can also pick **Edit original** (原图编辑): Reframe lists what can be changed (face, pose, background, text…), you fill in the changes, and the original is edited instead of redrawn.
    - There are also paths to put your subject into the reference scene, or to combine several images.
 5. **Get your prompt and image.** Click **Reverse only** (仅逆向) to get just the prompt, or **Reverse and generate** (逆向并生图) to make the image too. Jobs run in the background, so you can keep browsing. You get a notice when one finishes.
 6. **Come back any time.** Your projects, prompts and images are saved in `~/QC-Reframe/.local/`.

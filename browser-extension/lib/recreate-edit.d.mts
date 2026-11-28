@@ -1,0 +1,11 @@
+export type EditElement = { id: string; label: string; currentZh: string; currentEn: string };
+export type EditProfile = { styleZh: string; styleEn: string; elements: EditElement[] };
+export type EditRequest = { changes: { id: string; value: string }[]; note?: string };
+export type EditSnapshot = { changes: (EditElement & { value: string })[]; note: string };
+export const EDIT_LIMITS: { elements: number; label: number; current: number; style: number; value: number; note: number };
+export function sanitizeEditProfile(value: unknown): EditProfile | undefined;
+export function validEditProfile(profile: unknown): profile is EditProfile;
+export function editRequested(edit?: EditRequest): boolean;
+export function normalizeEditRequest(profile: unknown, edit: unknown): EditSnapshot;
+export function editPrompt(profile: EditProfile, edit: EditSnapshot, language: "zh" | "en"): string;
+export function referenceAspectRatio(width: number, height: number): { width: number; height: number } | undefined;

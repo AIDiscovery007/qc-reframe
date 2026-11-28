@@ -67,6 +67,10 @@ export const scenarios = [
     viewport: surface === 'popup' ? { width: 360, height: 740 } : wide, regression: 'generationReadinessRegression', rules: [],
   })),
   { id: 'generation-actions', surface: 'workspace', path: '/workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200', viewport: wide, regression: 'generationActionsRegression', rules: [] },
+  ...['submit', 'failed', 'legacy'].map(flow => ({
+    id: `recreate-edit-${flow}`, surface: 'workspace', viewport: wide, regression: 'recreateEditRegression', rules: [],
+    path: `/workspace.html?state=alignment&mode=recreate&recreateEditRegression=${flow}&generationDelay=1000&generationStartDelay=200${flow === 'failed' ? '&generationStart=failed' : ''}${flow === 'legacy' ? '&editProfile=none' : ''}`,
+  })),
   ...['workspace', 'workspace-narrow', 'popup'].map(surface => ({
     id: `generation-readiness-${surface}`, surface: surface === 'popup' ? 'popup' : 'workspace',
     path: `/${surface === 'popup' ? 'popup' : 'workspace'}.html?state=alignment&mode=recreate`,

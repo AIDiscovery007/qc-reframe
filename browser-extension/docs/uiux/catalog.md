@@ -99,6 +99,9 @@
 | generation-readiness-workspace-legacy | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationReadinessRegression=legacy&generationDelay=60000 | generationReadinessRegression |
 | generation-readiness-workspace-legacy-empty | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationReadinessRegression=legacy-empty&generationDelay=60000 | generationReadinessRegression |
 | generation-actions | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&generationActionsRegression=1&generationDelay=60000&generationStartDelay=200 | generationActionsRegression |
+| recreate-edit-submit | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&recreateEditRegression=submit&generationDelay=1000&generationStartDelay=200 | recreateEditRegression |
+| recreate-edit-failed | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&recreateEditRegression=failed&generationDelay=1000&generationStartDelay=200&generationStart=failed | recreateEditRegression |
+| recreate-edit-legacy | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate&recreateEditRegression=legacy&generationDelay=1000&generationStartDelay=200&editProfile=none | recreateEditRegression |
 | generation-readiness-workspace | workspace 1440×1000 | /workspace.html?state=alignment&mode=recreate | generationReadiness |
 | generation-readiness-workspace-narrow | workspace 360×740 | /workspace.html?state=alignment&mode=recreate | generationReadiness |
 | generation-readiness-popup | popup 360×740 | /popup.html?state=alignment&mode=recreate | generationReadiness |

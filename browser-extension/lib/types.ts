@@ -1,4 +1,5 @@
 import type { AgentId } from "./agents";
+import type { EditProfile, EditSnapshot } from "./recreate-edit.mjs";
 export type SessionSummary = { id: string; title: string; updatedAt: number };
 export type SessionIndexIssue = { code: "content_limit" | "response_limit" | "page_limit" | "index_capacity" | "changed" | "timeout" | "read_failed"; count: number };
 export type SessionIndexStatus = { state: "empty" | "stale" | "building" | "partial" | "ready"; indexed: number; processed?: number; total: number; failed: number; issues?: SessionIndexIssue[]; updatedAt: number | null; error?: string };
@@ -49,6 +50,8 @@ export type Result = {
   promptEn: string;
   negativePrompt: string;
   uncertainties: string[];
+  /** 完整复刻逆向扫描出的可编辑元素；旧版本或其他模式没有。 */
+  editProfile?: EditProfile;
 };
 export type Job = {
   agent?: AgentId;
@@ -129,6 +132,10 @@ export type Generation = {
   createdAt: string;
   language: "zh" | "en";
   aspectRatio?: AspectRatio;
+  /** 完整复刻选「自动」时按参考图推得的比例。 */
+  referenceAspectRatio?: AspectRatio;
+  /** 原图编辑受理时冻结的修改项；缺省为文生图。 */
+  edit?: EditSnapshot;
   prompt: string;
   negativePrompt: string;
   threadId?: string;

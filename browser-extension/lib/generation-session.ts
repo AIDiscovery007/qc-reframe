@@ -1,9 +1,12 @@
 import { requestedImageSize, validImageSizeRequest } from "./image-size.mjs";
+import { editRequested, validEditProfile, type EditRequest } from "./recreate-edit.mjs";
 import type { AspectRatio, Generation, ImageSize, Job, MultiSubject } from "./types";
 
 export type GenerationInput = {
   job: Job; lang: "zh" | "en"; disabled: boolean; subjectImage?: string; subjects?: MultiSubject[];
   aspectRatio?: AspectRatio; imageSize?: ImageSize; pixelSize?: boolean; allowMulti?: boolean; requestPending?: boolean;
+  /** 完整复刻原图编辑的修改项；缺省为文生图。 */
+  edit?: EditRequest;
 };
 export type GenerationCallbacks = {
   // Data and originating drawer settlement survive navigation; view selection does not.
@@ -33,7 +36,9 @@ export function generationReadiness({ job, lang, disabled, subjectImage, subject
   const incomplete = /\[SUBJECT\]/i.test((lang === "zh" ? job.result?.promptZh : job.result?.promptEn) || "");
   const validRatio = validGenerationRatio(aspectRatio);
   const validSize = pixelSize ? aspectRatio === undefined && validImageSizeRequest(imageSize) : imageSize === undefined && validRatio;
-  return { running, recovery, multi, inputsReady, generic, incomplete, validRatio, validSize,
+  // 原图编辑只用于逆向时扫描出可编辑元素的完整复刻版本。
+  const editable = job.mode === "recreate" && validEditProfile(job.result?.editProfile);
+  return { running, recovery, multi, inputsReady, generic, incomplete, validRatio, validSize, editable,
     canGenerate: !!job.result && job.autoGeneration?.status !== "pending" && !disabled && !requestPending && !running && !recovery && inputsReady && !generic && !incomplete && validSize && (allowMulti || !multi) };
 }
 
@@ -57,15 +62,22 @@ export function createGenerationSession(jobId: string, request: Request) {
     async act(input: GenerationInput, cancel: boolean, callbacks: GenerationCallbacks) {
       const readiness = generationReadiness(input);
       if (!active || input.job.id !== jobId || state.busy || input.requestPending || (cancel ? !readiness.running : !readiness.canGenerate)) return false;
+      if (!cancel && input.edit !== undefined && !(readiness.editable && editRequested(input.edit))) return false;
       const epoch = lifecycle;
       const subjectImage = !cancel && input.job.mode !== "recreate" && input.job.mode !== "session" ? input.subjectImage : undefined;
       const subjects = !cancel && readiness.multi ? input.subjects?.map(subject => ({ ...subject })) : undefined;
       const imageSize = input.pixelSize ? requestedImageSize(input.imageSize) : undefined;
+      // 空白项表示「保持不变」，不发送。
+      const edit = !cancel && input.edit ? {
+        changes: input.edit.changes.filter(change => change.value.trim()).map(({ id, value }) => ({ id, value: value.trim() })),
+        ...(input.edit.note?.trim() ? { note: input.edit.note.trim() } : {}),
+      } : undefined;
       const message = cancel ? { type: "alchemy:generation-cancel", id: jobId, generationId: readiness.running!.id }
         : { type: "alchemy:generate", id: jobId, language: input.lang,
           ...(input.aspectRatio ? { aspectRatio: { ...input.aspectRatio } } : {}),
           ...(imageSize ? { imageSize } : {}),
-          ...(readiness.multi ? { subjects } : subjectImage !== undefined ? { subjectImage } : {}) };
+          ...(readiness.multi ? { subjects } : subjectImage !== undefined ? { subjectImage } : {}),
+          ...(edit ? { edit } : {}) };
       update({ busy: true, submitting: !cancel, error: "" });
       let failure = "";
       try {
