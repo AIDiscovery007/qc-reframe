@@ -24,7 +24,7 @@ async function github(t) {
     if (!reply) return response.writeHead(404).end("{}");
     if (reply.hang) return;
     if (reply.redirect) return response.writeHead(302, { Location: reply.redirect }).end();
-    response.writeHead(reply.status || 200, { "Content-Type": "application/json" }).end(reply.raw ?? JSON.stringify(reply.body));
+    response.writeHead(reply.status || 200, { "Content-Type": "application/json", ...reply.headers }).end(reply.raw ?? JSON.stringify(reply.body));
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => { server.closeAllConnections(); server.close(); });
@@ -54,7 +54,7 @@ async function service(t, { gh, packaged = true, platform = "darwin", allowShutd
   return { call, clock, spawned, models, dataDir, port: app.server.address().port };
 }
 
-test("user sees a newer release in settings, checked at most once a day", async t => {
+test("user sees a newer release in settings, checked at most once an hour", async t => {
   // Given GitHub's latest release is newer than this installation.
   const gh = await github(t);
   gh.replies.push({ body: release("v9.9.9") });
@@ -64,32 +64,93 @@ test("user sees a newer release in settings, checked at most once a day", async 
   assert.equal(idle.current, current);
   assert.equal(idle.latest, null);
   assert.equal(idle.autoCheck, true);
+  assert.equal(idle.remind, false);
   assert.equal(gh.requests.length, 0);
-  // When the workspace asks for its automatic check, Then the release is offered with its page link and no body text.
+  // When the background or the workspace asks for its automatic check, Then the release is offered with its page link,
+  // no body text, and a reminder.
   const seen = (await s.call("/upgrade?check=auto")).body;
   assert.deepEqual(seen.latest, { version: "9.9.9", title: "QC-Reframe v9.9.9",
-    url: "https://github.com/AIDiscovery007/qc-reframe/releases/tag/v9.9.9", publishedAt: "2026-12-01T08:00:00.000Z" });
+    url: "https://github.com/AIDiscovery007/qc-reframe/releases/tag/v9.9.9", publishedAt: "2026-12-01T08:00:00.000Z", notes: [] });
   assert.equal(seen.available, true);
   assert.equal(seen.canUpgrade, true);
+  assert.equal(seen.remind, true);
+  assert.equal(seen.skippedVersion, null);
   assert.equal(seen.checkError, null);
   // And the request carries no user data: a fixed path, a product User-Agent, no cookies or tokens.
   assert.equal(gh.requests[0].url, "/repos/AIDiscovery007/qc-reframe/releases/latest");
   assert.match(gh.requests[0].headers["user-agent"], /^QC-Reframe\/\d+\.\d+\.\d+$/);
   assert.equal(gh.requests[0].headers.authorization, undefined);
   assert.equal(gh.requests[0].headers.cookie, undefined);
-  // And further automatic checks that day send nothing, even after a restart of the service on the same data.
-  s.clock.now += 23 * 3600_000;
+  // And further automatic checks within the hour send nothing, even after a restart of the service on the same data.
+  s.clock.now += 59 * 60_000;
   assert.equal((await s.call("/upgrade?check=auto")).body.latest.version, "9.9.9");
   const restarted = await service(t, { gh, dataDir: s.dataDir });
   restarted.clock.now = s.clock.now;
   assert.equal((await restarted.call("/upgrade?check=auto")).body.latest.version, "9.9.9");
   assert.equal(gh.requests.length, 1);
-  // And the next day's automatic check asks again.
-  s.clock.now += 3600_000;
+  // And the next hour's automatic check asks again.
+  s.clock.now += 60_000;
   await s.call("/upgrade?check=auto");
   assert.equal(gh.requests.length, 2);
   // And only the fixed GitHub address is the default source.
   assert.equal(RELEASE_URL, "https://api.github.com/repos/AIDiscovery007/qc-reframe/releases/latest");
+});
+
+test("user sees what is new in a release as short plain text", async t => {
+  // Given a release page whose sections are written in Markdown, with the fixed upgrade and verification sections,
+  // markup, a code block, an overlong heading and more sections than fit.
+  const body = [
+    "# QC-Reframe v9.9.9 · title", "", "intro with [a link](https://example.com)", "",
+    "## **主动**检查[更新](https://example.com)", "- detail", "### sub heading", "",
+    "```md", "## not a heading", "```",
+    "## `代码` <script>alert(1)</script>提醒  ", "## 升级方式与数据", "## 验证与已知限制", "##", "## ![图](x.png)",
+    `## ${"长".repeat(80)}`, "## 三", "## 四", "## 五", "## 六", "## 七",
+  ].join("\r\n");
+  const gh = await github(t);
+  gh.replies.push({ body: release("v9.9.9", { body }) });
+  const s = await service(t, { gh });
+  // When the user checks, Then the highlights are the section titles as plain text, without the fixed sections,
+  // at most six of them and each at most 60 characters.
+  const { notes } = (await s.call("/upgrade?check=manual")).body.latest;
+  assert.deepEqual(notes, ["主动检查更新", "代码 alert(1)提醒", `${"长".repeat(59)}…`, "三", "四", "五"]);
+  // And a release without a usable body has no highlights.
+  for (const value of [null, 42, ""]) {
+    const other = await github(t);
+    other.replies.push({ body: release("v9.9.9", { body: value }) });
+    assert.deepEqual((await (await service(t, { gh: other })).call("/upgrade?check=manual")).body.latest.notes, []);
+  }
+});
+
+test("user skips a release, can still upgrade to it, and is reminded again for a newer one", async t => {
+  // Given 9.9.9 is offered.
+  const gh = await github(t);
+  gh.replies.push({ body: release("v9.9.9") });
+  const s = await service(t, { gh });
+  await s.call("/upgrade?check=manual");
+  // When the user skips it, Then there is no reminder but the upgrade stays available.
+  const skipped = (await s.call("/upgrade/settings", { skippedVersion: "9.9.9" })).body;
+  assert.equal(skipped.skippedVersion, "9.9.9");
+  assert.equal(skipped.remind, false);
+  assert.equal(skipped.available, true);
+  assert.equal(skipped.canUpgrade, true);
+  // And the skip survives a restart.
+  const restarted = await service(t, { gh, dataDir: s.dataDir });
+  restarted.clock.now = s.clock.now;
+  assert.equal((await restarted.call("/upgrade")).body.remind, false);
+  // And only the latest release can be skipped; malformed requests are refused and change nothing.
+  assert.equal((await restarted.call("/upgrade/settings", { skippedVersion: "9.9.8" })).status, 409);
+  for (const body of [{ skippedVersion: "v9.9.9" }, { skippedVersion: 9 }, { skippedVersion: null, autoCheck: true }])
+    assert.equal((await restarted.call("/upgrade/settings", body)).status, 400);
+  assert.equal((await restarted.call("/upgrade")).body.skippedVersion, "9.9.9");
+  // When a newer release appears, Then it is reminded again although the old skip is kept.
+  gh.replies[0] = { body: release("v9.9.10") };
+  restarted.clock.now += 61_000;
+  const newer = (await restarted.call("/upgrade?check=manual")).body;
+  assert.equal(newer.latest.version, "9.9.10");
+  assert.equal(newer.remind, true);
+  // And clearing the skip, or turning off automatic checks, behaves as expected.
+  assert.equal((await restarted.call("/upgrade/settings", { skippedVersion: null })).body.skippedVersion, null);
+  assert.equal((await restarted.call("/upgrade/settings", { autoCheck: false })).body.remind, false);
 });
 
 test("user checks manually at most once a minute and sees when already up to date", async t => {
@@ -111,6 +172,33 @@ test("user checks manually at most once a minute and sees when already up to dat
   // And an unknown check mode is refused without contacting GitHub.
   assert.equal((await s.call("/upgrade?check=always")).status, 400);
   assert.equal(gh.requests.length, 2);
+});
+
+// Scenario: user checks for updates while GitHub limits this network's queries
+//   Given other programs on the same network used up GitHub's hourly quota for unauthenticated requests
+//   When the user clicks 检查更新
+//   Then the card says GitHub is limiting queries and roughly when to retry, not that the network is down
+//   And a network failure still says the network is unavailable
+test("user is told when GitHub limits this network's queries rather than that the network is down", async t => {
+  const gh = await github(t);
+  const s = await service(t, { gh });
+  const reset = String(Math.floor(s.clock.now / 1000) + 25 * 60 + 10);
+  gh.replies.push({ status: 403, headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": reset }, body: { message: "API rate limit exceeded" } });
+  const limited = (await s.call("/upgrade?check=manual")).body;
+  assert.equal(limited.checkError, "无法检查更新：GitHub 暂时限制了本网络的查询次数，约 26 分钟后可重试。");
+  assert.equal(limited.available, false);
+  // And a secondary limit that only says Retry-After is reported the same way.
+  s.clock.now += 61_000;
+  gh.replies.splice(0, 1, { status: 429, headers: { "Retry-After": "90" }, body: {} });
+  assert.equal((await s.call("/upgrade?check=manual")).body.checkError, "无法检查更新：GitHub 暂时限制了本网络的查询次数，约 2 分钟后可重试。");
+  // And a limit without a usable time asks to retry later.
+  s.clock.now += 61_000;
+  gh.replies.splice(0, 1, { status: 403, headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "soon" }, body: {} });
+  assert.equal((await s.call("/upgrade?check=manual")).body.checkError, "无法检查更新：GitHub 暂时限制了本网络的查询次数，请稍后重试。");
+  // And any other refusal is not mistaken for a limit.
+  s.clock.now += 61_000;
+  gh.replies.splice(0, 1, { status: 403, headers: { "X-RateLimit-Remaining": "12" }, body: {} });
+  assert.equal((await s.call("/upgrade?check=manual")).body.checkError, "无法检查更新：网络不可用或 GitHub 暂时无响应，请稍后重试。");
 });
 
 test("user is offered nothing from an answer that is not a stable published release", async t => {
@@ -158,7 +246,7 @@ test("user turns off automatic checks and only the button contacts GitHub", asyn
   assert.equal((await restarted.call("/upgrade?check=manual")).body.latest.version, "9.9.9");
   assert.equal(gh.requests.length, 1);
   // And the switch accepts only a boolean.
-  for (const body of [{ autoCheck: "no" }, {}, { autoCheck: false, extra: 1 }]) assert.equal((await s.call("/upgrade/settings", body)).status, 400);
+  for (const body of [{ autoCheck: "no" }, {}, { autoCheck: false, extra: 1 }, { autoCheck: false, skippedVersion: null }]) assert.equal((await s.call("/upgrade/settings", body)).status, 400);
 });
 
 test("user upgrades with one click and the local installer runs for exactly that release", async t => {

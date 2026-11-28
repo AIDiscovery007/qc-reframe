@@ -93,7 +93,7 @@ async function setup(t, agent = async () => result, generator) {
   const skillPath = join(dir, "SKILL.md");
   await writeFile(join(dir, "model-settings.json"), JSON.stringify({ model: "test-model", accountKey: "test" }));
   await writeFile(skillPath, "---\nname: alchemy\n---\nTest skill");
-  const app = await createBridge({ dataDir: dir, skillPath, agent, generator, generationContext: async () => ({ model: 'test-model', provider: 'fixture', reasoningEffort: 'low', codexGeneration: true }) });
+  const app = await createBridge({ dataDir: dir, skillPath, agent, generator, cli: { close() {} }, generationContext: async () => ({ model: 'test-model', provider: 'fixture', reasoningEffort: 'low', codexGeneration: true }) });
   app.server.listen(0, "127.0.0.1");
   await once(app.server, "listening");
   const url = `http://127.0.0.1:${app.server.address().port}`;
@@ -819,7 +819,7 @@ test("restart preserves completed output and marks interrupted jobs as failed", 
     }),
   );
   await writeFile(join(dir, `${doneId}.png`), decodeImage(image).bytes);
-  const { server, token } = await createBridge({ dataDir: dir });
+  const { server, token } = await createBridge({ dataDir: dir, cli: { close() {} } });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(async () => {

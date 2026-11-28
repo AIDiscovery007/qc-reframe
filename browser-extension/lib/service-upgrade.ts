@@ -3,13 +3,16 @@
 
 export type UpgradeStage = "download" | "verify" | "stop" | "replace" | "setup" | "start";
 export type UpgradeOutcome = "upgraded" | "rolled_back" | "failed";
-export type UpgradeRelease = { version: string; title: string; url: string; publishedAt: string | null };
+/** `notes` are the release page's section titles as plain text; older services send none. */
+export type UpgradeRelease = { version: string; title: string; url: string; publishedAt: string | null; notes?: string[] };
 /** The installer's own record of its last run, written in the data folder before it exits. */
 export type UpgradeResult = { version: string; from: string | null; outcome: UpgradeOutcome; stage: UpgradeStage | null; at: string };
 export type UpgradeStatus = {
   current: string; install: "package" | "source"; autoCheck: boolean;
   latest: UpgradeRelease | null; checkedAt: string | null; checkError: string | null;
   available: boolean; canUpgrade: boolean; reason: string | null; upgrading: boolean; lastResult: UpgradeResult | null;
+  /** Not sent by older services: the release the user chose not to be reminded of, and whether the latest one is to be pointed out. */
+  skippedVersion?: string | null; remind?: boolean;
 };
 export type UpgradeTicket = { version: string; startedAt: string };
 export type UpgradeWait = { outcome: UpgradeOutcome; status: UpgradeStatus; result: UpgradeResult | null };
@@ -36,11 +39,26 @@ export function newerVersion(a: unknown, b: unknown) {
   return false;
 }
 
-/** A service newer than the running extension needs a reload before anything else; otherwise a newer release is offered. */
+/**
+ * A service newer than the running extension needs a reload before anything else; otherwise a newer release is pointed
+ * out unless the user skipped it or turned automatic checks off. Settings still offer every available release.
+ */
 export function upgradeHint(extensionVersion: string, status: UpgradeStatus | undefined): "reload" | "available" | undefined {
   if (!status) return;
   if (newerVersion(status.current, extensionVersion)) return "reload";
-  if (status.available) return "available";
+  if (status.available && status.remind !== false) return "available";
+}
+
+/** The release the icon and the system notification should point out, if any. */
+export function remindedVersion(extensionVersion: string, status: UpgradeStatus | undefined) {
+  return upgradeHint(extensionVersion, status) === "available" ? status!.latest?.version ?? null : null;
+}
+
+/** True for a reply that has the shape of an upgrade status, so a stray reply cannot clear or set a reminder. */
+export function isUpgradeStatus(value: unknown): value is UpgradeStatus {
+  const status = value as UpgradeStatus | null;
+  return !!status && typeof status === "object" && typeof status.current === "string" && typeof status.available === "boolean"
+    && (status.latest === null || typeof status.latest === "object" && typeof status.latest.version === "string");
 }
 
 /**

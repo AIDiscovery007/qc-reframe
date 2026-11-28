@@ -94,7 +94,7 @@
 | `scripts/manage.mjs`、`scripts/native-host.mjs`、`scripts/package-runtime.mjs`、`scripts/install.sh`、`scripts/icons.mjs`、`tests/` | 安装及服务管理、浏览器按需启动器注册、Release 运行包与一键安装、构建图标、隔离的自动测试。 |
 | `lib/extension-identity.mjs`、`lib/start-command.ts` | 固定扩展 ID 的公开 manifest key；离线时可复制的启动命令（安装目录来自服务健康响应，仅存 trusted local storage）。 |
 | `lib/channel.mjs`、`lib/extension-channel.ts`、`bridge/service-record.mjs` | 发行版与开发版两套身份（扩展 ID、端口、启动器、构建目录、命令）；扩展按构建 mode、服务按 `--dev` / `ALCHEMY_CHANNEL` 取得通道；同一数据目录只允许一个服务。 |
-| `bridge/upgrade.mjs`、`scripts/sign-release.mjs`、`lib/service-upgrade.ts`、`entrypoints/popup/ServiceUpgrade.tsx` | 插件内升级：GitHub 检查与受理、启动本安装的安装器；Release 签名；扩展端跟随、结果文案与 reload 后重新打开；「本机连接」升级卡片。 |
+| `bridge/upgrade.mjs`、`scripts/sign-release.mjs`、`lib/service-upgrade.ts`、`lib/upgrade-reminder.ts`、`entrypoints/popup/ServiceUpgrade.tsx` | 插件内升级：GitHub 检查、更新要点、跳过与受理，启动本安装的安装器；Release 签名；扩展端跟随、结果文案与 reload 后重新打开；后台定时提醒（图标 `NEW` 与系统通知）；「本机连接」升级卡片。 |
 | [Agent 工具库](../agent-tool/README.md) | 根目录开发辅助脚本，包含 UI 示例预览与性能基准；用途、入口和副作用查工具索引。 |
 
 ## 连接、模型和图片边界
@@ -103,7 +103,7 @@
 
 - Codex 渠道的逆向、生图与模型验证使用 `thread/start`，默认设置 `ephemeral: true`；结果从实时事件获取并保存到 Reframe，不依赖 Codex 会话日志。仅显式设置 `ALCHEMY_PERSIST_CODEX_SESSIONS=1` 时为逆向/生图保留会话，模型验证始终临时；开关只作用于当前服务进程，不写入运行配置。失败或取消不回退持久会话。旧会话仅按已保存的 thread ID 核对并归档，不按提示词标题清理。
 
-- 插件内升级只升级到服务向 GitHub 重新确认的最新正式版本，只启动本安装自带的 `scripts/install.sh`，且必须验证发布签名；忙碌、源码仓库、Windows 或前台服务时拒绝。检查只请求固定的 GitHub 地址，不带用户数据，每天最多自动一次且可关闭。签名私钥只在 Actions secret 与维护者备份中，不进仓库或对话；换钥须先发布同时信任新旧公钥的安装器。模块边界见[架构的插件内升级](docs/architecture.md#插件内升级)。
+- 插件内升级只升级到服务向 GitHub 重新确认的最新正式版本，只启动本安装自带的 `scripts/install.sh`，且必须验证发布签名；忙碌、源码仓库、Windows 或前台服务时拒绝。检查只请求固定的 GitHub 地址，不带用户数据，每小时最多自动一次且可关闭；新版本提醒（图标 `NEW` 与每版本一次的系统通知）只依据服务返回的 `remind`，后台不自行联系 GitHub、不唤醒已停止的服务，跳过只停止提醒、不禁止升级。签名私钥只在 Actions secret 与维护者备份中，不进仓库或对话；换钥须先发布同时信任新旧公钥的安装器。模块边界见[架构的插件内升级](docs/architecture.md#插件内升级)。
 - 开发版（`npm run dev*`，端口 43197，QC-Reframe Dev）与发行版身份分离，各自只信任自己的扩展 ID；不要让开发版服务接受发行版扩展，也不要在运行包安装中提供开发版命令。
 - bridge 默认仅监听 `127.0.0.1:43187`（开发版 `43197`），保留 Bearer 认证、Host / Origin 和消息来源检查。manifest 带固定公钥，任何目录加载的 QC-Reframe 扩展 ID 均为 `lib/extension-identity.mjs` 的固定 ID；`POST /connection` 只对该 ID 及安装配置显式批准的 `ALCHEMY_EXTENSION_ID` 返回既有令牌，不能信任任意扩展或首个请求来源。公钥公开，开发者模式下其他扩展也能声明同一 ID，此取舍已由用户确认；私钥不进仓库。后台自动取得/恢复凭据，不回传界面；仅认证拒绝允许一次恢复重试，网络失败不重放业务写入。页面内容不能任意请求本机文件或端点；不将配对码暴露到页面 DOM。
 - 逆向模型目录取自插件实际调用的对应 CLI；列表出现不等于账号有权限。验证成功才保存插件选择，失败保留原有效选择；账号、登录、提供方或 CLI 变化需重新确认上下文。不要硬编码“可用模型”，不要悄悄回退到全局默认模型。

@@ -13,6 +13,7 @@ import { extensionChannel } from "../lib/extension-channel";
 import { validGenerationRatio } from "../lib/generation-session";
 import { agentQuery, isAgentId } from "../lib/agents";
 import { markReopenAfterReload, reopenAfterReload } from "../lib/service-upgrade";
+import { startUpgradeReminder } from "../lib/upgrade-reminder";
 import type {
   ImageTarget,
   AspectRatio,
@@ -32,6 +33,8 @@ export default defineBackground(() => {
   const bridge = connection.request;
   const savePreferences = connection.savePreferences;
   const reminders = startReminderService(bridge);
+  const upgrades = startUpgradeReminder({ bridge, extensionVersion: () => browser.runtime.getManifest().version, refreshBadge: reminders.refreshBadge,
+    openSettings: async () => { await uiMessage({ type: "alchemy:open-workspace", view: "settings", section: "connection" }); } });
   // Health is the one place the installation and data folders arrive; keep them here for the offline hint.
   const openingHealth = async () => {
     const { health, location } = splitStartLocation(await connection.open(async () => `/health${await showsHiddenProjects() ? "?includeHidden=true" : ""}`));
@@ -184,8 +187,9 @@ export default defineBackground(() => {
     }
   };
   const drafts = createDraftStore();
+  // Every upgrade status the user sees also updates the icon, so it never points out a release already handled.
   const upgradeRequest = async <T>(send: () => Promise<T>) => {
-    try { return await send(); }
+    try { const status = await send(); void upgrades.seen(status).catch(console.error); return status; }
     catch (error) {
       if ((error as Error).message === "Not found") throw new Error("当前本机服务不支持插件内升级（0.8.0 起支持），请按 README 手动更新。");
       throw error;
@@ -326,8 +330,10 @@ export default defineBackground(() => {
         if (message.check !== undefined && message.check !== "auto" && message.check !== "manual") throw new Error("无效的检查方式");
         return upgradeRequest(() => bridge(`/upgrade${message.check ? `?check=${message.check}` : ""}`, token));
       case "alchemy:upgrade-settings":
-        if (typeof message.autoCheck !== "boolean") throw new Error("无效的更新设置");
-        return upgradeRequest(() => bridge("/upgrade/settings", token, { autoCheck: message.autoCheck }));
+        if (typeof message.autoCheck === "boolean") return upgradeRequest(() => bridge("/upgrade/settings", token, { autoCheck: message.autoCheck }));
+        if (message.skippedVersion === null || typeof message.skippedVersion === "string" && /^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(message.skippedVersion))
+          return upgradeRequest(() => bridge("/upgrade/settings", token, { skippedVersion: message.skippedVersion }));
+        throw new Error("无效的更新设置");
       case "alchemy:upgrade-start":
         if (typeof message.version !== "string" || !/^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(message.version)) throw new Error("无效的升级版本");
         return upgradeRequest(() => bridge("/upgrade", token, { version: message.version }));

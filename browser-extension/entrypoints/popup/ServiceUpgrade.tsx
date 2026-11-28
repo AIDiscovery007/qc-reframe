@@ -65,13 +65,16 @@ export default function ServiceUpgrade({ connected, busy, onStatus }: { connecte
     try {
       const next = await request<UpgradeStatus>({ type: "alchemy:upgrade-status", check: "manual" });
       accept(next);
-      if (!next.checkError && !next.available) setNotice(`已是最新正式版本（${next.current}）。`);
+      if (!next.checkError) setNotice(next.available && next.latest ? `发现新版本 ${next.latest.version}。` : `已是最新正式版本（${next.current}）。`);
     } catch (e) { setError((e as Error).message); }
     finally { setChecking(false); }
   };
-  const changeAutoCheck = async (autoCheck: boolean) => {
-    setSaving(true); setError("");
-    try { accept(await request<UpgradeStatus>({ type: "alchemy:upgrade-settings", autoCheck })); }
+  const changeSetting = async (setting: { autoCheck: boolean } | { skippedVersion: string }) => {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      accept(await request<UpgradeStatus>({ type: "alchemy:upgrade-settings", ...setting }));
+      if ("skippedVersion" in setting) setNotice(`不再提醒 ${setting.skippedVersion}，仍可随时在这里升级。`);
+    }
     catch (e) { setError((e as Error).message); }
     finally { setSaving(false); }
   };
@@ -103,6 +106,10 @@ export default function ServiceUpgrade({ connected, busy, onStatus }: { connecte
     finally { pending.current = false; }
   };
 
+  const skipped = !!latest && status?.skippedVersion === latest.version;
+  // Older services cannot record a skip; they send no `remind`.
+  const canSkip = !!status?.available && status.remind !== undefined && !skipped;
+  const notes = status?.available ? latest?.notes ?? [] : [];
   const last = status?.lastResult;
   const recent = last && Date.now() - Date.parse(last.at) < DAY ? last : undefined;
   const message = phase === "starting" ? `正在确认 ${target} 并启动升级…`
@@ -112,6 +119,7 @@ export default function ServiceUpgrade({ connected, busy, onStatus }: { connecte
     : !status ? loadError || "正在读取版本信息…"
     : hint === "reload" ? `本机服务已是 ${status.current}，扩展仍在运行 ${extensionVersion}。重新加载扩展以完成升级。`
     : status.available && status.reason ? status.reason
+    : status.available && skipped ? `${latest!.title} 已发布。已跳过此版本的提醒，仍可随时升级。`
     : status.available ? `${latest!.title} 已发布。升级会短暂停止本机服务，保留项目、图片、配对与设置。`
     : status.install === "source" && status.reason ? status.reason
     : status.checkedAt ? `已是最新正式版本。最近检查：${date(status.checkedAt)}。`
@@ -120,12 +128,14 @@ export default function ServiceUpgrade({ connected, busy, onStatus }: { connecte
     <div className="settings-update-top"><strong>QC-Reframe 版本</strong>{status?.available && <span className="settings-chip attention">新版本</span>}</div>
     {status && <div className="settings-version-pair">{status.available && latest ? <><span>{status.current}</span><span>→</span><strong>{latest.version}</strong></> : <strong>{status.current}</strong>}</div>}
     <p className="settings-operation-status" role="status">{message}</p>
+    {notes.length > 0 && <div className="settings-release-notes"><strong>更新内容</strong><ul>{notes.map(note => <li key={note}>{note}</li>)}</ul></div>}
     {status && <div className="settings-cli-actions">
       {hint === "reload" ? <button className="primary" disabled={running} onClick={() => void reload()}>重新加载扩展</button>
         : status.available && <button className="primary" disabled={running || busy || !status.canUpgrade} onClick={() => { setError(""); setConfirming(true); }}>
           {running ? "正在升级…" : `升级到 ${latest!.version}`}</button>}
+      <button className="secondary" disabled={running || checking} onClick={() => void check()}>{checking ? "正在检查…" : "检查更新"}</button>
       {latest && status.available && <a className="text-button" href={latest.url} target="_blank" rel="noreferrer">查看更新说明</a>}
-      <button className="text-button" disabled={running || checking} onClick={() => void check()}>{checking ? "正在检查…" : "检查更新"}</button>
+      {canSkip && <button className="text-button" disabled={running || saving} onClick={() => void changeSetting({ skippedVersion: latest!.version })}>跳过此版本</button>}
     </div>}
     {notice && <p className="fine" role="status">{notice}</p>}
     {recent?.outcome === "upgraded" && recent.version === status?.current && !running
@@ -133,9 +143,9 @@ export default function ServiceUpgrade({ connected, busy, onStatus }: { connecte
     {recent && recent.outcome !== "upgraded" && !running && !error
       && <div className="settings-info settings-error" role="alert">{upgradeOutcomeMessage(recent.outcome, recent, recent.version)}</div>}
     {(error || status?.checkError) && <div className="settings-info settings-error" role="alert">{error || status?.checkError}</div>}
-    {status && <label className="settings-row reminder-switch"><span>每天自动检查更新</span>
-      <input type="checkbox" role="switch" checked={status.autoCheck} disabled={saving || running} onChange={event => void changeAutoCheck(event.target.checked)} /></label>}
-    {status && <p className="fine">检查只向 GitHub 读取最新正式版本信息，不发送项目、图片或配对信息。</p>}
+    {status && <label className="settings-row reminder-switch"><span>自动检查并提醒新版本</span>
+      <input type="checkbox" role="switch" checked={status.autoCheck} disabled={saving || running} onChange={event => void changeSetting({ autoCheck: event.target.checked })} /></label>}
+    {status && <p className="fine">约每小时向 GitHub 读取一次最新正式版本信息，有新版本时在扩展图标和系统通知中提醒；不发送项目、图片或配对信息。</p>}
     <dialog ref={dialog} className="result-dialog modal dialog-small" aria-labelledby="upgrade-title" aria-describedby="upgrade-description"
       onCancel={event => { event.stopPropagation(); event.preventDefault(); setConfirming(false); }}
       onKeyDown={event => { if (event.key === "Escape") event.stopPropagation(); }}>

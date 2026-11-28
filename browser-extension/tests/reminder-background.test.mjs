@@ -10,17 +10,17 @@ const stateCode = await compile('../lib/task-reminders.ts'), serviceCode = await
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const task = (id, extra = {}) => ({ id, jobId: 'prompt', projectId: 'a'.repeat(64), mode: 'style', status: 'completed', createdAt: new Date(2000).toISOString(), hidden: false, ...extra });
 
-async function harness({ denied = false, stored, audioFails = false, paired = false, feed, existingTabs = [], updateFails = false, restrictedUrls = false, contextsFail = false } = {}) {
+async function harness({ upgradeBadge, denied = false, stored, audioFails = false, paired = false, feed, existingTabs = [], updateFails = false, restrictedUrls = false, contextsFail = false } = {}) {
   let now = 10000, listener, clicked, alarm, serial = 0, tasks = [], contexts = [];
-  const timers = new Map(), notices = [], sounds = [], tabs = [], badges = [], updates = [], windows = [];
+  const timers = new Map(), notices = [], sounds = [], tabs = [], badges = [], titles = [], updates = [], windows = [];
   const stateExports = {};
   class Clock extends Date { static now() { return now; } }
   runInNewContext(stateCode, { exports: stateExports, Date: Clock });
-  const local = { taskReminders: stored || stateExports.newReminderState(1000), ...(paired ? { preferences: { token: "test-only" } } : {}) }, session = {};
+  const local = { taskReminders: stored || stateExports.newReminderState(1000), ...(paired ? { preferences: { token: "test-only" } } : {}), ...(upgradeBadge ? { upgradeBadge } : {}) }, session = {};
   const area = data => ({ get: async () => structuredClone(data), set: async values => Object.assign(data, structuredClone(values)), remove: async key => { delete data[key]; } });
   const browser = {
     storage: { local: area(local), session: area(session), onChanged: { addListener() {} } },
-    action: { setBadgeText: async value => badges.push(value.text), setBadgeBackgroundColor: async () => {}, setTitle: async () => {} },
+    action: { setBadgeText: async value => badges.push(value.text), setBadgeBackgroundColor: async () => {}, setTitle: async value => titles.push(value.title) },
     alarms: { create: async () => {}, onAlarm: { addListener(fn) { alarm = fn; } } },
     runtime: { id: 'test', getURL: path => `chrome-extension://test${path}`, getContexts: async filter => { if (contextsFail && filter.contextTypes?.includes("TAB")) throw new Error("contexts unavailable"); return filter.contextTypes?.includes("TAB")
       ? existingTabs.map(tab => ({ tabId: tab.id, documentUrl: tab.url })) : contexts; },
@@ -42,11 +42,11 @@ async function harness({ denied = false, stored, audioFails = false, paired = fa
   const exports = {};
   runInNewContext(serviceCode, { exports, Date: Clock, URLSearchParams, console, crypto: webcrypto,
     setTimeout: (fn, delay) => { const id = ++serial; timers.set(id, { fn, at: now + delay }); return id; }, clearTimeout: id => timers.delete(id),
-    require: name => name === 'wxt/browser' ? { browser } : name === './task-reminders' ? stateExports : name === './workspace-navigation' ? navigation : undefined,
+    require: name => name === 'wxt/browser' ? { browser } : name === './task-reminders' ? stateExports : name === './workspace-navigation' ? navigation : name === './upgrade-reminder' ? { UPGRADE_BADGE_KEY: 'upgradeBadge' } : undefined,
   });
   const service = exports.startReminderService(async path => feed ? feed(path) : ({ revision: String(now), tasks })); await tick();
   const message = (type, props = {}, tab = 1) => new Promise((resolve, reject) => listener({ type: `alchemy:reminder-${type}`, ...props }, { id: 'test', url: 'chrome-extension://test/workspace.html', tab: { id: tab } }, reply => reply.error ? reject(new Error(reply.error)) : resolve(reply.value)));
-  return { local, session, notices, sounds, tabs, badges, updates, windows, message, openWorkspace: navigation.openWorkspace, setFeed(next) { feed = next; }, projectsChanged: service.projectsChanged,
+  return { refreshBadge: service.refreshBadge, titles, local, session, notices, sounds, tabs, badges, updates, windows, message, openWorkspace: navigation.openWorkspace, setFeed(next) { feed = next; }, projectsChanged: service.projectsChanged,
     async snapshot(next) { tasks = next; local.preferences = { token: 'test-only' }; await service.wake(); },
     async advance(ms) { now += ms; for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.fn(); } await tick(); await message('get'); },
     async click() { clicked('reframe-tasks'); await tick(); },
@@ -64,6 +64,22 @@ test('background completion is silent by default, batches tasks and restores wit
   const restored = await harness({ stored: h.local.taskReminders });
   await restored.snapshot([task('prompt'), task('image', { generationId: 'image' })]); await restored.advance(60000);
   assert.equal(restored.notices.length, 0); assert.equal(restored.local.taskReminders.unread.length, 2);
+});
+
+// Scenario: user keeps seeing unread task results on the icon
+//   Given 2 unread task results and a new release 0.9.0
+//   Then the icon shows 2; once the results are read it shows NEW, and nothing once the release is no longer reminded
+test('unread task results take the icon before a new release, which takes it before nothing', async () => {
+  const h = await harness({ upgradeBadge: '0.9.0' });
+  await h.refreshBadge();
+  assert.equal(h.badges.at(-1), 'NEW'); assert.equal(h.titles.at(-1), 'QC-Reframe 0.9.0 可用 · 打开设置中心升级');
+  await h.snapshot([task('one'), task('two')]);
+  assert.equal(h.badges.at(-1), '2');
+  await h.message('read', { ids: h.local.taskReminders.unread.map(item => item.id) });
+  assert.equal(h.badges.at(-1), 'NEW');
+  delete h.local.upgradeBadge;
+  await h.refreshBadge();
+  assert.equal(h.badges.at(-1), ''); assert.equal(h.titles.at(-1), '打开 QC-Reframe');
 });
 
 test('denied desktop permission preserves badge; sound is opt-in, coalesced and cooldown applies', async () => {
