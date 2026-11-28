@@ -1,4 +1,5 @@
 import type { MultiSubject } from "./types";
+import { EDIT_LIMITS, type EditRequest } from "./recreate-edit.mjs";
 
 // Pure checks for UI messages; the background rejects malformed input before it touches storage or the bridge.
 export const modes = ["style", "recreate", "reenact", "multi-reenact", "session"];
@@ -15,6 +16,16 @@ export const validSubjects = (subjects: unknown, minimum = 2): subjects is Multi
     && (validSubjectImage(subject.subjectImage) || minimum === 0 && subject.subjectImage === "") && subjectRoles.includes(subject.role)
     && typeof subject.detail === "string" && subject.detail.length <= 2000)
   && new Set(subjects.map(subject => subject.id)).size === subjects.length;
+
+// 原图编辑的形状检查；修改项是否属于当前提示词版本由本机服务判断。
+export const validEditRequest = (edit: unknown): edit is EditRequest => !!edit && typeof edit === "object" && !Array.isArray(edit)
+  && Object.keys(edit).every(key => key === "changes" || key === "note")
+  && Array.isArray((edit as EditRequest).changes) && (edit as EditRequest).changes.length <= EDIT_LIMITS.elements
+  && (edit as EditRequest).changes.every(change => !!change && typeof change === "object" && !Array.isArray(change)
+    && Object.keys(change).every(key => key === "id" || key === "value")
+    && typeof change.id === "string" && /^e\d{1,2}$/.test(change.id)
+    && typeof change.value === "string" && change.value.length <= EDIT_LIMITS.value)
+  && ((edit as EditRequest).note === undefined || typeof (edit as EditRequest).note === "string" && (edit as EditRequest).note!.length <= EDIT_LIMITS.note);
 
 export const validateDraft = (draft: any) => {
   if (draft !== undefined && (typeof draft !== "object" || draft === null || Array.isArray(draft) || new TextEncoder().encode(JSON.stringify(draft)).length > 8 * 1024 * 1024))

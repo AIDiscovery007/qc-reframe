@@ -12,9 +12,9 @@ const json = value => new Response(JSON.stringify(value), { headers: { 'Content-
 const result = () => json({ data: [{ b64_json: png.toString('base64'), revised_prompt: 'a red cat' }] });
 const options = patch => ({ settings, mode: 'recreate', prompt: 'a cat', negativePrompt: 'watermark', ...patch });
 
-test('user: Given stale image paths, When recreating an image, Then only text reaches Images API', async () => {
+test('user: Given a text-only recreate, When generating, Then only text reaches Images API', async () => {
   let calls = 0;
-  const output = await runImageApi(options({ imagePath: '/must-not-read', subjectImagePath: '/also-not-read', aspectRatio: { width: 16, height: 9 }, fetchImpl: async (url, init) => {
+  const output = await runImageApi(options({ aspectRatio: { width: 16, height: 9 }, fetchImpl: async (url, init) => {
     calls++;
     assert.equal(url, 'https://images.example/v1/images/generations');
     assert.equal(init.method, 'POST');
@@ -31,6 +31,36 @@ test('user: Given stale image paths, When recreating an image, Then only text re
   assert.equal(calls, 1); assert.deepEqual(output.bytes, png);
   assert.equal(output.extension, 'png'); assert.equal(output.revisedPrompt, 'a red cat');
 });
+
+for (const provider of ['openai', 'gemini']) test(`user: Given a recreate edit, When generating through ${provider}, Then exactly the original image is sent as image 1`, async t => {
+  const { paths, buffers } = await images(t);
+  let calls = 0;
+  await runImageApi(options({ settings: { ...settings, provider }, imagePath: paths[0], prompt: '以图 1 为原图进行局部编辑', negativePrompt: '', fetchImpl: async (url, init) => {
+    calls++;
+    let text, sent;
+    if (provider === 'openai') {
+      assert.equal(url, 'https://images.example/v1/images/edits');
+      text = init.body.get('prompt');
+      sent = await Promise.all(init.body.getAll('image[]').map(async file => Buffer.from(await file.arrayBuffer())));
+    } else {
+      const body = JSON.parse(init.body);
+      text = body.contents[0].parts[0].text;
+      sent = body.contents[0].parts.slice(1).map(part => Buffer.from(part.inlineData.data, 'base64'));
+    }
+    assert.match(text, /以图 1 为原图进行局部编辑/); assert.match(text, /图 1 为待编辑的原图/);
+    assert.doesNotMatch(text, /参考图|主体/);
+    assert.deepEqual(sent, [buffers[0]]);
+    return provider === 'openai' ? result() : json({ candidates: [{ content: { parts: [{ inlineData: { data: png.toString('base64'), mimeType: 'image/png' } }] } }] });
+  } }));
+  assert.equal(calls, 1);
+});
+
+for (const patch of [{ subjectImagePath: '/subject' }, { subjectImagePaths: ['/a', '/b'] }, { subjects: [{ id: 's1', role: '人物', detail: '' }] }])
+  test(`user: Given recreate with ${Object.keys(patch)[0]}, When generating, Then it is rejected before network access`, async () => {
+    let calls = 0;
+    await assert.rejects(runImageApi(options({ imagePath: '/original', ...patch, fetchImpl: async () => { calls++; return result(); } })), /完整复刻不接受主体图/);
+    assert.equal(calls, 0);
+  });
 
 async function images(t) {
   const dir = await mkdtemp(join(tmpdir(), 'reframe-image-api-'));

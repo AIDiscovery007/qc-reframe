@@ -551,3 +551,35 @@ test('user reopens legacy Magpie batch history without rewriting its requested d
   assert.deepEqual(historical.imageSize, imageSize); assert.equal(historical.sizeRule, undefined); assert.equal(historical.submittedImageSize, undefined);
   assert.equal(s.generation.length, 1); assert.equal(s.reverse.length, 1);
 });
+
+test('user recreating through an image API with automatic size gets the reference ratio, and edits also attach the original', async t => {
+  // Given a 4:3 recreate reference with scanned elements and API generation,
+  // When the user generates text-only and then submits an edit with size left automatic,
+  // Then both requests carry the 4:3 reference ratio, only the edit attaches the stored original, and the edit has no exclusions.
+  const s = await setup(t);
+  await s.request('/image-settings', settings);
+  const bytes = await sharp({ create: { width: 800, height: 600, channels: 3, background: '#557733' } }).png().toBuffer();
+  const editProfile = { styleZh: '水彩', styleEn: 'Watercolor', elements: [{ id: 'e1', label: '天空', currentZh: '晴朗蓝天', currentEn: 'clear blue sky' }] };
+  const task = await s.request('/jobs', { image: `data:image/png;base64,${bytes.toString('base64')}`, mode: 'recreate' });
+  await wait(() => s.reverse.length); s.reverse[0].resolve({ ...result, editProfile });
+  await wait(async () => !(await s.request('/health')).body.active);
+  for (const [index, body] of [{ language: 'zh' }, { language: 'zh', edit: { changes: [{ id: 'e1', value: '晚霞' }] } }].entries()) {
+    assert.equal((await s.request(`/jobs/${task.body.id}/generations`, body)).status, 202);
+    await wait(() => s.generation.length > index);
+    const { args } = s.generation[index];
+    assert.equal(args.mode, 'recreate');
+    assert.deepEqual(args.aspectRatio, { width: 4, height: 3 });
+    assert.equal(args.subjectImagePath, undefined); assert.equal(args.subjects, undefined);
+    if (body.edit) {
+      assert.deepEqual(await readFile(args.imagePath), bytes);
+      assert.equal(args.negativePrompt, '');
+      assert.match(args.prompt, /天空：图中为「晴朗蓝天」，改为「晚霞」/);
+    } else {
+      assert.equal(args.imagePath, undefined);
+      assert.match(args.prompt, /^一只猫\n\n输出画面宽高比例与参考图一致：4:3/);
+    }
+    s.generation[index].resolve(decodeImage(image));
+    await wait(async () => !(await s.request('/health')).body.active);
+  }
+  assert.equal(s.codex.length, 0);
+});

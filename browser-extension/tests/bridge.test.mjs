@@ -9,6 +9,7 @@ import { createBridge, decodeImage } from "../bridge/server.mjs";
 import { agentInput, parseResult } from "../bridge/agent.mjs";
 import { generationInput } from "../bridge/generation.mjs";
 import sharp from "sharp";
+import { editPrompt } from "../lib/recreate-edit.mjs";
 
 for (const failure of ['image', 'record']) test(`user retries only local saving after generated ${failure} persistence fails`, async t => {
   // Given completed model output, When the image or task commit fails, Then recovery saves the same result and never calls the model again.
@@ -80,6 +81,8 @@ test('user cancellation during image persistence never publishes a late output',
     assert.equal((await s.request(`/jobs/${job.id}/generations/${id}/image`)).status, 409);
   } finally { release.resolve(); fs.promises.rename = rename; syncBuiltinESMExports(); }
 });
+// 完整复刻选「自动」比例时，本机服务按参考图（测试图为 1×1）追加的比例要求。
+const referenceRatio = { zh: "\n\n输出画面宽高比例与参考图一致：1:1（宽:高）。", en: "\n\nMatch the aspect ratio of the reference: 1:1 (width:height)." };
 const result = {
   title: "测试",
   observations: ["观察"],
@@ -208,7 +211,7 @@ for (const mode of ["style", "reenact", "recreate"]) test(`${mode} generates fro
   const generate = (language) => request(path, { method: "POST", body: JSON.stringify({ language, imagePath: "/ignored-user-path" }) });
   assert.equal((await generate("en")).status, 202);
   const first = await waitGeneration(request, created.id, "completed");
-  assert.equal(calls[0].prompt, finalResult.promptEn);
+  assert.equal(calls[0].prompt, finalResult.promptEn + (paired ? "" : referenceRatio.en), "recreate auto size follows the reference ratio");
   assert.equal(calls[0].negativePrompt, finalResult.negativePrompt);
   if (paired) assert.deepEqual(await readFile(calls[0].imagePath), decodeImage(image).bytes);
   else assert.equal(calls[0].imagePath, undefined, "recreate must send text only");
@@ -216,7 +219,8 @@ for (const mode of ["style", "reenact", "recreate"]) test(`${mode} generates fro
   if (paired) assert.deepEqual(await readFile(calls[0].subjectImagePath), decodeImage(image).bytes);
   const generated = first.generations[0];
   assert.equal(generated.aspectRatio, undefined);
-  assert.equal(generated.prompt, finalResult.promptEn);
+  assert.deepEqual(generated.referenceAspectRatio, paired ? undefined : { width: 1, height: 1 });
+  assert.equal(generated.prompt, finalResult.promptEn + (paired ? "" : referenceRatio.en));
   assert.equal((await (await request(`${path}/${generated.id}/reference`)).json()).image, image);
   const imagePath = `${path}/${generated.id}/image`;
   assert.equal((await fetch(url + imagePath)).status, 401);
@@ -228,7 +232,7 @@ for (const mode of ["style", "reenact", "recreate"]) test(`${mode} generates fro
   assert.deepEqual(await readFile(firstAsset.path), decodeImage(image).bytes);
   assert.equal((await generate("zh")).status, 202);
   const second = await waitGeneration(request, created.id, "completed");
-  assert.equal(calls[1].prompt, finalResult.promptZh);
+  assert.equal(calls[1].prompt, finalResult.promptZh + (paired ? "" : referenceRatio.zh));
   assert.deepEqual(second.result, finalResult);
   assert.equal(second.generations.length, 2);
   assert.deepEqual(second.generations[0], first.generations[0]);
@@ -243,6 +247,7 @@ for (const mode of ["style", "reenact", "recreate"]) test(`${mode} generates fro
   if (!paired) {
     await waitGeneration(request, created.id, "completed");
     assert.equal(calls[2].imagePath, undefined, "text-to-image works without the saved reference");
+    assert.equal(calls[2].prompt, finalResult.promptZh, "a missing reference leaves the ratio automatic");
     assert.equal(calls[2].subjectImagePath, undefined);
     assert.deepEqual(generationInput(calls[2]).map((item) => item.type), ["text"]);
   }
@@ -489,8 +494,8 @@ test("generations from different prompt versions overlap analysis and cancel ind
   assert.equal((await (await request("/health")).json()).active, 3);
   const cancelPath = `/jobs/${first.id}/generations/${jobs[0].generations[0].id}/cancel`;
   await request(cancelPath, { method: "POST" });
-  const firstCall = generations.get("Actual subject");
-  const secondCall = generations.get("实际主体");
+  const firstCall = generations.get("Actual subject" + referenceRatio.en);
+  const secondCall = generations.get("实际主体" + referenceRatio.zh);
   assert.equal(firstCall.signal.aborted, true);
   assert.equal(secondCall.signal.aborted, false);
   assert.equal((await (await request(`/jobs/${analysis.id}`)).json()).status, "running");
@@ -713,6 +718,139 @@ test("Codex receives subject first, template second, and the submitted user task
   assert.throws(() => agentInput({ ...args, mode: "style", basePrompt: " " }), /缺少/);
   assert.deepEqual(agentInput({ ...args, mode: "recreate" }).filter(x => x.type === "localImage").map(x => x.path), ["/template.png"]);
   assert.throws(() => agentInput({ ...args, mode: "reenact", subjectImagePath: undefined }), /缺少/);
+});
+
+// Scenario: user reverses any path and expects subject appearance written as part phrases.
+// Given a reverse task for each path, including generic style with no subject image,
+// When the bridge builds the agent input,
+// Then one task block asks for category prior → outer styling → part phrases → clarity distribution,
+//   binds multiple subjects one by one, routes appearance by path, and keeps it apart from body and mood;
+// And a malformed paired task still fails before any appearance rule is sent.
+test("user reverse on every path asks for subject appearance from category prior to part phrases", () => {
+  const base = { name: "alchemy", skillPath: "/skill/SKILL.md", imagePath: "/template.png", instruction: "沿用模板构图" };
+  const tasks = {
+    recreate: { ...base, instruction: undefined },
+    "style-generic": { ...base, mode: "style" },
+    "style-paired": { ...base, mode: "style", subjectImagePath: "/subject.png" },
+    reenact: { ...base, subjectImagePath: "/subject.png" },
+    "multi-reenact": { ...base, subjectImagePaths: ["/a.png", "/b.png"], subjects: [{ id: "a", role: "人物" }, { id: "b", role: "宠物" }] },
+  };
+  for (const [name, args] of Object.entries(tasks)) {
+    const input = agentInput({ mode: name.replace(/-(generic|paired)$/, ""), ...args });
+    const texts = input.filter(item => item.type === "text").map(item => item.text);
+    const appearance = texts.findIndex(text => text.startsWith("主体外观须具体化"));
+    assert.ok(appearance > texts.findIndex(text => text.startsWith("人物身材须具体化")), name);
+    const block = texts[appearance];
+    assert.match(block, /promptZh 与 promptEn 正文/);
+    assert.match(block, /类别先验.*外层造型.*部位名.*清晰度分布/s);
+    assert.match(block, /行业词/);
+    assert.match(block, /画面位置加类别先验逐个起句/);
+    assert.match(block, /完整复刻取参考图.*通用风格把具体外貌留给 \[SUBJECT\].*重演与多图按身份来源逐个绑定/s);
+    assert.match(block, /外貌、身材与神态分层写/);
+    assert.match(block, /只描述可见外貌，专名及具名后的外貌简写按下一条规则/);
+  }
+  assert.throws(() => agentInput({ ...base, mode: "reenact" }), /缺少/);
+});
+
+// Scenario: user reverses fan art of a known character and expects its name to anchor generation.
+// Given a reverse task for every path,
+// When the bridge builds the agent input,
+// Then one task block, between the appearance and orientation blocks, makes identification an observation step:
+//   ask which known character, mascot, landmark, artwork or product the subject is, from the model's own knowledge,
+//   confirm it by stable design marks even when outfit, art style or pose differ, record the basis in observations,
+//   and write the name right after the category prior;
+// And for a named subject, traits that match the original design shrink to one short phrase of two or three marks,
+//   while deviations from the original, expression, pose and orientation, composition, light and style are still written
+//   from the image, and the body block defers matching body type to the same rule;
+// And subjects without a concrete candidate and real people stay described by appearance, names follow each path's
+//   content source, and editProfile still lists the full appearance without the name.
+// Why this changed: the first version only said "name it if a combination of features confirms it" at writing time and
+//   listed long straight black hair as too common. Two real recreate reverses of a Hinata fan art then wrote no name,
+//   although the same model names her when asked directly; a passive, strict condition does not trigger identification.
+//   The second version kept every part phrase next to the name; real generations then drifted away from the character,
+//   because detailed part phrases compete with the name, so matching traits are now abbreviated.
+test("user reverse on every path identifies a known subject, names it after its category prior and abbreviates its original traits", () => {
+  const base = { name: "alchemy", skillPath: "/skill/SKILL.md", imagePath: "/template.png", instruction: "沿用模板构图" };
+  const sessionContext = { sources: [{ id: "s", title: "小说" }], messages: [{ threadId: "s", role: "user", text: "雨夜的邮局" }] };
+  const tasks = [
+    ["recreate", { ...base, instruction: undefined }],
+    ["style", base],
+    ["style", { ...base, subjectImagePath: "/subject.png" }],
+    ["reenact", { ...base, subjectImagePath: "/subject.png" }],
+    ["multi-reenact", { ...base, subjectImagePaths: ["/a.png", "/b.png"], subjects: [{ id: "a", role: "人物" }, { id: "b", role: "宠物" }] }],
+    ["session", { ...base, sessionContext }],
+  ];
+  for (const [mode, args] of tasks) {
+    const texts = agentInput({ mode, ...args }).filter(item => item.type === "text").map(item => item.text);
+    const naming = texts.findIndex(text => text.startsWith("主体身份先识别再具名"));
+    assert.ok(naming > texts.findIndex(text => text.startsWith("主体外观须具体化")), mode);
+    assert.ok(naming < texts.findIndex(text => text.startsWith("姿态与朝向须逐段写准")), mode);
+    const block = texts[naming];
+    assert.match(block, /在 observation 阶段.*这是哪个已知的虚构角色、吉祥物、地标建筑、艺术作品或产品型号/s);
+    assert.match(block, /只凭已有知识识别，不联网检索/);
+    assert.match(block, /发型轮廓与发色、瞳色与瞳孔样式/);
+    assert.match(block, /服装、画风或姿态与原作不同不影响确认/);
+    assert.match(block, /observations 写一条身份依据/);
+    assert.match(block, /类别先验之后写出专名/);
+    assert.match(block, /日向雏田（Hinata Hyuga，《火影忍者》）/);
+    assert.match(block, /与原作一致的身份特征.*一个短语点出两三个最有辨识度的标志.*不再逐部位展开/s);
+    assert.match(block, /照常按图写：与原作不同之处.*神态.*姿态与朝向.*构图、光色与画风/s);
+    assert.doesNotMatch(block, /仍按图逐项写全/);
+    assert.match(texts.find(text => text.startsWith("人物身材须具体化")), /已具名角色与原作一致的体型按“主体身份先识别再具名”规则简写/);
+    assert.match(block, /想不出具体候选.*只写外观/s);
+    assert.match(block, /真实人物（含公众人物）不凭外貌识别具名/);
+    assert.match(block, /完整复刻取参考图.*被替换的原主体不具名.*\[SUBJECT\] 不具名.*会话创作的名称来自会话内容/s);
+    assert.match(block, /editProfile 仍逐项写外观，不写专名/);
+  }
+});
+
+// Scenario: user reverses a slightly turned subject and expects the turn to survive generation.
+// Given a reverse task for each path,
+// When the bridge builds the agent input,
+// Then one task block, after the appearance block, asks to measure each segment's orientation from left/right evidence
+//   and write direction, approximate angle and visible consequences, with the frontal misreading as a negative;
+// And it routes the pose source by path and leaves generic style free of the reference subject's orientation.
+test("user reverse on every path asks for per-segment orientation with angles and visible consequences", () => {
+  const base = { name: "alchemy", skillPath: "/skill/SKILL.md", imagePath: "/template.png", instruction: "沿用模板构图" };
+  const tasks = [
+    ["recreate", { ...base, instruction: undefined }],
+    ["style", base],
+    ["style", { ...base, subjectImagePath: "/subject.png" }],
+    ["reenact", { ...base, subjectImagePath: "/subject.png" }],
+    ["multi-reenact", { ...base, subjectImagePaths: ["/a.png", "/b.png"], subjects: [{ id: "a", role: "人物" }, { id: "b", role: "宠物" }] }],
+  ];
+  for (const [mode, args] of tasks) {
+    const texts = agentInput({ mode, ...args }).filter(item => item.type === "text").map(item => item.text);
+    const pose = texts.findIndex(text => text.startsWith("姿态与朝向须逐段写准"));
+    assert.ok(pose > texts.findIndex(text => text.startsWith("主体外观须具体化")), mode);
+    const block = texts[pose];
+    assert.match(block, /默认把主体画成正面、端正、对称/);
+    assert.match(block, /鼻尖偏离脸部中线.*远侧耳朵与肩膀是否露出.*眼线与肩线斜率/s);
+    assert.match(block, /头的转、倾、俯仰.*视线.*肩胸.*骨盆/s);
+    assert.match(block, /方向（以画面左右为参照）、近似角度和一两个可见后果/);
+    assert.match(block, /negativePrompt 写出“双肩正对镜头，身体端正对称”/);
+    assert.match(block, /完整复刻取参考图.*通用风格不锁定参考主体的朝向/s);
+  }
+});
+
+// Scenario: user recreates an image and expects one continuous description.
+// Given a recreate task and a reenact task,
+// When the bridge builds each agent input,
+// Then recreate weaves expression into the pose sentence and part phrases and closes with one mood sentence, without headed sections;
+// And the other paths still ask for the headed mood and expression sections.
+test("user recreate prompts weave mood and expression into the body while other paths keep headed sections", () => {
+  const base = { name: "alchemy", skillPath: "/skill/SKILL.md", imagePath: "/template.png" };
+  const sections = input => input.filter(item => item.type === "text").map(item => item.text).join("\n");
+  const recreate = agentInput({ ...base, mode: "recreate" });
+  assert.match(recreate[0].text, /神态写进姿态句与部位短语/);
+  assert.match(recreate[0].text, /整体情绪在正文结尾用一句收束/);
+  assert.match(recreate[0].text, /不另起带标题的段落/);
+  assert.match(sections(recreate), /完整复刻按路径意图织入姿态句与部位短语，不另起专段/);
+  assert.match(sections(recreate), /完整复刻按路径意图织入正文结尾，不另起段落/);
+  const reenact = agentInput({ ...base, mode: "reenact", subjectImagePath: "/subject.png", instruction: "沿用模板构图" });
+  assert.doesNotMatch(reenact[0].text, /不另起带标题的段落/);
+  assert.match(sections(reenact), /其他路径各用空行分出“人物神态与微动作 \/ Expression & subtle gestures”专段/);
+  assert.match(sections(reenact), /其他路径在 promptZh 与 promptEn 正文各用空行单列‘整体情绪与氛围 \/ Overall mood & atmosphere’/);
 });
 
 test("multi-reenact keeps ordered roles, immutable generation inputs and latest restoration", async (t) => {
@@ -1013,7 +1151,7 @@ for (const change of ["edit", "cancel", "disk failure"]) test(`automatic handoff
     const job = await waitFor(request, submitted.id, change === "disk failure" ? "failed" : "completed");
     if (change === "edit") {
       assert.equal(job.result.promptZh, "edited");
-      assert.equal(calls[0].prompt, "original");
+      assert.equal(calls[0].prompt, "original" + referenceRatio.zh);
       assert.equal(calls[0].negativePrompt, "original exclusion");
     } else {
       assert.equal(calls.length, 0);
@@ -1062,4 +1200,120 @@ test("user's plugin instruction requests reject unknown queries and malformed bo
   assert.equal((await request("/plugin-instructions?x=1")).status, 400);
   assert.equal((await request("/plugin-instructions", { method: "POST", body: JSON.stringify({ text: 1, revision: view.revision }) })).status, 400);
   assert.deepEqual(await (await request("/plugin-instructions")).json(), view);
+});
+
+const editProfile = {
+  styleZh: "厚涂油画（impasto），可见刮刀笔触", styleEn: "Impasto oil painting with visible palette-knife strokes",
+  elements: [
+    { id: "e1", label: "发色", currentZh: "人物齐肩黑发", currentEn: "shoulder-length black hair" },
+    { id: "e2", label: "背景", currentZh: "灰蓝色海边", currentEn: "grey-blue seaside" },
+  ],
+};
+
+test("user edits a recreate original and only the assembled edit prompt and the original reach the generator", async t => {
+  // Given a recreate version with scanned editable elements and a 4:3 reference,
+  // When the user submits one element change plus a free-form note,
+  // Then the generator receives the stored original as image 1 and a frozen edit prompt instead of the copy prompt, without exclusions;
+  // the untouched element is named only as something to keep.
+  const calls = [];
+  const reference = `data:image/png;base64,${(await sharp({ create: { width: 1200, height: 900, channels: 3, background: "#335577" } }).png().toBuffer()).toString("base64")}`;
+  const s = await setup(t, async () => ({ ...result, promptZh: "完整复刻提示词", promptEn: "full copy prompt", negativePrompt: "水印", editProfile }), async args => {
+    calls.push(args);
+    return { bytes: decodeImage(image).bytes, extension: "png" };
+  });
+  const created = await (await s.request("/jobs", submit({ mode: "recreate", image: reference }))).json();
+  await waitFor(s.request, created.id, "completed");
+  const edit = { changes: [{ id: "e2", value: " 夕阳下的麦田 " }], note: "人物微笑" };
+  const accepted = await s.request(`/jobs/${created.id}/generations`, { method: "POST", body: JSON.stringify({ language: "zh", edit }) });
+  assert.equal(accepted.status, 202);
+  const job = await waitGeneration(s.request, created.id, "completed");
+  const frozen = { changes: [{ ...editProfile.elements[1], value: "夕阳下的麦田" }], note: "人物微笑" };
+  const expected = `${editPrompt(editProfile, frozen, "zh")}\n\n输出画面宽高比例与图 1 一致：4:3（宽:高）。`;
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].prompt, expected);
+  assert.match(calls[0].prompt, /背景：图中为「灰蓝色海边」，改为「夕阳下的麦田」/);
+  assert.match(calls[0].prompt, /保持不变[^\n]*\n- 发色：人物齐肩黑发\n/);
+  assert.doesNotMatch(calls[0].prompt, /完整复刻提示词|发色：图中为/);
+  assert.equal(calls[0].negativePrompt, "");
+  assert.deepEqual(await readFile(calls[0].imagePath), decodeImage(reference).bytes);
+  assert.equal(calls[0].subjectImagePath, undefined);
+  const generated = job.generations[0];
+  assert.deepEqual(generated.edit, frozen);
+  assert.deepEqual(generated.referenceAspectRatio, { width: 4, height: 3 });
+  assert.equal(generated.prompt, expected);
+  assert.deepEqual(job.result.editProfile, editProfile, "the reverse result keeps its scanned elements for later edits");
+});
+
+test("user cannot submit an invalid or mismatched edit and no generation is admitted", async t => {
+  // Given recreate versions with and without editable elements and a style version,
+  // When an edit is malformed, empty, stale, mixed with subject images or sent to another mode,
+  // Then each request fails with a reason before any generator call or generation record.
+  let calls = 0;
+  const generator = async () => { calls++; return { bytes: decodeImage(image).bytes, extension: "png" }; };
+  const s = await setup(t, async ({ mode }) => ({ ...result, promptZh: "提示词", promptEn: "prompt", ...(mode === "recreate" ? { editProfile } : {}) }), generator);
+  const editable = await (await s.request("/jobs", submit({ mode: "recreate" }))).json();
+  await waitFor(s.request, editable.id, "completed");
+  const generate = (id, body) => s.request(`/jobs/${id}/generations`, { method: "POST", body: JSON.stringify({ language: "zh", ...body }) });
+  for (const [edit, message] of [
+    [{ changes: [] }, /至少填写一项/],
+    [{ changes: [{ id: "e1", value: "   " }] }, /1–500/],
+    [{ changes: [{ id: "e9", value: "金发" }] }, /不一致/],
+    [{ changes: [{ id: "e1", value: "金发" }, { id: "e1", value: "红发" }] }, /不一致/],
+    [{ changes: [{ id: "e1", value: "x".repeat(501) }] }, /1–500/],
+    [{ changes: [{ id: "e1", value: "金发", extra: true }] }, /无效的原图编辑参数/],
+    [{ changes: [], prompt: "override" }, /无效的原图编辑参数/],
+    ["金发", /无效的原图编辑参数/],
+  ]) {
+    const response = await generate(editable.id, { edit });
+    assert.equal(response.status, 400, JSON.stringify(edit));
+    assert.match((await response.json()).error, message);
+  }
+  const mixed = await generate(editable.id, { edit: { changes: [{ id: "e1", value: "金发" }] }, subjectImage: image });
+  assert.equal(mixed.status, 400);
+  assert.match((await mixed.json()).error, /不接受主体图/);
+  const style = await (await s.request("/jobs", submit({ mode: "style", reenact: { subjectImage: image, basePrompt: "保留主体" } }))).json();
+  await waitFor(s.request, style.id, "completed");
+  const other = await generate(style.id, { edit: { changes: [{ id: "e1", value: "金发" }] } });
+  assert.equal(other.status, 400);
+  assert.match((await other.json()).error, /只有完整复刻/);
+  assert.equal(calls, 0);
+  assert.equal((await (await s.request(`/jobs/${editable.id}`)).json()).generations?.length ?? 0, 0);
+});
+
+test("user with a version reversed before edit support is asked to reverse again instead of sending a copy", async t => {
+  // Given an older recreate result without editable elements, When an edit is submitted, Then it is rejected and text generation still works.
+  const calls = [];
+  const s = await setup(t, async () => ({ ...result, promptZh: "旧版提示词", promptEn: "old prompt" }), async args => { calls.push(args); return { bytes: decodeImage(image).bytes, extension: "png" }; });
+  const created = await (await s.request("/jobs", submit({ mode: "recreate" }))).json();
+  await waitFor(s.request, created.id, "completed");
+  const rejected = await s.request(`/jobs/${created.id}/generations`, { method: "POST", body: JSON.stringify({ language: "zh", edit: { changes: [{ id: "e1", value: "金发" }] } }) });
+  assert.equal(rejected.status, 400);
+  assert.match((await rejected.json()).error, /重新逆向/);
+  assert.equal((await s.request(`/jobs/${created.id}/generations`, { method: "POST", body: '{"language":"zh"}' })).status, 202);
+  await waitGeneration(s.request, created.id, "completed");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].imagePath, undefined);
+  assert.equal(calls[0].prompt, "旧版提示词" + referenceRatio.zh);
+});
+
+test("user editing an original whose stored image is gone gets a missing-reference failure", async t => {
+  // Given an editable recreate version whose reference file was removed, When an edit is submitted, Then it fails with 404 and never falls back to text-only generation.
+  let calls = 0;
+  const s = await setup(t, async () => ({ ...result, promptZh: "提示词", promptEn: "prompt", editProfile }), async () => { calls++; return { bytes: decodeImage(image).bytes, extension: "png" }; });
+  const created = await (await s.request("/jobs", submit({ mode: "recreate" }))).json();
+  const job = await waitFor(s.request, created.id, "completed");
+  await rm(join(s.dir, "images", job.imageAsset));
+  const response = await s.request(`/jobs/${created.id}/generations`, { method: "POST", body: JSON.stringify({ language: "zh", edit: { changes: [{ id: "e1", value: "金发" }] } }) });
+  assert.equal(response.status, 404);
+  assert.equal(calls, 0);
+});
+
+test("user edit runs pass the original to Codex image generation as the edit base", () => {
+  // Given a frozen edit generation, When the Codex built-in input is built, Then the only attached image is the original and the instruction says to edit it.
+  const input = generationInput({ mode: "recreate", imagePath: "/original.png", prompt: "以图 1 为原图进行局部编辑", negativePrompt: "" });
+  assert.deepEqual(input.filter(item => item.type === "localImage").map(item => item.path), ["/original.png"]);
+  const text = input.find(item => item.type === "text").text;
+  assert.match(text, /原图编辑任务/);
+  assert.match(text, /以图 1 为原图进行局部编辑/);
+  assert.throws(() => generationInput({ mode: "recreate", imagePath: "/original.png", subjects: [{ id: "s1" }], prompt: "x" }), /完整复刻不接受主体图/);
 });

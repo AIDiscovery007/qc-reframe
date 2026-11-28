@@ -70,6 +70,14 @@ flowchart TD
 
 这个 seam 有两个实际 UI adapter，改动一处即可覆盖两端；不引入通用表单框架或全局事件总线。
 
+完整复刻原图编辑的共同规则在 `lib/recreate-edit.mjs`（`.d.mts` 提供类型），bridge 与界面共用：
+
+- `sanitizeEditProfile` 清洗 Agent 输出，由 `agent.mjs` 的 `parseResult` 仅对 recreate 调用。
+- `normalizeEditRequest` 在受理时校验修改项并冻结快照；`editPrompt` 拼装编辑提示词；`referenceAspectRatio` 把参考图尺寸化为紧凑比例，`bridge/reference-ratio.mjs` 读取 EXIF 校正后的尺寸。
+- 界面只用它预览提示词、判断能否提交；`generation-session` 的 `editable` 资格与 `act(…, edit)` 负责发送，`RecreateEditDialog.tsx` 只管填写，`background.ts` 用 `validEditRequest` 做形状检查。
+
+自动衔接与批次的生图参数白名单不包含 `edit`，因此保持文生图。
+
 ## 逆向 Agent
 
 `bridge/agents.mjs` 是逆向 Agent 的 seam。`createAgentRegistry({ dataDir, adapters })` 校验并登记 adapter，持久化当前选择（`agent-settings.json`，原子替换），向界面提供 `view()` 目录（ID、名称、当前模型、是否可安装及最近一次检测到的 CLI 安装情况），`detect()` 供 `GET /agents?detect=1` 在本机检查所有 adapter 的 CLI（只看安装与版本，不查询更新），未检测或检测失败为 `null`（未知），不等同于未安装；并以 `frozen(snapshot)` 按任务冻结的 `modelSettings.agent` 解析执行者：缺少字段按 `LEGACY_AGENT`（Codex）解释，未登记 ID 明确失败，不回退到当前选择。`builtinAgents()` 装配现有 Codex、Pi 与 Claude Code adapter；新增本机 Agent 只需在此登记一个对象：
@@ -112,7 +120,7 @@ Magpie 文生图使用 Images JSON generations，附图使用 multipart edits，
 
 `generation-output.mjs` 在图片与任务记录均成功提交前保留模型返回的字节；写图片前先原子保存 `generation-outputs/<generationId>.json`，独立关联任务、图片 hash 与输出元数据。即使终态和失败补写连续失败，启动也先按关联恢复 resultSavePending，再回收图片；所有回收入口保护关联引用。恢复索引损坏或所指任务文件损坏时停止启动并保留原件；已取消、已删除或已完成任务不复活。图片写入或终态保存失败，任务为 failed；`POST /jobs/:jobId/generations/:generationId/save` 只重试保存原输出，不调用模型、不新增 generation。失败不清除恢复项，保存成功、取消或删除后释放；尚无磁盘图片时仅服务内存可恢复。任务记录存在未提交写入时也禁止图片回收。
 
-`bridge/image-settings.mjs` 原子保存渠道与各 API 配置；扩展专用 `/image-settings` 仅返回非敏感字段及密钥存在状态。`image-api.mjs` 处理 OpenAI Images 和 Gemini generateContent 协议、有序附图、比例适配、受限下载及取消；Codex 路径继续使用原 generator。完整复刻只发送提示词，其余模式沿用任务的图片顺序与分工。失败不回退其他渠道、不自动重试。
+`bridge/image-settings.mjs` 原子保存渠道与各 API 配置；扩展专用 `/image-settings` 仅返回非敏感字段及密钥存在状态。`image-api.mjs` 处理 OpenAI Images 和 Gemini generateContent 协议、有序附图、比例适配、受限下载及取消；Codex 路径继续使用原 generator。完整复刻文生图只发送提示词；原图编辑只附任务参考图作为图 1，走 `/images/edits` 或 Gemini `inlineData`。其余模式沿用任务的图片顺序与分工。失败不回退其他渠道、不自动重试。
 
 手动、连续及批次任务在受理时冻结生图配置。凭据只保存在私有设置文件和在途内存快照，不进入任务、批次或历史响应；批次终结及服务关闭清理快照。历史保留渠道、地址和模型；重启沿既有规则终结中断批次，不读取当前密钥继续旧请求。
 
@@ -164,6 +172,7 @@ HTTP server 保留鉴权、JSON 解析、响应映射及既有 mutation lock；�
 | 交接/提醒读取与五模式逆向资格 | `creation-entry.test.mjs` 验证阶段、失败、revision 与 dispose；`workspace-prompt-action.test.mjs`、`reverse-cancel.test.mjs` 验证逆向资格、提交与取消锁；`quick-workspace.test.mjs` 经 `createSurfaceSync` 与交接 module 验证初始化与导航合同，浏览器 `creation-context`、`end-to-end-context` 验证实际装配 |
 | 服务健康、渠道设置、项目输入与可见性 | `service-health.test.mjs`、`image-settings-sync.test.mjs`、`project-selection.test.mjs`、`project-visibility-ui.test.mjs`；提示词导出图序见 `prompt-export.test.mjs` |
 | 两端生图行为 | `generation-session.test.mjs`，工作台 `generation-actions.browser.js`，快捷界面提交/取消 |
+| 完整复刻原图编辑与参考比例 | `recreate-edit.test.mjs`（共享规则、Agent 解析、消息形状、会话资格）；`bridge.test.mjs`、`image-api-bridge.test.mjs`、`image-api.test.mjs` 验证受理、附图与比例；`recreate-edit.browser.js` 验证弹窗与模式切换 |
 | 执行、取消、保存失败与重启 | `task-runtime.test.mjs`、`task-records.test.mjs`，现有 server/storage 集成测试 |
 | 批次预检、受理、同键恢复与响应丢失 | `batch-admission.test.mjs`、`batches.test.mjs` 的真实 HTTP 与临时磁盘集成测试 |
 | CAS、空输入、旧记录 | `project-inputs.test.mjs` 与项目恢复测试 |

@@ -77,10 +77,13 @@ export async function runImageApi({ settings, mode, imagePath, subjectImagePath,
       throw failure('会话创作需要一张风格参考图，不接受主体图');
     if (mode !== 'recreate' && subjectImagePaths && (!imagePath || subjectImagePaths.length < 2 || subjectImagePaths.length > 6 || subjectImagePaths.length !== subjects?.length))
       throw failure('多图任务缺少主体图快照');
-    const order = mode === 'recreate' ? { paths: [] } : orderedImages(imagePath, subjectImagePaths || (subjectImagePath ? [subjectImagePath] : []), referenceIndex);
+    if (mode === 'recreate' && (subjectImagePath || subjectImagePaths || subjects)) throw failure('完整复刻不接受主体图');
+    // 完整复刻：文生图不附图；原图编辑只附原图作为编辑底图。
+    const order = mode === 'recreate' ? { paths: imagePath ? [imagePath] : [], subjectNumbers: [], referenceIndex: 0 } : orderedImages(imagePath, subjectImagePaths || (subjectImagePath ? [subjectImagePath] : []), referenceIndex);
     let text = `${prompt}${negativePrompt ? `\n\n排除项 / Negative prompt:\n${negativePrompt}` : ''}`;
     if (order.paths.length) {
-      text += mode === 'session' ? '\n图 1 仅为风格参考，创作内容以提示词为准。'
+      text += mode === 'recreate' ? '\n图 1 为待编辑的原图，只按提示词修改指定内容。'
+        : mode === 'session' ? '\n图 1 仅为风格参考，创作内容以提示词为准。'
         : !order.subjectNumbers.length ? '\n图 1 为参考图，各图保留项与迁移项以提示词为准。'
         : `\n图 ${order.referenceIndex + 1} 为参考模板；${order.subjectNumbers.map(number => `图 ${number}`).join('、')} 为主体。各图保留项与迁移项以提示词为准。`;
       if (subjects) text += `\n当前图片分工：${JSON.stringify(subjects.map(({ id, role, detail }, index) => ({ image: order.subjectNumbers[index], id, role, detail })))}`;

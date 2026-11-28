@@ -48,7 +48,7 @@ const job = {
   result,
 };
 
-const regressions = Object.fromEntries(['input-operation', 'workspace-image-model', 'image-settings-sync', 'magpie-workflows', 'generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'service-upgrade', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context', 'plugin-instructions']
+const regressions = Object.fromEntries(['input-operation', 'workspace-image-model', 'image-settings-sync', 'magpie-workflows', 'generation-readiness', 'automatic-connection', 'image-settings', 'agent-settings', 'batch-recreate', 'settings-recovery', 'service-upgrade', 'end-to-end', 'generation-actions', 'auto-style', 'image-order', 'creation-context', 'plugin-instructions', 'recreate-edit']
   .map(name => [`/${name}-regression.js`, `browser-extension/tests/${name}.browser.js`]));
 async function sendScript(req, res, body) {
   res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
@@ -67,6 +67,10 @@ const server = createServer(async (req, res) => {
     if (galleryAsset(path, res)) return;
     if (path === '/preview-image-size.mjs') {
       await sendScript(req, res, await readFile(new URL('../browser-extension/lib/image-size.mjs', import.meta.url)));
+      return;
+    }
+    if (path === '/preview-recreate-edit.mjs') {
+      await sendScript(req, res, await readFile(new URL('../browser-extension/lib/recreate-edit.mjs', import.meta.url)));
       return;
     }
     if (regressions[path]) {
@@ -147,6 +151,11 @@ const server = createServer(async (req, res) => {
           job.mode='recreate';job.instruction='分析参考图的主体、内容、构图、配色、光影与材质，生成可用于文生图的完整提示词。';
           job.result.title='双画布对齐示例';
           if(state==='alignment')job.generations=Array.from({length:Math.min(12,Math.max(1,Number(previewOptions.get('results'))||1))},(_,i)=>({...job.generations[0],id:'alignment-result-'+i}));
+          // 完整复刻逆向时扫描出的可编辑元素；editProfile=none 模拟升级前的旧版本。
+          if(previewOptions.get('editProfile')!=='none')job.result.editProfile={styleZh:'暖米色纸底上的平涂几何色块，边缘清晰，带细微印刷颗粒（risograph）。',styleEn:'Flat geometric color blocks on warm cream paper with crisp edges and fine risograph grain.',elements:[
+            {id:'e1',label:'主体形状',currentZh:'画面中央的橄榄绿圆形',currentEn:'the olive green circle in the center'},
+            {id:'e2',label:'横向色块',currentZh:'圆形下方压住它的陶土红横条',currentEn:'the terracotta bar overlapping the bottom of the circle'},
+            {id:'e3',label:'背景',currentZh:'大面积留白的暖米色纸底',currentEn:'the warm cream paper background with generous negative space'}]};
         }
         const gallery = ${JSON.stringify(gallery)};
         const template = state==='alignment'||state.startsWith('session')?alignment[0].image:state === 'gallery' || state.startsWith('multi') ? gallery.reference : ${JSON.stringify(image)};
@@ -263,6 +272,12 @@ const server = createServer(async (req, res) => {
           if(previewOptions.get('generationStart')==='failed')throw new Error('示例：生成请求提交失败，请重试');
           const generation={id:crypto.randomUUID(),status:'running',stage:'正在生成图片…',language:message.language,extension:'png',createdAt:new Date().toISOString(),prompt:message.language==='zh'?saved.result.promptZh:saved.result.promptEn,negativePrompt:saved.result.negativePrompt,model:saved.model||models.selected,referenceIndex:savedReferenceIndex(saved),subjectImage:message.subjectImage,subjects:message.subjects?structuredClone(message.subjects):undefined,aspectRatio:message.aspectRatio,...(previewOptions.has('magpieWorkflowsRegression')||imageSettingsSync||workspaceImageModel?{provider:message.provider||imageSettings.provider,imageSize:message.imageSize,sizeMode:message.imageSize?'explicit':(message.provider||imageSettings.provider)==='magpie'?'gateway-default':undefined,outputSize:{width:320,height:400}}:{})};
           if(workspaceImageModel)generation.model=message.generationModel||imageSettings.configs.magpie.model;
+          if(message.edit) {
+            // Mirrors the bridge: the frozen edit snapshot and assembled prompt replace the reverse prompt.
+            const {normalizeEditRequest,editPrompt}=await import('/preview-recreate-edit.mjs');
+            generation.edit=normalizeEditRequest(saved.result.editProfile,message.edit);
+            Object.assign(generation,{prompt:editPrompt(saved.result.editProfile,generation.edit,message.language),negativePrompt:''});
+          }
           if(generation.provider==='magpie') { const {normalizeMagpieSize}=await import('/preview-image-size.mjs');Object.assign(generation,normalizeMagpieSize(message.generationModel||imageSettings.configs.magpie.model,message.imageSize)); }
           saved.generations||=[];saved.generations.push(generation);touch(projects.find(p=>p.id===saved.projectId));
           setTimeout(()=>{if(generation.status==='running'){
@@ -747,6 +762,8 @@ const server = createServer(async (req, res) => {
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/end-to-end-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('generationActionsRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/generation-actions-regression.js"></script></body>'));
+    if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('recreateEditRegression'))
+      content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/recreate-edit-regression.js"></script></body>'));
     if (path === '/workspace.html' && new URL(req.url, 'http://127.0.0.1').searchParams.has('autoStyleRegression'))
       content = Buffer.from(content.toString().replace('</body>', '<script type="module" src="/auto-style-regression.js"></script></body>'));
     if (['/workspace.html','/popup.html'].includes(path) && new URL(req.url, 'http://127.0.0.1').searchParams.has('imageOrderRegression'))

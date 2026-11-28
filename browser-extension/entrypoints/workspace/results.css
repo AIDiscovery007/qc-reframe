@@ -65,3 +65,23 @@
  .workspace-app .workspace-head .badge { display:none; }
 }
 @media(max-height:580px) { .workspace-app { --canvas-strip-height:46px;--canvas-controls-height:150px;--canvas-gap:6px; } }
+
+/* 完整复刻 · 原图编辑 */
+.workspace-app .result-dialog.recreate-edit { width:min(520px,calc(100% - 32px));overflow:hidden; }
+.recreate-edit .dialog-content { display:flex;flex-direction:column;flex:1 1 auto;min-height:0;padding-bottom:20px; }
+.recreate-edit .edit-body { flex:1 1 auto;min-height:0;overflow:auto; }
+.recreate-edit .edit-body > p { margin-bottom:16px;font-size:12px;line-height:1.9;color:var(--muted); }
+.recreate-edit .edit-elements { display:flex;flex-direction:column;gap:10px;margin-bottom:16px; }
+.recreate-edit .edit-element { display:flex;flex-direction:column;gap:5px;font-size:12px; }
+.recreate-edit .edit-element-label { display:flex;align-items:baseline;gap:8px;min-width:0; }
+.recreate-edit .edit-element-label strong { flex:none;font-weight:600; }
+.recreate-edit .edit-element-label small { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px; }
+.recreate-edit .edit-element input,.recreate-edit .edit-element textarea { width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:12px;line-height:1.6; }
+.recreate-edit .edit-element textarea { resize:vertical;min-height:52px; }
+.recreate-edit .edit-element input:focus,.recreate-edit .edit-element textarea:focus { border-color:#bdb7aa; }
+.recreate-edit .edit-element input::placeholder,.recreate-edit .edit-element textarea::placeholder { color:var(--muted); }
+.recreate-edit .edit-prompt-preview { margin-bottom:16px;font-size:11px;color:var(--muted); }
+.recreate-edit .edit-prompt-preview summary { cursor:pointer; }
+.recreate-edit .edit-prompt-preview .prompt-text { margin-top:8px;padding:10px 12px;max-height:200px;overflow:auto;border-radius:8px;background:var(--paper);color:var(--ink);white-space:pre-wrap;line-height:1.7; }
+.recreate-edit .error { flex:none;margin:12px 0 0; }
+.recreate-edit .dialog-actions { flex:none;justify-content:flex-end;padding-top:16px; }

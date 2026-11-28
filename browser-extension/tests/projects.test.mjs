@@ -442,6 +442,8 @@ for (const mode of ["recreate", "style", "reenact"]) test(`${mode} saves edited 
   const other = await settled(request, (await (await request("/jobs", post(input))).json()).id);
   const path = `/jobs/${job.id}/prompt`;
   const edits = { promptZh: "自定义中文\n保留换行", promptEn: "Custom English prompt", negativePrompt: "自定义排除项" };
+  // Recreate with automatic size appends the reference ratio to the frozen generation prompt; the saved reverse prompt stays as edited.
+  const ratio = mode === "recreate" ? { zh: "\n\n输出画面宽高比例与参考图一致：1:1（宽:高）。", en: "\n\nMatch the aspect ratio of the reference: 1:1 (width:height)." } : { zh: "", en: "" };
   assert.equal((await request(path, { ...post(edits), headers: { Authorization: "" } })).status, 401);
   for (const invalid of [null, 7, "", "   ", "x".repeat(20001)])
     assert.equal((await request(path, post({ ...edits, promptZh: invalid }))).status, 400);
@@ -449,20 +451,20 @@ for (const mode of ["recreate", "style", "reenact"]) test(`${mode} saves edited 
   assert.deepEqual((await (await request(`/jobs/${job.id}`)).json()).result, result);
   assert.equal((await request(path, post({ ...edits, title: "ignored", observations: [] }))).status, 200);
   assert.equal((await request(`/jobs/${job.id}/generations`, post({ language: "zh" }))).status, 202);
-  assert.equal(calls[0].prompt, edits.promptZh);
+  assert.equal(calls[0].prompt, edits.promptZh + ratio.zh);
   assert.equal(calls[0].negativePrompt, edits.negativePrompt);
   const later = { ...edits, promptZh: "下一张图的提示词", negativePrompt: "" };
   assert.equal((await request(path, post(later))).status, 200);
   finish();
   const saved = await settled(request, job.id);
   assert.deepEqual(saved.result, { ...result, ...later });
-  assert.equal(saved.generations[0].prompt, edits.promptZh);
+  assert.equal(saved.generations[0].prompt, edits.promptZh + ratio.zh);
   assert.equal(saved.generations[0].negativePrompt, edits.negativePrompt);
   assert.deepEqual((await (await request(`/jobs/${other.id}`)).json()).result, result);
   await restart();
   assert.deepEqual((await (await request(`/jobs/${job.id}`)).json()).result, { ...result, ...later });
   assert.equal((await request(`/jobs/${job.id}/generations`, post({ language: "en" }))).status, 202);
-  assert.equal(calls[1].prompt, later.promptEn);
+  assert.equal(calls[1].prompt, later.promptEn + ratio.en);
   assert.equal(calls[1].negativePrompt, "");
   finish();
   await settled(request, job.id);

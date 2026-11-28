@@ -3,7 +3,7 @@ import { startReminderService } from "../lib/reminder-background";
 import { browser } from "wxt/browser";
 import { createServiceConnection } from "../lib/service-connection";
 import { createDraftStore } from "../lib/session-drafts";
-import { handoffContext, modes, validateDraft, validSubjects } from "../lib/message-validation";
+import { handoffContext, modes, validateDraft, validEditRequest, validSubjects } from "../lib/message-validation";
 import { operationFor, allowsOperation, messageSource, PORT_KEEP_ALIVE } from "../lib/operation-policy";
 import { pagePanelFile } from "../lib/page-panel";
 import { captureImage } from "../lib/capture";
@@ -533,8 +533,11 @@ export default defineBackground(() => {
             throw new Error("请上传有效的主体图");
           if (message.subjects !== undefined && (!validSubjects(message.subjects) || message.subjectImage !== undefined))
             throw new Error("请添加 2–6 张有效主体图");
+          if (message.edit !== undefined && (!validEditRequest(message.edit) || message.subjectImage !== undefined || message.subjects !== undefined))
+            throw new Error("无效的原图编辑参数");
           const subjects = message.subjects?.map(({ id, subjectImage, role, detail }: MultiSubject) => ({ id, subjectImage, role, detail }));
-          const job = await bridge(path, token, { language: message.language, subjectImage: message.subjectImage, subjects, aspectRatio, ...(imageSize ? { imageSize: { ...imageSize } } : {}) });
+          const edit = message.edit && { changes: message.edit.changes.map(({ id, value }: { id: string; value: string }) => ({ id, value })), ...(message.edit.note !== undefined ? { note: message.edit.note } : {}) };
+          const job = await bridge(path, token, { language: message.language, subjectImage: message.subjectImage, subjects, aspectRatio, ...(imageSize ? { imageSize: { ...imageSize } } : {}), ...(edit ? { edit } : {}) });
           void reminders.wake();
           return job;
         }

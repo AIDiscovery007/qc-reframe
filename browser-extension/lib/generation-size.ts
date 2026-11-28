@@ -22,7 +22,7 @@ export function parsePixelDimensions(width: string, height: string): ImageSize |
 export function generationSizeDescription(generation: Generation) {
   const requested = generation.provider === "magpie" || generation.imageSize
     ? generation.imageSize ? `请求尺寸：${generation.imageSize.width} × ${generation.imageSize.height} px` : "请求尺寸：Magpie 网关默认"
-    : generation.aspectRatio ? `请求比例：${generation.aspectRatio.width}:${generation.aspectRatio.height}` : "请求比例：自动";
+    : generation.aspectRatio ? `请求比例：${generation.aspectRatio.width}:${generation.aspectRatio.height}` : generation.referenceAspectRatio ? `请求比例：自动（按参考图 ${generation.referenceAspectRatio.width}:${generation.referenceAspectRatio.height}）` : "请求比例：自动";
   const submitted = generation.sizeRule ? generation.submittedImageSize ? ` · 提交尺寸：${generation.submittedImageSize.width} × ${generation.submittedImageSize.height} px` : " · 提交尺寸：自动（网关默认）" : "";
   return `${requested}${submitted}${generation.outputSize ? ` · 实际图片：${generation.outputSize.width} × ${generation.outputSize.height} px` : ""}`;
 }

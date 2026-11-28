@@ -142,7 +142,7 @@ for (const conflict of [false, true]) {
       assert.deepEqual(identity(saved[0]), identity(final));
       assert.equal(s.reverse.length, 1);
       assert.equal(s.generation.length, 1);
-      assert.equal(s.generation[0].prompt, "A cat");
+      assert.equal(s.generation[0].prompt, "A cat\n\nMatch the aspect ratio of the reference: 1:1 (width:height).", "automatic batch size follows the reference ratio");
     } finally {
       commit.restore();
       await Promise.allSettled([first, second]);

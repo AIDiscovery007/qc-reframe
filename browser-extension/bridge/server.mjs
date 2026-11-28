@@ -1,4 +1,6 @@
 import { requestedImageSize } from "../lib/image-size.mjs";
+import { editPrompt, normalizeEditRequest } from "../lib/recreate-edit.mjs";
+import { referenceRatio } from "./reference-ratio.mjs";
 import { createGenerationPreparation, validateGenerationOptions } from "./generation-preparation.mjs";
 import { createImageCollection } from "./image-collection.mjs";
 import { createBatchStore } from "./batches.mjs";
@@ -170,14 +172,17 @@ export async function createBridge({
       throw bad("这条提示词仍在生图，请等待完成或取消", 409);
     validateGenerationOptions(body);
     const { aspectRatio } = body;
-    if (job.mode === "recreate" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("完整复刻使用纯文生图，不接受主体图");
+    if (job.mode === "recreate" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("完整复刻不接受主体图");
+    if (job.mode !== "recreate" && body.edit !== undefined) throw bad("只有完整复刻支持原图编辑");
+    // 原图编辑 freezes the user's changes and assembles its own prompt; the reverse prompt would only ask for a copy.
+    const edit = job.mode === "recreate" && body.edit !== undefined ? normalizeEditRequest(promptResult.editProfile, body.edit) : undefined;
     if (job.mode === "session" && (body.subjectImage !== undefined || body.subjects !== undefined)) throw bad("会话创作不接受主体图");
     if (job.mode !== "multi-reenact" && body.subjects !== undefined) throw bad("此模式不接受多张主体图");
     if (job.mode === "multi-reenact" && body.subjectImage !== undefined) throw bad("多图重演需要主体图列表");
     const referenceIndex = savedReferenceIndex(job);
     if (body.referenceIndex !== undefined && body.referenceIndex !== referenceIndex) throw bad("图片顺序已变化，请重新生成提示词");
-    const { negativePrompt } = promptResult;
-    let prompt = body.language === "zh" ? promptResult.promptZh : promptResult.promptEn;
+    const negativePrompt = edit ? "" : promptResult.negativePrompt;
+    let prompt = edit ? editPrompt(promptResult.editProfile, edit, body.language) : body.language === "zh" ? promptResult.promptZh : promptResult.promptEn;
     if (!prompt?.trim() || /\[SUBJECT\]/i.test(prompt)) throw bad("提示词仍缺少主体，请补充后重新逆向");
     if (aspectRatio) prompt += body.language === "zh"
       ? `\n\n用户指定的输出画面宽高比例：${aspectRatio.width}:${aspectRatio.height}（宽:高）。此比例要求优先于原提示词及参考图中的画幅要求。请调整构图和背景以适应该比例，保持主体自然比例，不拉伸或压缩主体。`
@@ -186,7 +191,13 @@ export async function createBridge({
       frozen: modelSettings ? { modelSettings, sizeSnapshot } : undefined, signal,
     }));
     const imageSize = sizeSnapshot?.submittedImageSize || undefined;
-    const imagePath = job.mode === "recreate" ? undefined : await storedImage(job, false, true);
+    const imagePath = job.mode === "recreate" && !edit ? undefined : await storedImage(job, false, true);
+    // 完整复刻的「自动」比例跟随参考图；Magpie 的自动仍交给网关默认尺寸。
+    const referenceAspectRatio = job.mode === "recreate" && !aspectRatio && modelSettings.imageProvider !== "magpie"
+      ? await referenceRatio(imagePath || await storedImage(job, false, true).catch(error => { if (error.status === 404) return undefined; throw error; })) : undefined;
+    if (referenceAspectRatio) prompt += body.language === "zh"
+      ? `\n\n输出画面宽高比例与${edit ? "图 1 " : "参考图"}一致：${referenceAspectRatio.width}:${referenceAspectRatio.height}（宽:高）。`
+      : `\n\nMatch the aspect ratio of ${edit ? "image 1" : "the reference"}: ${referenceAspectRatio.width}:${referenceAspectRatio.height} (width:height).`;
     const multi = job.mode === "multi-reenact";
     const decodedSubjects = multi ? decodeSubjects(body.subjects !== undefined ? body.subjects : await restoreSubjects(job.reenact?.subjects), (await images.read(job.imageAsset)).length) : undefined;
     if (multi && JSON.stringify(decodedSubjects.map(subject => subject.id)) !== JSON.stringify(job.reenact?.subjects?.map(subject => subject.id)))
@@ -203,7 +214,7 @@ export async function createBridge({
     referencePosition(referenceIndex, subjects?.length ?? (subject ? 1 : 0));
     signal?.throwIfAborted();
     const controller = runtime.reserve(id, job.projectId);
-    const next = { id, referenceIndex, ...(modelSettings.imageProvider === "magpie" ? { sizeMode: imageSize ? "explicit" : "gateway-default", ...structuredClone(sizeSnapshot) } : {}), provider: modelSettings.imageProvider || "codex", ...(modelSettings.imageProvider ? { baseUrl: modelSettings.baseUrl } : {}), model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: modelSettings.imageProvider ? "正在连接生图 API…" : "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
+    const next = { id, referenceIndex, ...(modelSettings.imageProvider === "magpie" ? { sizeMode: imageSize ? "explicit" : "gateway-default", ...structuredClone(sizeSnapshot) } : {}), provider: modelSettings.imageProvider || "codex", ...(modelSettings.imageProvider ? { baseUrl: modelSettings.baseUrl } : {}), model: modelSettings.model, reasoningEffort: modelSettings.reasoningEffort, status: "running", stage: modelSettings.imageProvider ? "正在连接生图 API…" : "正在连接 Codex 生图…", createdAt: new Date().toISOString(), language: body.language, prompt, negativePrompt, ...(aspectRatio ? { aspectRatio } : {}), ...(referenceAspectRatio ? { referenceAspectRatio } : {}), ...(edit ? { edit } : {}), ...(subject ? { subjectExtension: subject.extension, subjectAsset } : {}), ...(subjects ? { subjects } : {}) };
     job.generations ||= [];
     job.generations.push(next);
     if (automatic) Object.assign(job.autoGeneration, { status: "started", generationId: id });
@@ -220,7 +231,7 @@ export async function createBridge({
       onSaveFailure: () => { if (next.status !== "cancelled") generationOutputs.markPending(next); },
       onSettled: () => generationOutputs.settled(next),
       execute: async ({ signal, progress }) => {
-        const output = await (modelSettings.imageProvider ? apiGenerator : generator)({ ...(modelSettings.imageProvider ? { settings: modelSettings, aspectRatio, imageSize } : {}), mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt: next.negativePrompt,
+        const output = await (modelSettings.imageProvider ? apiGenerator : generator)({ ...(modelSettings.imageProvider ? { settings: modelSettings, aspectRatio: aspectRatio || referenceAspectRatio, imageSize } : {}), mode: job.mode, imagePath, subjectImagePath, subjectImagePaths, subjects, referenceIndex, prompt, negativePrompt: next.negativePrompt,
           signal, modelSettings, onProgress: progress });
         signal.throwIfAborted();
         if (!["png", "jpeg", "webp"].includes(output.extension)) throw new Error("生图返回了不支持的文件格式");
